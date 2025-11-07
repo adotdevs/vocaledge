@@ -44,10 +44,7 @@ export default function Router() {
     <AuthProvider authType={"cookie"}
       authName={"_auth"}
       cookieDomain={
-        process.env.NODE_ENV === "production"
-          ? window.location.hostname.includes("vocaledge.io")
-            ? ".vocaledge.io" : ""
-          : window.location.hostname
+        ".vocaledge.io"
       }
       cookieSecure={window.location.protocol === "https:"} >
       <BrowserRouter basename="/admin">
@@ -101,6 +98,6 @@ export default function Router() {
           <Route path="*" element={<Error404 />} />
         </Routes>
       </BrowserRouter>
-    </AuthProvider>
+    </AuthProvider >
   );
 }

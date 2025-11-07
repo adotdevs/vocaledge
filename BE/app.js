@@ -19,8 +19,8 @@ app.use(cookieParser());
 const cron = require("node-cron");
 const getLeadModel = require("./crmDB/models/leadsModel");
 let ALLOWED_ORIGINS = [
-  "http://vocaledge.io",
-  "https://www.vocaledge.io",
+  "https://vocaledge.io",
+  "https://www.vocaledge.io", 
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:3002",

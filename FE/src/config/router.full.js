@@ -100,242 +100,241 @@ export default function Router() {
       authName={"_auth"}            // name of the cookie
 
       cookieDomain={
-        process.env.NODE_ENV === "production"
-          ? window.location.hostname.includes("vocaledge.pro")
-            ? ".vocaledge.pro" : ""
+        window.location.hostname.includes("vocaledge.io")
+          ? ".vocaledge.io" : ""
           : window.location.hostname
       }
-      cookieSecure={window.location.protocol === "https:"} >
-      <BrowserRouter>
-        <UseApplyBodyStyles />
-        <ScrollToTop />
-        <UserOnlineStatus />
-        <AppRouter />
-        <Routes>
-          <Route index path="/" element={<Home />} />{" "}
-          <Route path="/auth/login" element={<Login />} />{" "}
-          <Route path="/auth/signup" element={<SignUp />} />
-          <Route path="/auth/login/crm" element={<LoginPage />} />
+cookieSecure = { window.location.protocol === "https:" } >
+  <BrowserRouter>
+    <UseApplyBodyStyles />
+    <ScrollToTop />
+    <UserOnlineStatus />
+    <AppRouter />
+    <Routes>
+      <Route index path="/" element={<Home />} />{" "}
+      <Route path="/auth/login" element={<Login />} />{" "}
+      <Route path="/auth/signup" element={<SignUp />} />
+      <Route path="/auth/login/crm" element={<LoginPage />} />
 
-          <Route path="/users/:id/verify/:token" element={<EmailVerify />} />
-          <Route
-            path="/dashboard"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Dashboard />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/dashboard/crm"
-            element={
-              <RequireAuth loginPath={"/auth/login/crm"}>
-                <LeadsPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/dashboard/crm/recycle-bin"
-            element={
-              <RequireAuth loginPath={"/auth/login/crm"}>
-                <RecycleBin />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/crm/failed-emails"
-            element={
-              <RequireAuth loginPath={"/auth/login/crm"}>
-                <EmailQueue />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/crm/email-queue"
-            element={
-              <RequireAuth loginPath={"/auth/login/crm"}>
-                <EmailQueue />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/crm/lead/:leadId/stream"
-            element={
-              <RequireAuth loginPath={"/auth/login/crm"}>
-                <LeadStream />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/market"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Market />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/edit-profile"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <ProfileEdit />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/stocks/:id"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Stocks />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/all-files"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Documents />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/crypto-card"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <CardPg />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/assets"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Assets />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/tokens"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Tokens />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/legal"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <LetterPg />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/exchanges"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Exchange />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/account"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Account />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/staking"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <StakingPg />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/swap"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Swappg />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/trading"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AiTradingBot />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/Transactions/:id"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Transactions />
-              </RequireAuth>
-            }
-          />
-          {/* MLM: Referral System Routes */}
-          <Route
-            path="/user/referral-promo"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <ReferralPromo />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/user/affiliate"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AffiliateDashboard />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/support"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Supportpg />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/create-ticket"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <CreateTicketpg />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/tickets/:ticketId"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AllTicket />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/flows/kyc"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Kyc />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/dashboard"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AdminDashboard />
-              </RequireAuth>
-            }
-          />
-          {/* <Route
+      <Route path="/users/:id/verify/:token" element={<EmailVerify />} />
+      <Route
+        path="/dashboard"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Dashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/dashboard/crm"
+        element={
+          <RequireAuth loginPath={"/auth/login/crm"}>
+            <LeadsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/dashboard/crm/recycle-bin"
+        element={
+          <RequireAuth loginPath={"/auth/login/crm"}>
+            <RecycleBin />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/crm/failed-emails"
+        element={
+          <RequireAuth loginPath={"/auth/login/crm"}>
+            <EmailQueue />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/crm/email-queue"
+        element={
+          <RequireAuth loginPath={"/auth/login/crm"}>
+            <EmailQueue />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/crm/lead/:leadId/stream"
+        element={
+          <RequireAuth loginPath={"/auth/login/crm"}>
+            <LeadStream />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/market"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Market />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/edit-profile"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <ProfileEdit />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/stocks/:id"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Stocks />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/all-files"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Documents />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/crypto-card"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <CardPg />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/assets"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Assets />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/tokens"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Tokens />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/legal"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <LetterPg />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/exchanges"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Exchange />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Account />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/staking"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <StakingPg />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/swap"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Swappg />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/trading"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AiTradingBot />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/Transactions/:id"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Transactions />
+          </RequireAuth>
+        }
+      />
+      {/* MLM: Referral System Routes */}
+      <Route
+        path="/user/referral-promo"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <ReferralPromo />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/user/affiliate"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AffiliateDashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/support"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Supportpg />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/create-ticket"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <CreateTicketpg />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/tickets/:ticketId"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AllTicket />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/flows/kyc"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Kyc />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/dashboard"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AdminDashboard />
+          </RequireAuth>
+        }
+      />
+      {/* <Route
             path="/admin/upload-files"
             element={
               <RequireAuth loginPath={"/auth/login"}>
@@ -343,55 +342,55 @@ export default function Router() {
               </RequireAuth>
             }
           /> */}
-          <Route
-            path="/admin/transactions/pending"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <PendingTransactions />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/tickets"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AdminTickets />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/profile"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AdminProfile />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/support"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <SupportTickets />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/ticket/user/:id/:ticketId"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <TicketDetails />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/add-new-member"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AddUser />
-              </RequireAuth>
-            }
-          />
-          {/* <Route
+      <Route
+        path="/admin/transactions/pending"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <PendingTransactions />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/tickets"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AdminTickets />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/profile"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AdminProfile />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/support"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <SupportTickets />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/ticket/user/:id/:ticketId"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <TicketDetails />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/add-new-member"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AddUser />
+          </RequireAuth>
+        }
+      />
+      {/* <Route
             path="/admin/add-subadmin"
             element={
               <RequireAuth loginPath={"/auth/login"}>
@@ -400,147 +399,147 @@ export default function Router() {
             }
           /> */}
 
-          <Route
-            path="/admin/users"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AdminUsers />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/logs"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AdminErrorLogs />
-              </RequireAuth>
-            }
-          />
-          {/* MLM: Admin Referral Management */}
-          <Route
-            path="/admin/referrals"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <ReferralManagement />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/user/links"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <UserLinks />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/subadmin"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AdminSubAdmin />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/superadmin/admins"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AdminManagement />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/subadmin/users/:id"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <SubAdminUsers />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/permissions/:id"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <AdminPermissions />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/user/:id/general"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <General />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/users/:id/documents"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <UserDocs />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/users/:id/assets"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <UserAssets />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/users/:id/transactions"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <UserTransactions />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/users/:id/verifications"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <UserVerifications />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/users/:id/stocks"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <UserStocks />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/users/:id/tokens"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <UserTokens />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/users/:id/staking"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <UserStaking />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/createTicket/:id/:email"
-            element={
-              <RequireAuth loginPath={"/auth/login"}>
-                <Supportpage />
-              </RequireAuth>
-            }
-          />
-          <Route path="*" element={<Error404 />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+      <Route
+        path="/admin/users"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AdminUsers />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/logs"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AdminErrorLogs />
+          </RequireAuth>
+        }
+      />
+      {/* MLM: Admin Referral Management */}
+      <Route
+        path="/admin/referrals"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <ReferralManagement />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/user/links"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <UserLinks />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/subadmin"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AdminSubAdmin />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/superadmin/admins"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AdminManagement />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/subadmin/users/:id"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <SubAdminUsers />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/permissions/:id"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <AdminPermissions />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/user/:id/general"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <General />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/users/:id/documents"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <UserDocs />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/users/:id/assets"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <UserAssets />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/users/:id/transactions"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <UserTransactions />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/users/:id/verifications"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <UserVerifications />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/users/:id/stocks"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <UserStocks />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/users/:id/tokens"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <UserTokens />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/users/:id/staking"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <UserStaking />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/createTicket/:id/:email"
+        element={
+          <RequireAuth loginPath={"/auth/login"}>
+            <Supportpage />
+          </RequireAuth>
+        }
+      />
+      <Route path="*" element={<Error404 />} />
+    </Routes>
+  </BrowserRouter>
+    </AuthProvider >
   );
 }
 
