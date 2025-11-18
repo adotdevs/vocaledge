@@ -10,6 +10,8 @@ import LeadsPage from "../jsx/Admin/CRM/leads.js";
 import RecycleBin from "../jsx/Admin/CRM/RecycleBin.jsx";
 import EmailQueue from "../jsx/Admin/CRM/EmailQueue.jsx";
 import LeadStream from "../jsx/Admin/CRM/LeadStream.jsx";
+
+import CallDashboard from "../jsx/Admin/CRM/CallDashboard.jsx";
 import Error404 from "../jsx/pages/error/Error404";
 function AppRouter() {
   const signOut = useSignOut();
@@ -68,6 +70,14 @@ export default function Router() {
             element={
               <RequireAuth loginPath={"/auth/login/crm"}>
                 <RecycleBin />
+              </RequireAuth>
+            }
+          />
+           <Route
+            path="/admin/crm/call-dashboard"
+            element={
+              <RequireAuth loginPath={"/auth/login/crm"}>
+                <CallDashboard />
               </RequireAuth>
             }
           />

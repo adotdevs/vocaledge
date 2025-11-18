@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import io from 'socket.io-client';
 import {
     Box,
     Paper,
@@ -37,6 +38,9 @@ import {
     DialogActions,
     Menu,
     Autocomplete,
+    Accordion,
+    AccordionSummary,
+    AccordionDetails,
 } from '@mui/material';
 import {
     ArrowBack,
@@ -73,6 +77,21 @@ import {
     Search,
     GetApp,
     AlternateEmail,
+    PhoneCallback,
+    PhoneInTalk,
+    PhoneDisabled,
+    CheckCircle,
+    Cancel,
+    AccessTime,
+    Timer,
+    PlayArrow,
+    Stop,
+    Schedule,
+    ChevronLeft,
+    ChevronRight,
+    SmartToy,
+    Person as PersonIcon,
+    ExpandMore,
 } from '@mui/icons-material';
 import { toast } from 'react-toastify';
 import Sidebar from './Sidebar.js';
@@ -91,7 +110,12 @@ import {
     addNestedReplyApi,
     getCommentHistoryApi,
     getNestedRepliesApi,
-    searchCommentsApi
+    searchCommentsApi,
+    getCallHistoryApi,
+    initiateCallApi,
+    cancelCallApi,
+    getCallStatusApi,
+    adminCrmLeadsApi
 } from '../../../Api/Service';
 import { useAuthUser } from 'react-auth-kit';
 
@@ -221,6 +245,16 @@ const LeadStream = () => {
     // Filter states
     const [activityFilter, setActivityFilter] = useState('all');
     const [currentTab, setCurrentTab] = useState(0);
+    
+    // Call History states
+    const [callHistory, setCallHistory] = useState([]);
+    const [loadingCallHistory, setLoadingCallHistory] = useState(false);
+    const [callingLead, setCallingLead] = useState(false);
+    const [activeCallSessionId, setActiveCallSessionId] = useState(null);
+    
+    // Navigation states
+    const [adjacentLeads, setAdjacentLeads] = useState({ prev: null, next: null });
+    const [loadingNavigation, setLoadingNavigation] = useState(false);
     
     // Permission states
     const [currentUserLatest, setCurrentUserLatest] = useState(null);
@@ -401,6 +435,9 @@ const LeadStream = () => {
                     }
                     return prev;
                 });
+                
+                // Fetch adjacent leads for navigation
+                fetchAdjacentLeads(fetchedLead);
             } else {
                 const errorMsg = response.message || 'Failed to load lead data';
                 toast.error(errorMsg);
@@ -417,6 +454,57 @@ const LeadStream = () => {
         } finally {
             setLoading(false);
             setRefreshing(false);
+        }
+    }, [leadId]);
+
+    // Fetch adjacent leads for navigation
+    const fetchAdjacentLeads = useCallback(async (currentLead) => {
+        try {
+            setLoadingNavigation(true);
+            
+            // Fetch all leads to find adjacent ones
+            const response = await adminCrmLeadsApi({ 
+                params: { 
+                    page: 1, 
+                    limit: 1000, // Get enough leads to find adjacent ones
+                    sortBy: 'createdAt',
+                    sortOrder: 'desc'
+                } 
+            });
+            
+            if (response.success) {
+                // Handle both response.leads and response.data.leads
+                const leads = response.leads || response.data?.leads || [];
+                const currentIndex = leads.findIndex(l => l._id === leadId || l._id?.toString() === leadId?.toString());
+                
+                if (currentIndex >= 0) {
+                    const prevLead = currentIndex > 0 ? leads[currentIndex - 1] : null;
+                    const nextLead = currentIndex < leads.length - 1 ? leads[currentIndex + 1] : null;
+                    
+                    setAdjacentLeads({
+                        prev: prevLead ? { 
+                            id: prevLead._id, 
+                            name: `${prevLead.firstName || ''} ${prevLead.lastName || ''}`.trim() || 'Unnamed Lead'
+                        } : null,
+                        next: nextLead ? { 
+                            id: nextLead._id, 
+                            name: `${nextLead.firstName || ''} ${nextLead.lastName || ''}`.trim() || 'Unnamed Lead'
+                        } : null
+                    });
+                } else {
+                    // If current lead not found, still try to set adjacent leads
+                    console.warn('Current lead not found in list, attempting to find by ID');
+                    setAdjacentLeads({ prev: null, next: null });
+                }
+            } else {
+                console.error('Failed to fetch leads for navigation:', response);
+                setAdjacentLeads({ prev: null, next: null });
+            }
+        } catch (error) {
+            console.error('Error fetching adjacent leads:', error);
+            setAdjacentLeads({ prev: null, next: null });
+        } finally {
+            setLoadingNavigation(false);
         }
     }, [leadId]);
 
@@ -894,6 +982,496 @@ const LeadStream = () => {
         return comment.likes?.some(like => like.userId === currentUserLatest._id) || false;
     }, [currentUserLatest]);
 
+    // Fetch call history
+    const fetchCallHistory = useCallback(async () => {
+        if (!leadId) return;
+        
+        try {
+            setLoadingCallHistory(true);
+            const response = await getCallHistoryApi(leadId);
+            
+            if (response.success) {
+                setCallHistory(response.calls || []);
+            } else {
+                toast.error(response.message || 'Failed to load call history');
+            }
+        } catch (error) {
+            console.error('Error fetching call history:', error);
+            toast.error('Error loading call history');
+        } finally {
+            setLoadingCallHistory(false);
+        }
+    }, [leadId]);
+
+    // Initiate call
+    const handleInitiateCall = async () => {
+        if (!lead.phone) {
+            toast.error('Lead does not have a phone number');
+            return;
+        }
+
+        try {
+            setCallingLead(true);
+            const response = await initiateCallApi(leadId, lead.phone);
+            
+            if (response.success) {
+                toast.success('Call initiated successfully');
+                setActiveCallSessionId(response.call.sessionId);
+                // Refresh call history after a short delay
+                setTimeout(() => {
+                    fetchCallHistory();
+                }, 2000);
+            } else {
+                toast.error(response.message || 'Failed to initiate call');
+            }
+        } catch (error) {
+            console.error('Error initiating call:', error);
+            toast.error('Error initiating call');
+        } finally {
+            setCallingLead(false);
+        }
+    };
+
+    // Cancel call
+    const handleCancelCall = async (sessionId) => {
+        try {
+            const response = await cancelCallApi(sessionId);
+            
+            if (response.success) {
+                toast.success('Call cancelled');
+                setActiveCallSessionId(null);
+                fetchCallHistory();
+            } else {
+                toast.error(response.message || 'Failed to cancel call');
+            }
+        } catch (error) {
+            console.error('Error cancelling call:', error);
+            toast.error('Error cancelling call');
+        }
+    };
+
+    // Format duration helper
+    const formatDuration = (seconds) => {
+        if (!seconds) return '0:00';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        
+        if (hours > 0) {
+            return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+        return `${minutes}:${String(secs).padStart(2, '0')}`;
+    };
+
+    // Get status color
+    const getCallStatusColor = (status) => {
+        switch (status) {
+            case 'completed': return 'success';
+            case 'in-progress': return 'info';
+            case 'ringing': return 'warning';
+            case 'failed': return 'error';
+            case 'no-answer': return 'default';
+            case 'cancelled': return 'default';
+            default: return 'default';
+        }
+    };
+
+    // Get status icon
+    const getCallStatusIcon = (status) => {
+        switch (status) {
+            case 'completed': return <CheckCircle />;
+            case 'in-progress': return <PhoneInTalk />;
+            case 'ringing': return <PhoneCallback />;
+            case 'failed': return <Cancel />;
+            case 'no-answer': return <PhoneDisabled />;
+            case 'cancelled': return <Stop />;
+            default: return <Schedule />;
+        }
+    };
+
+    // Export transcript as text file
+    const exportTranscript = (call, format = 'txt') => {
+        if (!call.transcript) {
+            toast.error('No transcript available for this call');
+            return;
+        }
+
+        try {
+            let content = '';
+            let filename = '';
+
+            // Parse transcript
+            let messages = [];
+            try {
+                const parsed = JSON.parse(call.transcript);
+                if (Array.isArray(parsed)) {
+                    messages = parsed;
+                }
+            } catch (e) {
+                // Not JSON, parse text format
+                const lines = call.transcript.split('\n').filter(line => line.trim());
+                for (const line of lines) {
+                    const userMatch = line.match(/^(User|Customer|Caller):\s*(.+)/i);
+                    const botMatch = line.match(/^(Bot|Assistant|AI|Agent):\s*(.+)/i);
+                    if (userMatch) {
+                        messages.push({ role: 'user', content: userMatch[2].trim() });
+                    } else if (botMatch) {
+                        messages.push({ role: 'bot', content: botMatch[2].trim() });
+                    }
+                }
+            }
+
+            // Build content
+            content = `CALL TRANSCRIPT\n`;
+            content += `${'='.repeat(60)}\n\n`;
+            content += `Lead: ${lead?.firstName || ''} ${lead?.lastName || ''}\n`;
+            content += `Phone: ${call.phoneNumber}\n`;
+            content += `Date: ${formatDateTime(call.createdAt || call.startedAt)}\n`;
+            content += `Duration: ${formatDuration(call.duration)}\n`;
+            content += `Status: ${call.status}\n\n`;
+            
+            if (call.summary) {
+                content += `CALL SUMMARY\n`;
+                content += `${'-'.repeat(60)}\n`;
+                content += `${call.summary}\n\n`;
+            }
+
+            content += `CONVERSATION TRANSCRIPT\n`;
+            content += `${'-'.repeat(60)}\n\n`;
+
+            if (messages.length > 0) {
+                messages.forEach((msg, idx) => {
+                    const role = msg.role === 'user' ? 'USER' : 'BOT';
+                    const timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
+                    content += `[${role}${timestamp ? ` - ${timestamp}` : ''}]\n`;
+                    content += `${msg.content || msg.text || msg.message}\n\n`;
+                });
+            } else {
+                content += call.transcript;
+            }
+
+            // Add SIP events if available
+            if (call.metadata?.sipEvents && call.metadata.sipEvents.length > 0) {
+                content += `\nSIP EVENTS TIMELINE\n`;
+                content += `${'-'.repeat(60)}\n`;
+                call.metadata.sipEvents.forEach((event, idx) => {
+                    const timestamp = event.timestamp ? new Date(event.timestamp).toLocaleString() : 'N/A';
+                    content += `${idx + 1}. SIP ${event.code} ${event.message} - ${timestamp}\n`;
+                });
+            }
+
+            // Create and download file
+            filename = `call_transcript_${call.phoneNumber}_${new Date(call.createdAt || call.startedAt).toISOString().split('T')[0]}.txt`;
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+            
+            toast.success('Transcript exported successfully');
+        } catch (error) {
+            console.error('Error exporting transcript:', error);
+            toast.error('Failed to export transcript');
+        }
+    };
+
+    // Parse conversation transcript to display bot and user messages separately
+    const parseConversationTranscript = (transcript) => {
+        if (!transcript) return null;
+
+        // Try to parse if it's JSON (structured format)
+        try {
+            const parsed = JSON.parse(transcript);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                // If it's an array of message objects
+                return (
+                    <Stack spacing={1.5}>
+                        {parsed.map((msg, idx) => (
+                            <Box
+                                key={idx}
+                                sx={{
+                                    display: 'flex',
+                                    flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                                    gap: 1,
+                                    mb: 1
+                                }}
+                            >
+                                <Box
+                                    sx={{
+                                        maxWidth: '75%',
+                                        p: 1.5,
+                                        borderRadius: 2,
+                                        bgcolor: msg.role === 'user' 
+                                            ? 'primary.main' 
+                                            : 'grey.100',
+                                        color: msg.role === 'user' 
+                                            ? 'white' 
+                                            : 'text.primary',
+                                        boxShadow: 1
+                                    }}
+                                >
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                                        {msg.role === 'user' ? (
+                                            <PersonIcon sx={{ fontSize: 16 }} />
+                                        ) : (
+                                            <SmartToy sx={{ fontSize: 16 }} />
+                                        )}
+                                        <Typography variant="caption" sx={{ fontWeight: 600, opacity: 0.9 }}>
+                                            {msg.role === 'user' ? 'User' : 'Bot'}
+                                        </Typography>
+                                        {msg.timestamp && (
+                                            <Typography variant="caption" sx={{ ml: 'auto', opacity: 0.7 }}>
+                                                {new Date(msg.timestamp).toLocaleTimeString()}
+                                            </Typography>
+                                        )}
+                                    </Box>
+                                    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                        {msg.content || msg.text || msg.message}
+                                    </Typography>
+                                </Box>
+                            </Box>
+                        ))}
+                    </Stack>
+                );
+            }
+        } catch (e) {
+            // Not JSON, try to parse text format
+        }
+
+        // Try to parse text format like "User: ... Bot: ..."
+        const lines = transcript.split('\n').filter(line => line.trim());
+        const messages = [];
+        
+        let currentRole = null;
+        let currentContent = [];
+        
+        for (const line of lines) {
+            const userMatch = line.match(/^(User|Customer|Caller):\s*(.+)/i);
+            const botMatch = line.match(/^(Bot|Assistant|AI|Agent):\s*(.+)/i);
+            
+            if (userMatch) {
+                // Save previous message if exists
+                if (currentRole && currentContent.length > 0) {
+                    messages.push({
+                        role: currentRole,
+                        content: currentContent.join(' ').trim()
+                    });
+                }
+                currentRole = 'user';
+                currentContent = [userMatch[2].trim()];
+            } else if (botMatch) {
+                // Save previous message if exists
+                if (currentRole && currentContent.length > 0) {
+                    messages.push({
+                        role: currentRole,
+                        content: currentContent.join(' ').trim()
+                    });
+                }
+                currentRole = 'bot';
+                currentContent = [botMatch[2].trim()];
+            } else if (currentRole && line.trim()) {
+                // Continue current message
+                currentContent.push(line.trim());
+            }
+        }
+        
+        // Add last message
+        if (currentRole && currentContent.length > 0) {
+            messages.push({
+                role: currentRole,
+                content: currentContent.join(' ').trim()
+            });
+        }
+
+        // If we found structured messages, display them
+        if (messages.length > 0) {
+            return (
+                <Stack spacing={1.5}>
+                    {messages.map((msg, idx) => (
+                        <Box
+                            key={idx}
+                            sx={{
+                                display: 'flex',
+                                flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                                gap: 1,
+                                mb: 1
+                            }}
+                        >
+                            <Box
+                                sx={{
+                                    maxWidth: '75%',
+                                    p: 1.5,
+                                    borderRadius: 2,
+                                    bgcolor: msg.role === 'user' 
+                                        ? 'primary.main' 
+                                        : 'grey.100',
+                                    color: msg.role === 'user' 
+                                        ? 'white' 
+                                        : 'text.primary',
+                                    boxShadow: 1
+                                }}
+                            >
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                                    {msg.role === 'user' ? (
+                                        <PersonIcon sx={{ fontSize: 16 }} />
+                                    ) : (
+                                        <SmartToy sx={{ fontSize: 16 }} />
+                                    )}
+                                    <Typography variant="caption" sx={{ fontWeight: 600, opacity: 0.9 }}>
+                                        {msg.role === 'user' ? 'User' : 'Bot'}
+                                    </Typography>
+                                </Box>
+                                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                    {msg.content}
+                                </Typography>
+                            </Box>
+                        </Box>
+                    ))}
+                </Stack>
+            );
+        }
+
+        // Fallback: display as plain text
+        return (
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                {transcript}
+            </Typography>
+        );
+    };
+
+    // Fetch call history when Call History tab is selected
+    useEffect(() => {
+        if (currentTab === 2) { // Call History tab index
+            fetchCallHistory();
+        }
+    }, [currentTab, fetchCallHistory]);
+
+    // Socket.io integration for real-time call updates
+    useEffect(() => {
+        const backendUrl = process.env.REACT_APP_API_URL?.replace('/api/v1', '') || 
+                          (window.location.hostname.includes('vocaledge.io') ? 'https://api.vocaledge.io' : 'http://localhost:4000');
+        
+        const socket = io(backendUrl, {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionDelay: 1000,
+        });
+
+        socket.on('connect', () => {
+            console.log('✅ Socket.io connected for call updates');
+        });
+
+        socket.on('call:status:update', (data) => {
+            console.log('📞 LeadStream: Call status update received:', data);
+            if (data.leadId === leadId && lead) {
+                // Update call history in real-time
+                setCallHistory(prev => {
+                    const existingIndex = prev.findIndex(c => c.sessionId === data.sessionId || c._id === data.callId);
+                    if (existingIndex >= 0) {
+                        // Update existing call with all SIP event data
+                        const updated = [...prev];
+                        const existingCall = updated[existingIndex];
+                        
+                        // Update SIP events if provided
+                        let sipEvents = existingCall.metadata?.sipEvents || [];
+                        if (data.sipStatus && data.sipStatus.code) {
+                            // Check if this SIP event already exists
+                            const eventExists = sipEvents.some(e => 
+                                e.code === data.sipStatus.code && 
+                                e.message === data.sipStatus.message
+                            );
+                            if (!eventExists) {
+                                sipEvents = [...sipEvents, {
+                                    code: data.sipStatus.code,
+                                    message: data.sipStatus.message,
+                                    timestamp: new Date(),
+                                    type: data.sipStatus.type || 'unknown'
+                                }];
+                            }
+                        }
+                        
+                        updated[existingIndex] = {
+                            ...existingCall,
+                            status: data.status || existingCall.status,
+                            duration: data.duration || existingCall.duration,
+                            activeCallTime: data.activeCallTime || existingCall.activeCallTime,
+                            ringingTime: data.ringingTime || existingCall.ringingTime,
+                            startedAt: data.startedAt || existingCall.startedAt,
+                            endedAt: data.endedAt || existingCall.endedAt,
+                            metadata: {
+                                ...existingCall.metadata,
+                                sipStatus: data.sipStatus || existingCall.metadata?.sipStatus,
+                                sipEvents: sipEvents
+                            }
+                        };
+                        return updated;
+                    } else {
+                        // Add new call if not exists
+                        const newCall = {
+                            sessionId: data.sessionId,
+                            leadId: data.leadId,
+                            phoneNumber: lead?.phone || data.phoneNumber || '',
+                            status: data.status || 'initiating',
+                            duration: data.duration || 0,
+                            activeCallTime: data.activeCallTime || 0,
+                            ringingTime: data.ringingTime || 0,
+                            startedAt: data.startedAt || new Date(),
+                            createdAt: new Date(),
+                            metadata: {
+                                sipStatus: data.sipStatus || null,
+                                sipEvents: data.sipStatus ? [{
+                                    code: data.sipStatus.code,
+                                    message: data.sipStatus.message,
+                                    timestamp: new Date(),
+                                    type: data.sipStatus.type || 'unknown'
+                                }] : []
+                            }
+                        };
+                        return [newCall, ...prev];
+                    }
+                });
+
+                // Update active call session ID
+                if (data.status === 'in-progress' || data.status === 'ringing') {
+                    setActiveCallSessionId(data.sessionId);
+                    // Auto-switch to Call History tab when call becomes active
+                    if (currentTab !== 2) {
+                        setCurrentTab(2);
+                    }
+                } else if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                    setActiveCallSessionId(null);
+                }
+
+                // Show toast notification
+                if (data.status === 'completed') {
+                    toast.success('Call completed successfully');
+                } else if (data.status === 'failed') {
+                    toast.error('Call failed');
+                }
+            }
+        });
+
+        socket.on('call:summary:ready', (data) => {
+            if (data.leadId === leadId && lead) {
+                // Refresh call history to get updated summary
+                fetchCallHistory();
+                toast.success('Call summary ready');
+            }
+        });
+
+        socket.on('disconnect', () => {
+            console.log('❌ Socket.io disconnected');
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [leadId, lead?.phone, fetchCallHistory]);
+
     const formatDateTime = (dateString) => {
         const date = new Date(dateString);
         const now = new Date();
@@ -1184,14 +1762,63 @@ const LeadStream = () => {
                         >
                             <ArrowBack />
                         </IconButton>
+                        
                         <Box sx={{ flex: 1 }}>
                             <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 600 }}>
-                                {lead.firstName} {lead.lastName}
+                                {lead?.firstName || ''} {lead?.lastName || ''}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                                Lead ID: {leadId.slice(-8)} • {totalActivities} activities
+                                Lead ID: {leadId?.slice(-8) || 'N/A'} • {totalActivities} activities
                             </Typography>
                         </Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>
+                            {/* Navigation Arrows - Moved to right side */}
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Tooltip title={adjacentLeads.prev ? `Previous: ${adjacentLeads.prev.name}` : 'No previous lead'}>
+                                    <span>
+                                        <IconButton
+                                            onClick={() => {
+                                                if (adjacentLeads.prev) {
+                                                    navigate(`/admin/crm/lead/${adjacentLeads.prev.id}/stream`);
+                                                }
+                                            }}
+                                            disabled={!adjacentLeads.prev || loadingNavigation}
+                                            size="small"
+                                            sx={{ 
+                                                color: adjacentLeads.prev ? 'text.primary' : 'text.disabled',
+                                                '&:hover': {
+                                                    bgcolor: adjacentLeads.prev ? 'action.hover' : 'transparent'
+                                                }
+                                            }}
+                                        >
+                                            <ChevronLeft />
+                                        </IconButton>
+                                    </span>
+                                </Tooltip>
+                                <Tooltip title={adjacentLeads.next ? `Next: ${adjacentLeads.next.name}` : 'No next lead'}>
+                                    <span>
+                                        <IconButton
+                                            onClick={() => {
+                                                if (adjacentLeads.next) {
+                                                    navigate(`/admin/crm/lead/${adjacentLeads.next.id}/stream`);
+                                                }
+                                            }}
+                                            disabled={!adjacentLeads.next || loadingNavigation}
+                                            size="small"
+                                            sx={{ 
+                                                color: adjacentLeads.next ? 'text.primary' : 'text.disabled',
+                                                '&:hover': {
+                                                    bgcolor: adjacentLeads.next ? 'action.hover' : 'transparent'
+                                                }
+                                            }}
+                                        >
+                                            <ChevronRight />
+                                        </IconButton>
+                                    </span>
+                                </Tooltip>
+                            </Box>
+                            
+                            {lead?.status && (
                         <Chip 
                             label={lead.status} 
                             size="small"
@@ -1200,8 +1827,10 @@ const LeadStream = () => {
                                 lead.status === 'New' ? 'primary' :
                                 lead.status === 'Call Back' ? 'warning' : 'default'
                             }
-                            sx={{ fontWeight: 600, mr: 2, display: { xs: 'none', sm: 'inline-flex' } }}
+                                    sx={{ fontWeight: 600, display: { xs: 'none', sm: 'inline-flex' } }}
                         />
+                            )}
+                        </Box>
                         {canAssign && (
                             <Button
                                 variant="outlined"
@@ -1300,6 +1929,7 @@ const LeadStream = () => {
                                 >
                                     <Tab label="Details" icon={<Info sx={{ fontSize: 18 }} />} iconPosition="start" />
                                     <Tab label="Summary" icon={<History sx={{ fontSize: 18 }} />} iconPosition="start" />
+                                    <Tab label="Call History" icon={<Phone sx={{ fontSize: 18 }} />} iconPosition="start" />
                                 </Tabs>
 
                                 {/* Tab Content */}
@@ -1473,7 +2103,7 @@ const LeadStream = () => {
                                                 </Stack>
                                             </Box>
                                         </Stack>
-                                    ) : (
+                                    ) : currentTab === 1 ? (
                                         <Stack spacing={2}>
                                             {/* Summary Tab */}
                                             <Paper variant="outlined" sx={{ p: 2, bgcolor: 'primary.light', color: 'white' }}>
@@ -1532,19 +2162,218 @@ const LeadStream = () => {
                                                 </Box>
                                             </Paper>
                                         </Stack>
-                                    )}
+                                    ) : currentTab === 2 ? (
+                                        <Stack spacing={2}>
+                                            {/* Call History Tab - Compact View */}
+                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                                                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                                                    Call History ({callHistory.length})
+                                                </Typography>
+                                                {lead.phone && (
+                                                    <Button
+                                                        variant="contained"
+                                                        color="primary"
+                                                        size="small"
+                                                        startIcon={callingLead ? <CircularProgress size={16} /> : <Phone />}
+                                                        onClick={handleInitiateCall}
+                                                        disabled={callingLead || activeCallSessionId !== null}
+                                                        sx={{ textTransform: 'none' }}
+                                                    >
+                                                        {callingLead ? 'Initiating...' : 'Call Now'}
+                                                    </Button>
+                                                )}
+                                            </Box>
+
+                                            {loadingCallHistory ? (
+                                                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                                                    <CircularProgress />
+                                                </Box>
+                                            ) : callHistory.length === 0 ? (
+                                                <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+                                                    <PhoneDisabled sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                                                    <Typography variant="h6" color="text.secondary" gutterBottom>
+                                                        No Call History
+                                                    </Typography>
+                                                    <Typography variant="body2" color="text.secondary">
+                                                        {lead.phone ? 'Click "Call Now" to initiate a call' : 'This lead does not have a phone number'}
+                                                    </Typography>
+                                                </Paper>
+                                            ) : (
+                                                <Stack spacing={1}>
+                                                    {callHistory.map((call, idx) => (
+                                                        <Accordion 
+                                                            key={call._id || idx}
+                                                            sx={{ 
+                                                                borderLeft: '4px solid',
+                                                                borderColor: call.status === 'completed' ? 'success.main' : 
+                                                                             call.status === 'in-progress' ? 'info.main' :
+                                                                             call.status === 'ringing' ? 'warning.main' :
+                                                                             call.status === 'failed' ? 'error.main' : 'grey.400',
+                                                                '&:before': { display: 'none' },
+                                                                boxShadow: 1
+                                                            }}
+                                                        >
+                                                            <AccordionSummary
+                                                                expandIcon={<ExpandMore />}
+                                                                sx={{
+                                                                    bgcolor: call.status === 'completed' ? 'success.light' : 
+                                                                             call.status === 'in-progress' ? 'info.light' :
+                                                                             call.status === 'ringing' ? 'warning.light' :
+                                                                             call.status === 'failed' ? 'error.light' : 'grey.100',
+                                                                    '&:hover': {
+                                                                        bgcolor: call.status === 'completed' ? 'success.light' : 
+                                                                                 call.status === 'in-progress' ? 'info.light' :
+                                                                                 call.status === 'ringing' ? 'warning.light' :
+                                                                                 call.status === 'failed' ? 'error.light' : 'grey.200',
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, width: '100%', pr: 2 }}>
+                                                                    {getCallStatusIcon(call.status)}
+                                                                    <Box sx={{ flex: 1 }}>
+                                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                                                            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                                                                {call.phoneNumber}
+                                                                            </Typography>
+                                                                            <Chip 
+                                                                                icon={getCallStatusIcon(call.status)}
+                                                                                label={call.status.replace('-', ' ').toUpperCase()} 
+                                                                                size="small"
+                                                                                color={getCallStatusColor(call.status)}
+                                                                                sx={{ fontWeight: 600, textTransform: 'capitalize' }}
+                                                                            />
+                                                                            {call.duration > 0 && (
+                                                                                <Typography variant="caption" color="text.secondary">
+                                                                                    • {formatDuration(call.duration)}
+                                                                                </Typography>
+                                                                            )}
+                                                                        </Box>
+                                                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                                                                            <CalendarToday sx={{ fontSize: 12 }} />
+                                                                            {formatDateTime(call.createdAt)}
+                                                                        </Typography>
+                                                                    </Box>
+                                                                    {call.status === 'in-progress' || call.status === 'ringing' ? (
+                                                                        <Button
+                                                                            size="small"
+                                                                            variant="outlined"
+                                                                            color="error"
+                                                                            startIcon={<Stop />}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                handleCancelCall(call.sessionId);
+                                                                            }}
+                                                                        >
+                                                                            Cancel
+                                                                        </Button>
+                                                                    ) : null}
+                                                                </Box>
+                                                            </AccordionSummary>
+                                                            <AccordionDetails sx={{ bgcolor: 'background.paper' }}>
+                                                                <Stack spacing={2}>
+                                                                    {/* Call Duration & Timing Info */}
+                                                                    <Grid container spacing={2}>
+                                                                        {call.duration > 0 && (
+                                                                            <Grid item xs={6} sm={3}>
+                                                                                <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', bgcolor: 'background.paper' }}>
+                                                                                    <Typography variant="caption" color="text.secondary" display="block">
+                                                                                        Total Duration
+                                                                                    </Typography>
+                                                                                    <Typography variant="h6" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                                                                                        {formatDuration(call.duration)}
+                                                                                    </Typography>
+                                                                                </Paper>
+                                                                            </Grid>
+                                                                        )}
+                                                                        {call.activeCallTime > 0 && (
+                                                                            <Grid item xs={6} sm={3}>
+                                                                                <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', bgcolor: 'background.paper' }}>
+                                                                                    <Typography variant="caption" color="text.secondary" display="block">
+                                                                                        Active Call Time
+                                                                                    </Typography>
+                                                                                    <Typography variant="h6" sx={{ fontWeight: 600, color: 'success.main' }}>
+                                                                                        {formatDuration(call.activeCallTime)}
+                                                                                    </Typography>
+                                                                                </Paper>
+                                                                            </Grid>
+                                                                        )}
+                                                                        {call.ringingTime > 0 && (
+                                                                            <Grid item xs={6} sm={3}>
+                                                                                <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', bgcolor: 'background.paper' }}>
+                                                                                    <Typography variant="caption" color="text.secondary" display="block">
+                                                                                        Ringing Time
+                                                                                    </Typography>
+                                                                                    <Typography variant="h6" sx={{ fontWeight: 600, color: 'warning.main' }}>
+                                                                                        {formatDuration(call.ringingTime)}
+                                                                                    </Typography>
+                                                                                </Paper>
+                                                                            </Grid>
+                                                                        )}
+                                                                    </Grid>
+
+                                                                    {/* SIP Status */}
+                                                                    {call.metadata?.sipStatus && (
+                                                                        <Box>
+                                                                            <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                                                                                SIP Status
+                                                                            </Typography>
+                                                                            <Chip 
+                                                                                label={`${call.metadata.sipStatus.code} ${call.metadata.sipStatus.message}`}
+                                                                                size="small"
+                                                                                sx={{ 
+                                                                                    bgcolor: call.metadata.sipStatus.code === 200 ? 'success.light' :
+                                                                                            call.metadata.sipStatus.code === 183 ? 'info.light' :
+                                                                                            call.metadata.sipStatus.code === 180 ? 'warning.light' : 'grey.300',
+                                                                                    color: 'text.primary',
+                                                                                    fontWeight: 600
+                                                                                }}
+                                                                            />
+                                                                        </Box>
+                                                                    )}
+
+                                                                    {/* Call Summary */}
+                                                                    {call.summary && (
+                                                                        <Box>
+                                                                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                                                                                Call Summary
+                                                                            </Typography>
+                                                                            <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.paper' }}>
+                                                                                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                                                                    {call.summary}
+                                                                                </Typography>
+                                                                            </Paper>
+                                                                        </Box>
+                                                                    )}
+                                                                </Stack>
+                                                            </AccordionDetails>
+                                                        </Accordion>
+                                                    ))}
+                                                </Stack>
+                                            )}
+                                        </Stack>
+                                    ) : null}
                                 </Box>
                             </Card>
                         </Grid>
 
-                        {/* Right Column - Activity Stream */}
+                        {/* Right Column - Activity Stream or Call History (when Call History tab selected) */}
                         <Grid item xs={12} lg={8}>
                             <Card elevation={1} sx={{ borderRadius: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
                                 <Box sx={{ p: 3, borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
                                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                         <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                                            Activity Stream
+                                            {currentTab === 2 ? 'Call History Details' : activeCallSessionId ? 'Live Call Status' : 'Activity Stream'}
                                         </Typography>
+                                        {activeCallSessionId && currentTab !== 2 && (
+                                            <Chip 
+                                                icon={<PhoneInTalk sx={{ fontSize: 16 }} />}
+                                                label="Call Active" 
+                                                color="success" 
+                                                size="small"
+                                                sx={{ fontWeight: 600 }}
+                                            />
+                                        )}
+                                        {currentTab !== 2 && (
                                         <Box sx={{ display: 'flex', gap: 1 }}>
                                             <FormControl size="small" sx={{ minWidth: 150 }}>
                                                 <InputLabel>Filter Type</InputLabel>
@@ -1574,8 +2403,10 @@ const LeadStream = () => {
                                                 </IconButton>
                                             </Tooltip>
                                         </Box>
+                                        )}
                                     </Box>
-                                    {/* ✅ Comment Search Bar */}
+                                    {/* ✅ Comment Search Bar - Only show when not on Call History tab */}
+                                    {currentTab !== 2 && (
                                     <TextField
                                         fullWidth
                                         size="small"
@@ -1616,8 +2447,9 @@ const LeadStream = () => {
                                             }
                                         }}
                                     />
+                                    )}
                                     {/* Search Results Indicator */}
-                                    {showSearchResults && (
+                                    {showSearchResults && currentTab !== 2 && (
                                         <Box sx={{ mt: 1 }}>
                                             <Chip
                                                 label={`Showing ${searchResults.length} search result(s)`}
@@ -1764,7 +2596,505 @@ const LeadStream = () => {
                                     </Box>
                                 </Box>
 
-                                {/* Activity Stream - Professional Design */}
+                                {/* Show Call History when Call History tab selected, otherwise Activity Stream */}
+                                {currentTab === 2 ? (
+                                    /* Call History Details - Full View */
+                                    <Box sx={{ 
+                                        flex: 1,
+                                        overflow: 'auto',
+                                        p: 3,
+                                        '&::-webkit-scrollbar': {
+                                            width: '8px',
+                                        },
+                                        '&::-webkit-scrollbar-track': {
+                                            background: '#f5f5f5',
+                                        },
+                                        '&::-webkit-scrollbar-thumb': {
+                                            background: '#c0c0c0',
+                                            borderRadius: '4px',
+                                            '&:hover': {
+                                                background: '#a0a0a0',
+                                            },
+                                        },
+                                    }}>
+                                        {loadingCallHistory ? (
+                                            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                                                <CircularProgress />
+                                            </Box>
+                                        ) : callHistory.length === 0 ? (
+                                            <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+                                                <PhoneDisabled sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                                                <Typography variant="h6" color="text.secondary" gutterBottom>
+                                                    No Call History
+                                                </Typography>
+                                                <Typography variant="body2" color="text.secondary">
+                                                    {lead?.phone ? 'Click "Call Now" to initiate a call' : 'This lead does not have a phone number'}
+                                                </Typography>
+                                            </Paper>
+                                        ) : (
+                                            <Stack spacing={3}>
+                                                {callHistory.map((call) => (
+                                                    <Card 
+                                                        key={call._id || call.sessionId} 
+                                                        elevation={2}
+                                                        sx={{ 
+                                                            borderRadius: 3, 
+                                                            overflow: 'hidden',
+                                                            border: '1px solid',
+                                                            borderColor: call.status === 'completed' ? 'success.light' : 
+                                                                       call.status === 'in-progress' ? 'info.light' :
+                                                                       call.status === 'ringing' ? 'warning.light' :
+                                                                       call.status === 'failed' ? 'error.light' : 'grey.300',
+                                                            bgcolor: 'background.paper',
+                                                            transition: 'all 0.3s',
+                                                            '&:hover': {
+                                                                boxShadow: 4,
+                                                                transform: 'translateY(-2px)'
+                                                            }
+                                                        }}
+                                                    >
+                                                        {/* Header Section */}
+                                                        <Box sx={{ 
+                                                            p: 2.5, 
+                                                            bgcolor: call.status === 'completed' ? 'success.light' : 
+                                                                    call.status === 'in-progress' ? 'info.light' :
+                                                                    call.status === 'ringing' ? 'warning.light' :
+                                                                    call.status === 'failed' ? 'error.light' : 'grey.100',
+                                                            borderBottom: '1px solid',
+                                                            borderColor: 'divider'
+                                                        }}>
+                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                                <Box sx={{ flex: 1 }}>
+                                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+                                                                        <Box sx={{ 
+                                                                            p: 1, 
+                                                                            borderRadius: 2, 
+                                                                            bgcolor: 'white',
+                                                                            display: 'flex',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'center'
+                                                                        }}>
+                                                                            {getCallStatusIcon(call.status)}
+                                                                        </Box>
+                                                                        <Box sx={{ flex: 1 }}>
+                                                                            <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
+                                                                                {call.phoneNumber}
+                                                                            </Typography>
+                                                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                                                                <Chip 
+                                                                                    icon={getCallStatusIcon(call.status)}
+                                                                                    label={call.status.replace('-', ' ').toUpperCase()} 
+                                                                                    size="small"
+                                                                                    color={getCallStatusColor(call.status)}
+                                                                                    sx={{ fontWeight: 700, textTransform: 'capitalize', fontSize: '0.7rem' }}
+                                                                                />
+                                                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                                                                    <CalendarToday sx={{ fontSize: 12 }} />
+                                                                                    {formatDateTime(call.createdAt || call.startedAt)}
+                                                                                </Typography>
+                                                                            </Box>
+                                                                        </Box>
+                                                                    </Box>
+                                                                </Box>
+                                                                <Box sx={{ display: 'flex', gap: 1 }}>
+                                                                    {call.status === 'in-progress' || call.status === 'ringing' ? (
+                                                                        <Button
+                                                                            size="small"
+                                                                            variant="contained"
+                                                                            color="error"
+                                                                            startIcon={<Stop />}
+                                                                            onClick={() => handleCancelCall(call.sessionId)}
+                                                                            sx={{ textTransform: 'none', fontWeight: 600 }}
+                                                                        >
+                                                                            End Call
+                                                                        </Button>
+                                                                    ) : null}
+                                                                </Box>
+                                                            </Box>
+                                                        </Box>
+                                                        
+                                                        <Box sx={{ p: 3 }}>
+                                                            {/* Call Duration & Timing Info - Professional Cards */}
+                                                            <Grid container spacing={2} sx={{ mb: 3 }}>
+                                                                {call.duration > 0 && (
+                                                                    <Grid item xs={12} sm={4}>
+                                                                        <Paper 
+                                                                            elevation={0}
+                                                                            sx={{ 
+                                                                                p: 2, 
+                                                                                textAlign: 'center', 
+                                                                                bgcolor: 'primary.light',
+                                                                                borderRadius: 2,
+                                                                                border: '1px solid',
+                                                                                borderColor: 'primary.main'
+                                                                            }}
+                                                                        >
+                                                                            <Timer sx={{ fontSize: 24, color: 'primary.main', mb: 0.5 }} />
+                                                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                                                                Total Duration
+                                                                            </Typography>
+                                                                            <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                                                                                {formatDuration(call.duration)}
+                                                                            </Typography>
+                                                                        </Paper>
+                                                                    </Grid>
+                                                                )}
+                                                                {call.activeCallTime > 0 && (
+                                                                    <Grid item xs={12} sm={4}>
+                                                                        <Paper 
+                                                                            elevation={0}
+                                                                            sx={{ 
+                                                                                p: 2, 
+                                                                                textAlign: 'center', 
+                                                                                bgcolor: 'success.light',
+                                                                                borderRadius: 2,
+                                                                                border: '1px solid',
+                                                                                borderColor: 'success.main'
+                                                                            }}
+                                                                        >
+                                                                            <PhoneInTalk sx={{ fontSize: 24, color: 'success.main', mb: 0.5 }} />
+                                                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                                                                Active Call Time
+                                                                            </Typography>
+                                                                            <Typography variant="h5" sx={{ fontWeight: 700, color: 'success.main' }}>
+                                                                                {formatDuration(call.activeCallTime)}
+                                                                            </Typography>
+                                                                        </Paper>
+                                                                    </Grid>
+                                                                )}
+                                                                {call.ringingTime > 0 && (
+                                                                    <Grid item xs={12} sm={4}>
+                                                                        <Paper 
+                                                                            elevation={0}
+                                                                            sx={{ 
+                                                                                p: 2, 
+                                                                                textAlign: 'center', 
+                                                                                bgcolor: 'warning.light',
+                                                                                borderRadius: 2,
+                                                                                border: '1px solid',
+                                                                                borderColor: 'warning.main'
+                                                                            }}
+                                                                        >
+                                                                            <PhoneCallback sx={{ fontSize: 24, color: 'warning.main', mb: 0.5 }} />
+                                                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                                                                Ringing Time
+                                                                            </Typography>
+                                                                            <Typography variant="h5" sx={{ fontWeight: 700, color: 'warning.main' }}>
+                                                                                {formatDuration(call.ringingTime)}
+                                                                            </Typography>
+                                                                        </Paper>
+                                                                    </Grid>
+                                                                )}
+                                                            </Grid>
+
+                                                            {/* SIP Events Timeline */}
+                                                            {call.metadata?.sipEvents && call.metadata.sipEvents.length > 0 && (
+                                                                <Box sx={{ mb: 3 }}>
+                                                                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, color: 'text.primary' }}>
+                                                                        SIP Events Timeline
+                                                                    </Typography>
+                                                                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+                                                                        <Stack spacing={1.5}>
+                                                                            {call.metadata.sipEvents.map((event, idx) => {
+                                                                                const eventCode = event.code;
+                                                                                const isNumber = typeof eventCode === 'number';
+                                                                                const isBYE = eventCode === 'BYE';
+                                                                                
+                                                                                return (
+                                                                                    <Box 
+                                                                                        key={idx}
+                                                                                        sx={{ 
+                                                                                            display: 'flex', 
+                                                                                            alignItems: 'center', 
+                                                                                            gap: 2,
+                                                                                            p: 1.5,
+                                                                                            borderRadius: 1,
+                                                                                            bgcolor: 'white',
+                                                                                            border: '1px solid',
+                                                                                            borderColor: isBYE ? 'error.light' :
+                                                                                                       (isNumber && eventCode === 200) ? 'success.light' :
+                                                                                                       (isNumber && eventCode === 183) ? 'info.light' :
+                                                                                                       (isNumber && eventCode === 180) ? 'warning.light' :
+                                                                                                       (isNumber && eventCode === 100) ? 'grey.300' : 'grey.200'
+                                                                                        }}
+                                                                                    >
+                                                                                        <Box sx={{ 
+                                                                                            width: 40, 
+                                                                                            height: 40, 
+                                                                                            borderRadius: '50%',
+                                                                                            bgcolor: isBYE ? 'error.main' :
+                                                                                                    (isNumber && eventCode === 200) ? 'success.main' :
+                                                                                                    (isNumber && eventCode === 183) ? 'info.main' :
+                                                                                                    (isNumber && eventCode === 180) ? 'warning.main' :
+                                                                                                    (isNumber && eventCode === 100) ? 'grey.500' : 'primary.main',
+                                                                                            display: 'flex',
+                                                                                            alignItems: 'center',
+                                                                                            justifyContent: 'center',
+                                                                                            color: 'white',
+                                                                                            fontWeight: 700,
+                                                                                            fontSize: '0.875rem',
+                                                                                            flexShrink: 0
+                                                                                        }}>
+                                                                                            {isBYE ? 'BYE' : eventCode}
+                                                                                        </Box>
+                                                                                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                                                                                            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.25 }}>
+                                                                                                {event.message}
+                                                                                            </Typography>
+                                                                                            <Typography variant="caption" color="text.secondary">
+                                                                                                {event.type ? event.type.charAt(0).toUpperCase() + event.type.slice(1) : 'Unknown'} • {event.timestamp ? new Date(event.timestamp).toLocaleString() : 'N/A'}
+                                                                                            </Typography>
+                                                                                        </Box>
+                                                                                    </Box>
+                                                                                );
+                                                                            })}
+                                                                        </Stack>
+                                                                    </Paper>
+                                                                </Box>
+                                                            )}
+
+                                                            {/* SIP Status (Latest) */}
+                                                            {call.metadata?.sipStatus && (
+                                                                <Box sx={{ mb: 3 }}>
+                                                                    <Typography variant="caption" color="text.secondary" display="block" gutterBottom sx={{ fontWeight: 600 }}>
+                                                                        Current SIP Status
+                                                                    </Typography>
+                                                                    <Chip 
+                                                                        label={`SIP ${call.metadata.sipStatus.code} ${call.metadata.sipStatus.message}`}
+                                                                        size="medium"
+                                                                        sx={{ 
+                                                                            bgcolor: (typeof call.metadata.sipStatus.code === 'number' && call.metadata.sipStatus.code === 200) ? 'success.light' :
+                                                                                    (typeof call.metadata.sipStatus.code === 'number' && call.metadata.sipStatus.code === 183) ? 'info.light' :
+                                                                                    (typeof call.metadata.sipStatus.code === 'number' && call.metadata.sipStatus.code === 180) ? 'warning.light' :
+                                                                                    (call.metadata.sipStatus.code === 'BYE') ? 'error.light' : 'grey.300',
+                                                                            color: 'text.primary',
+                                                                            fontWeight: 700,
+                                                                            fontSize: '0.875rem',
+                                                                            height: 32
+                                                                        }}
+                                                                    />
+                                                                </Box>
+                                                            )}
+
+                                                            {/* Call Summary */}
+                                                            {call.summary && (
+                                                                <Box sx={{ mb: 3 }}>
+                                                                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, color: 'text.primary', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                                        <Info sx={{ fontSize: 18 }} />
+                                                                        Call Summary
+                                                                    </Typography>
+                                                                    <Paper 
+                                                                        elevation={0}
+                                                                        variant="outlined" 
+                                                                        sx={{ 
+                                                                            p: 2.5, 
+                                                                            bgcolor: 'info.light',
+                                                                            borderRadius: 2,
+                                                                            border: '1px solid',
+                                                                            borderColor: 'info.main'
+                                                                        }}
+                                                                    >
+                                                                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, color: 'text.primary' }}>
+                                                                            {call.summary}
+                                                                        </Typography>
+                                                                    </Paper>
+                                                                </Box>
+                                                            )}
+
+                                                            {/* Conversation Transcript - Bot and User Messages */}
+                                                            {call.transcript && (
+                                                                <Box>
+                                                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                                                                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                                            <PhoneInTalk sx={{ fontSize: 18 }} />
+                                                                            Conversation Transcript
+                                                                        </Typography>
+                                                                        <Tooltip title="Export Transcript as TXT">
+                                                                            <Button
+                                                                                size="small"
+                                                                                variant="outlined"
+                                                                                startIcon={<GetApp />}
+                                                                                onClick={() => exportTranscript(call)}
+                                                                                sx={{ 
+                                                                                    textTransform: 'none',
+                                                                                    fontWeight: 600,
+                                                                                    borderRadius: 2
+                                                                                }}
+                                                                            >
+                                                                                Export
+                                                                            </Button>
+                                                                        </Tooltip>
+                                                                    </Box>
+                                                                    <Paper 
+                                                                        elevation={0}
+                                                                        variant="outlined" 
+                                                                        sx={{ 
+                                                                            p: 2.5, 
+                                                                            bgcolor: 'background.paper', 
+                                                                            maxHeight: 500, 
+                                                                            overflow: 'auto',
+                                                                            borderRadius: 2,
+                                                                            border: '1px solid',
+                                                                            borderColor: 'divider'
+                                                                        }}
+                                                                    >
+                                                                        {parseConversationTranscript(call.transcript)}
+                                                                    </Paper>
+                                                                </Box>
+                                                            )}
+                                                        </Box>
+                                                    </Card>
+                                                ))}
+                                            </Stack>
+                                        )}
+                                    </Box>
+                                ) : activeCallSessionId ? (
+                                    <Box sx={{ 
+                                        flex: 1,
+                                        overflow: 'auto',
+                                        p: 3,
+                                        '&::-webkit-scrollbar': {
+                                            width: '8px',
+                                        },
+                                        '&::-webkit-scrollbar-track': {
+                                            background: '#f5f5f5',
+                                        },
+                                        '&::-webkit-scrollbar-thumb': {
+                                            background: '#c0c0c0',
+                                            borderRadius: '4px',
+                                            '&:hover': {
+                                                background: '#a0a0a0',
+                                            },
+                                        },
+                                    }}>
+                                        {loadingCallHistory ? (
+                                            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                                                <CircularProgress />
+                                            </Box>
+                                        ) : callHistory.length === 0 ? (
+                                            <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+                                                <PhoneDisabled sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                                                <Typography variant="h6" color="text.secondary" gutterBottom>
+                                                    No Call History
+                                                </Typography>
+                                                <Typography variant="body2" color="text.secondary">
+                                                    {lead?.phone ? 'Click "Call Now" to initiate a call' : 'This lead does not have a phone number'}
+                                                </Typography>
+                                            </Paper>
+                                        ) : (
+                                            <Stack spacing={2}>
+                                                {callHistory.map((call) => (
+                                                    <Card key={call._id || call.sessionId} variant="outlined" sx={{ 
+                                                        borderRadius: 2, 
+                                                        overflow: 'hidden',
+                                                        borderLeft: '4px solid',
+                                                        borderColor: call.status === 'completed' ? 'success.main' : 
+                                                                   call.status === 'in-progress' ? 'info.main' :
+                                                                   call.status === 'ringing' ? 'warning.main' :
+                                                                   call.status === 'failed' ? 'error.main' : 'grey.400',
+                                                        bgcolor: call.status === 'in-progress' || call.status === 'ringing' ? 'action.selected' : 'background.paper'
+                                                    }}>
+                                                        <Box sx={{ p: 2.5 }}>
+                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                                                                <Box sx={{ flex: 1 }}>
+                                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                                                        {getCallStatusIcon(call.status)}
+                                                                        <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                                                                            {call.phoneNumber}
+                                                                        </Typography>
+                                                                        <Chip 
+                                                                            icon={getCallStatusIcon(call.status)}
+                                                                            label={call.status.replace('-', ' ').toUpperCase()} 
+                                                                            size="small"
+                                                                            color={getCallStatusColor(call.status)}
+                                                                            sx={{ fontWeight: 600, textTransform: 'capitalize' }}
+                                                                        />
+                                                                    </Box>
+                                                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                                                        <CalendarToday sx={{ fontSize: 14 }} />
+                                                                        {formatDateTime(call.createdAt || call.startedAt)}
+                                                                    </Typography>
+                                                                </Box>
+                                                                {call.status === 'in-progress' || call.status === 'ringing' ? (
+                                                                    <Button
+                                                                        size="small"
+                                                                        variant="outlined"
+                                                                        color="error"
+                                                                        startIcon={<Stop />}
+                                                                        onClick={() => handleCancelCall(call.sessionId)}
+                                                                    >
+                                                                        Cancel
+                                                                    </Button>
+                                                                ) : null}
+                                                            </Box>
+
+                                                            {/* Call Duration & Timing Info */}
+                                                            <Grid container spacing={2} sx={{ mb: 2 }}>
+                                                                {call.duration > 0 && (
+                                                                    <Grid item xs={6} sm={3}>
+                                                                        <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', bgcolor: 'background.paper' }}>
+                                                                            <Typography variant="caption" color="text.secondary" display="block">
+                                                                                Total Duration
+                                                                            </Typography>
+                                                                            <Typography variant="h6" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                                                                                {formatDuration(call.duration)}
+                                                                            </Typography>
+                                                                        </Paper>
+                                                                    </Grid>
+                                                                )}
+                                                                {call.activeCallTime > 0 && (
+                                                                    <Grid item xs={6} sm={3}>
+                                                                        <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', bgcolor: 'background.paper' }}>
+                                                                            <Typography variant="caption" color="text.secondary" display="block">
+                                                                                Active Call Time
+                                                                            </Typography>
+                                                                            <Typography variant="h6" sx={{ fontWeight: 600, color: 'success.main' }}>
+                                                                                {formatDuration(call.activeCallTime)}
+                                                                            </Typography>
+                                                                        </Paper>
+                                                                    </Grid>
+                                                                )}
+                                                                {call.ringingTime > 0 && (
+                                                                    <Grid item xs={6} sm={3}>
+                                                                        <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', bgcolor: 'background.paper' }}>
+                                                                            <Typography variant="caption" color="text.secondary" display="block">
+                                                                                Ringing Time
+                                                                            </Typography>
+                                                                            <Typography variant="h6" sx={{ fontWeight: 600, color: 'warning.main' }}>
+                                                                                {formatDuration(call.ringingTime)}
+                                                                            </Typography>
+                                                                        </Paper>
+                                                                    </Grid>
+                                                                )}
+                                                            </Grid>
+
+                                                            {/* SIP Status */}
+                                                            {call.metadata?.sipStatus && (
+                                                                <Box sx={{ mb: 2 }}>
+                                                                    <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                                                                        SIP Status
+                                                                    </Typography>
+                                                                    <Chip 
+                                                                        label={`${call.metadata.sipStatus.code} ${call.metadata.sipStatus.message}`}
+                                                                        size="small"
+                                                                        sx={{ 
+                                                                            bgcolor: call.metadata.sipStatus.code === 200 ? 'success.light' :
+                                                                                    call.metadata.sipStatus.code === 183 ? 'info.light' :
+                                                                                    call.metadata.sipStatus.code === 180 ? 'warning.light' : 'grey.300',
+                                                                            color: 'text.primary',
+                                                                            fontWeight: 600
+                                                                        }}
+                                                                    />
+                                                                </Box>
+                                                            )}
+                                                        </Box>
+                                                    </Card>
+                                                ))}
+                                            </Stack>
+                                        )}
+                                    </Box>
+                                ) : (
+                                    /* Activity Stream - Professional Design */
                                 <Box sx={{ 
                                     flex: 1,
                                     overflow: 'auto',
@@ -2049,6 +3379,63 @@ const LeadStream = () => {
                                                                     ? highlightMentions(activity.comment || activity.description || 'No description')
                                                                     : (activity.description || activity.comment || 'No description')}
                                                             </Typography>
+
+                                                            {/* ✅ Call Summary Display */}
+                                                            {activity.type === 'call_logged' && activity.metadata && (
+                                                                <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(25, 118, 210, 0.08)', borderRadius: 2, borderLeft: '3px solid', borderColor: 'primary.main' }}>
+                                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                                                                        <Phone sx={{ fontSize: 18, color: 'primary.main' }} />
+                                                                        <Typography variant="subtitle2" fontWeight="bold" color="primary.main">
+                                                                            Call Summary
+                                                                        </Typography>
+                                                                        {activity.metadata.duration && (
+                                                                            <Chip 
+                                                                                label={`${Math.floor(activity.metadata.duration / 60)}:${String(activity.metadata.duration % 60).padStart(2, '0')}`}
+                                                                                size="small"
+                                                                                sx={{ height: 20, fontSize: '0.7rem', bgcolor: 'primary.light', color: 'white' }}
+                                                                            />
+                                                                        )}
+                                                                    </Box>
+                                                                    <Typography 
+                                                                        variant="body2" 
+                                                                        sx={{ 
+                                                                            fontSize: '0.875rem',
+                                                                            lineHeight: 1.6,
+                                                                            whiteSpace: 'pre-wrap',
+                                                                            wordBreak: 'break-word',
+                                                                            color: 'text.primary',
+                                                                            mb: activity.metadata.transcript ? 1.5 : 0
+                                                                        }}
+                                                                    >
+                                                                        {activity.comment || activity.description || 'No summary available'}
+                                                                    </Typography>
+                                                                    {activity.metadata.transcript && (
+                                                                        <Box sx={{ mt: 1.5 }}>
+                                                                            <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                                                                Full Transcript:
+                                                                            </Typography>
+                                                                            <Typography 
+                                                                                variant="body2" 
+                                                                                sx={{ 
+                                                                                    fontSize: '0.813rem',
+                                                                                    lineHeight: 1.5,
+                                                                                    whiteSpace: 'pre-wrap',
+                                                                                    wordBreak: 'break-word',
+                                                                                    color: 'text.secondary',
+                                                                                    fontStyle: 'italic',
+                                                                                    maxHeight: '200px',
+                                                                                    overflowY: 'auto',
+                                                                                    p: 1,
+                                                                                    bgcolor: 'rgba(0,0,0,0.02)',
+                                                                                    borderRadius: 1
+                                                                                }}
+                                                                            >
+                                                                                {activity.metadata.transcript}
+                                                                            </Typography>
+                                                                        </Box>
+                                                                    )}
+                                                                </Box>
+                                                            )}
                                                             
                                                             {/* ✅ Show Mentions Below Comment */}
                                                             {activity.mentions && activity.mentions.length > 0 && (
@@ -2299,6 +3686,7 @@ const LeadStream = () => {
                                         </Stack>
                                     )}
                                 </Box>
+                                )}
                             </Card>
                         </Grid>
                     </Grid>

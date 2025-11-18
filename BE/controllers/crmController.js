@@ -281,6 +281,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
         const BATCH_SIZE = 1000; // Increased batch size for better performance
         let processedCount = 0; // Track count instead of storing documents
         const skippedLeads = [];
+        const createdLeadIds = []; // Store IDs of newly created leads for bulk calling
         let lastProgressUpdate = 0;
         const PROGRESS_UPDATE_INTERVAL = results.length > 1000 ? 50 : 10; // Less frequent updates for large datasets
 
@@ -314,7 +315,9 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
             if (leadsToInsert.length > 0) {
                 try {
                     const result = await Lead.insertMany(leadsToInsert, { ordered: false });
-                    processedCount += result.length; // Only count, don't store documents
+                    processedCount += result.length;
+                    // Store IDs of newly created leads
+                    createdLeadIds.push(...result.map(lead => lead._id.toString()));
                 } catch (error) {
                     // Handle any individual errors during bulk insert
                     if (error.writeErrors) {
@@ -358,6 +361,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
             data: {
                 processed: processedCount,
                 skipped: skippedLeads.length,
+                leadIds: createdLeadIds, // Return IDs of newly created leads for bulk calling
                 details: {
                     // Don't return full lead objects to save memory
                     skippedLeads: skippedLeads.length > 100 ? skippedLeads.slice(0, 100) : skippedLeads, // Limit skipped list

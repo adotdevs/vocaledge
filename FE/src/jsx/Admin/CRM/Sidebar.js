@@ -23,6 +23,7 @@ import {
   Logout,
   Menu,
   EmailOutlined,
+  Phone,
 } from '@mui/icons-material';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useAuthUser, useSignOut } from "react-auth-kit";
@@ -92,12 +93,13 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   }, [user]);
 
   const menuItems = [
-    { icon: <Dashboard />, label: 'Dashboard', link: "/admin/dashboard" },
+    // { icon: <Dashboard />, label: 'Dashboard', link: "/admin/dashboard" },
     { icon: <People />, label: 'Leads', link: "/admin/dashboard/crm" },
+    { icon: <Phone />, label: 'Call Dashboard', link: "/admin/crm/call-dashboard" },
   ];
 
   // Add Recycle Bin and Email Queue for superadmin
-  if (user()?.user?.role === 'superadmin') {
+  if (user()?.user?.role === 'superadmin') {  // Commented out for now
     menuItems.push({ icon: <DeleteForeverIcon />, label: 'Recycle Bin', link: "/admin/dashboard/crm/recycle-bin" });
     menuItems.push({ icon: <EmailOutlined />, label: 'Email Queue', link: "/admin/crm/email-queue", badge: true });
   }

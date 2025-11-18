@@ -82,7 +82,12 @@ import {
     Menu as MenuIcon,
     CheckCircle,
     Upload as UploadIcon,
-    PersonAdd as PersonAddIcon
+    PersonAdd as PersonAddIcon,
+    PhoneInTalk,
+    PhoneCallback,
+    PhoneDisabled,
+    Cancel,
+    AccessTime
 } from "@mui/icons-material";
 import {
     adminCrmLeadsApi,
@@ -98,6 +103,12 @@ import {
     assignLeadsApi,
     activateLeadApi,
     activateLeadsBulkApi,
+    initiateCallApi,
+    bulkCallLeadsApi,
+    scheduleCallApi,
+    getCallStatusApi,
+    getCallHistoryApi,
+    cancelCallApi,
     activateLeadsBulkWithProgress,
     getEmailQueueStatusApi
 } from "../../../Api/Service";
@@ -142,6 +153,8 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
     const [csvHeaders, setCsvHeaders] = useState([]);
     const [csvPreview, setCsvPreview] = useState([]);
     const [fieldMapping, setFieldMapping] = useState({});
+    const [callAfterUpload, setCallAfterUpload] = useState(false);
+    const [uploadedLeadIds, setUploadedLeadIds] = useState([]);
     const [selectedFields, setSelectedFields] = useState({});
     const [uploading, setUploading] = useState(false);
     const [creating, setCreating] = useState(false);
@@ -305,6 +318,28 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
         }
     };
 
+    // Handle bulk calling after CSV upload
+    const handleBulkCallAfterUpload = async (leadIds) => {
+        if (!leadIds || leadIds.length === 0) {
+            toast.warning('No leads to call');
+            return;
+        }
+
+        try {
+            toast.info(`Initiating calls for ${leadIds.length} leads...`);
+            const response = await bulkCallLeadsApi(leadIds, { delay: 5000 });
+            
+            if (response.success) {
+                toast.success(`Queued ${response.calls.length} calls for sequential processing`);
+            } else {
+                toast.error(response.message || 'Failed to initiate bulk calls');
+            }
+        } catch (error) {
+            console.error('Error initiating bulk calls:', error);
+            toast.error('Error initiating bulk calls');
+        }
+    };
+
     const handleCsvUpload = async () => {
         if (!csvFile) {
             toast.error('Please select a CSV file');
@@ -382,9 +417,22 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                         }, 500);
                     }
                     
+                    // Store uploaded lead IDs if call after upload is enabled
+                    if (callAfterUpload && eventData.data.processed > 0) {
+                        // Fetch the newly uploaded leads to get their IDs
+                        // We'll trigger bulk calling after a short delay
+                        setUploadedLeadIds(eventData.data.leadIds || []);
+                    }
+                    
                     // Wait a bit to show 100% completion
                     setTimeout(() => {
                         onLeadCreated();
+                        
+                        // If call after upload is enabled, initiate bulk calls
+                        if (callAfterUpload && eventData.data.processed > 0) {
+                            handleBulkCallAfterUpload(eventData.data.leadIds || []);
+                        }
+                        
                         onClose();
                         resetForm();
                     }, 1500);
@@ -418,6 +466,8 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
     };
 
     const resetForm = () => {
+        setCallAfterUpload(false);
+        setUploadedLeadIds([]);
         setManualForm({
             firstName: "",
             lastName: "",
@@ -803,6 +853,30 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                     {!uploadProgress.isUploading && uploadProgress.percentage === 0 ? (
                                         <>
                                             <Typography variant="h6" gutterBottom>Ready to Upload</Typography>
+                                            
+                                            {/* Call After Upload Option */}
+                                            <Box sx={{ mt: 2, mb: 2, p: 2, bgcolor: 'info.light', borderRadius: 1, border: '1px solid', borderColor: 'info.main' }}>
+                                                <FormControlLabel
+                                                    control={
+                                                        <MuiCheckbox
+                                                            checked={callAfterUpload}
+                                                            onChange={(e) => setCallAfterUpload(e.target.checked)}
+                                                            color="primary"
+                                                        />
+                                                    }
+                                                    label={
+                                                        <Box>
+                                                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                                                Call leads automatically after upload
+                                                            </Typography>
+                                                            <Typography variant="caption" color="text.secondary">
+                                                                Leads with phone numbers will be called sequentially (one by one)
+                                                            </Typography>
+                                                        </Box>
+                                                    }
+                                                />
+                                            </Box>
+                                            
                                             <Typography variant="body2" gutterBottom>
                                                 You are about to upload <strong>{csvFile?.name}</strong> with the following mapping:
                                             </Typography>
@@ -1383,6 +1457,8 @@ const LeadsPage = () => {
     const [viewDetailsOpen, setViewDetailsOpen] = useState(false);
     const [editDialogOpen, setEditDialogOpen] = useState(false);
     const [selectedLeads, setSelectedLeads] = useState(new Set());
+    const [callStatuses, setCallStatuses] = useState({}); // Track call status per lead
+    const [socket, setSocket] = useState(null);
     const [expandedLead, setExpandedLead] = useState(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [deleteType, setDeleteType] = useState(''); // 'single', 'bulk', 'all'
@@ -1417,9 +1493,19 @@ const LeadsPage = () => {
         msg: ''
     });
 
-    // ✅ Socket.io connection for real-time email queue updates
+    // Call progress dialog (live status)
+    const [callProgressOpen, setCallProgressOpen] = useState(false);
+    const [callProgress, setCallProgress] = useState({
+        leadId: null,
+        sessionId: null,
+        phoneNumber: null,
+        status: 'initiating',
+        timeline: []
+    });
+
+    // ✅ Socket.io connection for real-time email queue updates and call status
     useEffect(() => { 
-        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
         
         // Parse URL properly to avoid malformed URLs
         let backendUrl;
@@ -1428,7 +1514,7 @@ const LeadsPage = () => {
             backendUrl = `${url.protocol}//${url.host}`; // Get protocol + host only
         } catch (e) {
             console.error('Invalid REACT_APP_API_URL:', apiUrl);
-            backendUrl = 'http://localhost:5000'; // Fallback
+            backendUrl = 'http://localhost:4000'; // Fallback
         }
         
         const socket = io(backendUrl, {
@@ -1445,6 +1531,144 @@ const LeadsPage = () => {
                 total: data.total || 0
             });
         });
+
+        // Call status updates
+        socket.on('call:status:update', (data) => {
+            // Update call status for the lead
+            if (data.leadId) {
+                setCallStatuses(prev => ({
+                    ...prev,
+                    [data.leadId]: data.status
+                }));
+                
+                // Clear status after call ends
+                if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                    setTimeout(() => {
+                        setCallStatuses(prev => {
+                            const updated = { ...prev };
+                            delete updated[data.leadId];
+                            return updated;
+                        });
+                    }, 5000); // Clear after 5 seconds
+                }
+            }
+            // Update call progress dialog with detailed SIP events
+            setCallProgress(prev => {
+                // Initialize if this is a new call
+                if (!prev.leadId && data.leadId) {
+                    return {
+                        leadId: data.leadId,
+                        sessionId: data.sessionId || null,
+                        phoneNumber: data.phoneNumber || prev.phoneNumber || '',
+                        status: data.status || 'initiating',
+                        duration: data.duration || 0,
+                        activeCallTime: data.activeCallTime || 0,
+                        ringingTime: data.ringingTime || 0,
+                        timeline: [{
+                            t: new Date().toISOString(),
+                            label: data.sipStatus ? `SIP ${data.sipStatus.code} ${data.sipStatus.message}` : `Status: ${data.status}`,
+                            sipCode: data.sipStatus?.code,
+                            sipMessage: data.sipStatus?.message
+                        }]
+                    };
+                }
+                
+                // Check if this update is for the current call
+                const isCurrentCall = prev.leadId && (
+                    (data.leadId && data.leadId === prev.leadId) ||
+                    (prev.sessionId && data.sessionId && data.sessionId === prev.sessionId)
+                );
+                
+                if (!isCurrentCall && prev.leadId) return prev; // Different call, ignore
+                
+                // Build timeline entry with SIP status info
+                let timelineLabel = `Status: ${data.status}`;
+                if (data.sipStatus && data.sipStatus.code) {
+                    // Map SIP codes to friendly labels
+                    const sipLabels = {
+                        100: 'Trying',
+                        180: 'Ringing',
+                        183: 'Session Progress',
+                        200: 'Call Answered',
+                        'BYE': 'Call Ended'
+                    };
+                    timelineLabel = `SIP ${data.sipStatus.code} ${sipLabels[data.sipStatus.code] || data.sipStatus.message || data.status}`;
+                }
+                
+                // Check if this event already exists in timeline (avoid duplicates)
+                const eventExists = prev.timeline.some(e => 
+                    e.sipCode === data.sipStatus?.code && 
+                    e.sipMessage === data.sipStatus?.message
+                );
+                
+                const next = {
+                    ...prev,
+                    sessionId: prev.sessionId || data.sessionId || null,
+                    status: data.status || prev.status,
+                    duration: data.duration || prev.duration,
+                    activeCallTime: data.activeCallTime || prev.activeCallTime,
+                    ringingTime: data.ringingTime || prev.ringingTime,
+                    timeline: eventExists ? prev.timeline : [...prev.timeline, { 
+                        t: new Date().toISOString(), 
+                        label: timelineLabel,
+                        sipCode: data.sipStatus?.code,
+                        sipMessage: data.sipStatus?.message
+                    }]
+                };
+                
+                // Auto-close dialog after call ends
+                if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                    setTimeout(() => setCallProgressOpen(false), 3000);
+                }
+                return next;
+            });
+        });
+
+        // Call summary ready
+        socket.on('call:summary:ready', (data) => {
+            // Clear call status when summary is ready
+            if (data.leadId) {
+                setCallStatuses(prev => {
+                    const updated = { ...prev };
+                    delete updated[data.leadId];
+                    return updated;
+                });
+                // Refresh leads to show updated call history
+                fetchLeads(pagination.currentPage);
+            }
+            toast.success(`Call summary ready for lead`);
+            setCallProgress(prev => {
+                if (prev.sessionId && data.sessionId === prev.sessionId) {
+                    setCallProgressOpen(false);
+                }
+                return prev;
+            });
+        });
+        
+        socket.on('bulk:call:complete', (data) => {
+            toast.success(data.message || 'All bulk calls completed');
+            // Clear all call statuses
+            setCallStatuses({});
+            // Refresh leads to show updated call history
+            fetchLeads(pagination.currentPage);
+        });
+
+        // Bulk call progress
+        socket.on('bulk:call:progress', (data) => {
+            if (data.current && data.current.leadId) {
+                setCallStatuses(prev => ({
+                    ...prev,
+                    [data.current.leadId]: data.current.status || 'ringing'
+                }));
+            }
+            
+            // Show progress notification
+            if (data.completed && data.total) {
+                toast.info(`Bulk call progress: ${data.completed}/${data.total}`, { autoClose: 2000 });
+            }
+        });
+
+        setSocket(socket);
 
         socket.on('disconnect', () => {});
 
@@ -1600,6 +1824,68 @@ const LeadsPage = () => {
 
     const handleLeadUpdated = () => {
         fetchLeads(pagination.currentPage);
+    };
+
+    // Call handlers
+    const handleCallLead = async (lead) => {
+        if (!lead.phone) {
+            toast.error('Lead has no phone number');
+            return;
+        }
+
+        try {
+            setCallStatuses(prev => ({ ...prev, [lead._id]: 'ringing' }));
+            const response = await initiateCallApi(lead._id, lead.phone);
+            if (response.success) {
+                toast.success(`Calling ${lead.firstName} ${lead.lastName}...`);
+                // Open live call progress dialog
+                setCallProgressOpen(true);
+                setCallProgress({
+                    leadId: lead._id,
+                    sessionId: response.call?.sessionId || null,
+                    phoneNumber: lead.phone,
+                    status: 'ringing',
+                    timeline: [
+                        { t: new Date().toISOString(), label: 'Initiated' },
+                        { t: new Date().toISOString(), label: 'Ringing' }
+                    ]
+                });
+            } else {
+                toast.error(response.msg || 'Failed to initiate call');
+                setCallStatuses(prev => ({ ...prev, [lead._id]: null }));
+            }
+        } catch (error) {
+            console.error('Error initiating call:', error);
+            toast.error('Failed to initiate call');
+            setCallStatuses(prev => ({ ...prev, [lead._id]: null }));
+        }
+    };
+
+    const handleBulkCall = async () => {
+        if (selectedLeads.size === 0) {
+            toast.error('Please select leads to call');
+            return;
+        }
+
+        const selectedLeadIds = Array.from(selectedLeads);
+        const leadsToCall = leads.filter(lead => selectedLeadIds.includes(lead._id) && lead.phone);
+
+        if (leadsToCall.length === 0) {
+            toast.error('Selected leads have no phone numbers');
+            return;
+        }
+
+        try {
+            const response = await bulkCallLeadsApi(selectedLeadIds, { delay: 5000 });
+            if (response.success) {
+                toast.success(`Queued ${response.calls.length} calls`);
+            } else {
+                toast.error(response.msg || 'Failed to initiate bulk calls');
+            }
+        } catch (error) {
+            console.error('Error initiating bulk calls:', error);
+            toast.error('Failed to initiate bulk calls');
+        }
     };
 
     // Selection handlers
@@ -2094,6 +2380,195 @@ const LeadsPage = () => {
                     transition: "margin-left 0.3s ease",
                 }}
             >
+                {/* Live Call Progress Dialog - Enhanced UI */}
+                <Dialog
+                    open={callProgressOpen}
+                    onClose={() => setCallProgressOpen(false)}
+                    maxWidth="sm"
+                    fullWidth
+                    PaperProps={{
+                        sx: {
+                            borderRadius: 2,
+                            boxShadow: '0 8px 32px rgba(0,0,0,0.12)'
+                        }
+                    }}
+                >
+                    <DialogTitle sx={{ pb: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+                        <Box display="flex" alignItems="center" justifyContent="space-between">
+                            <Box display="flex" alignItems="center" gap={1.5}>
+                                <PhoneInTalk color="primary" sx={{ fontSize: 28 }} />
+                                <Box>
+                                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                                        Call in Progress
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        Real-time call status
+                                    </Typography>
+                                </Box>
+                            </Box>
+                            <IconButton onClick={() => setCallProgressOpen(false)} size="small">
+                                <Close />
+                            </IconButton>
+                        </Box>
+                    </DialogTitle>
+                    <DialogContent dividers sx={{ pt: 2.5 }}>
+                        <Stack spacing={2.5}>
+                            {/* Lead Info */}
+                            <Box sx={{ 
+                                p: 2, 
+                                bgcolor: 'primary.light', 
+                                borderRadius: 2,
+                                border: '1px solid',
+                                borderColor: 'primary.main'
+                            }}>
+                                <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                                    Calling
+                                </Typography>
+                                <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
+                                    {leads.find(l => l._id === callProgress.leadId)?.firstName} {leads.find(l => l._id === callProgress.leadId)?.lastName}
+                                </Typography>
+                                <Box display="flex" alignItems="center" gap={1}>
+                                    <Phone sx={{ fontSize: 16, color: 'text.secondary' }} />
+                                    <Typography variant="body2" color="text.secondary">
+                                        {callProgress.phoneNumber}
+                                    </Typography>
+                                </Box>
+                            </Box>
+
+                            {/* Status Card */}
+                            <Box sx={{ 
+                                p: 2, 
+                                bgcolor: callProgress.status === 'in-progress' ? 'success.light' :
+                                        callProgress.status === 'ringing' ? 'warning.light' :
+                                        callProgress.status === 'completed' ? 'success.light' :
+                                        callProgress.status === 'failed' ? 'error.light' : 'grey.100',
+                                borderRadius: 2,
+                                border: '1px solid',
+                                borderColor: callProgress.status === 'in-progress' ? 'success.main' :
+                                           callProgress.status === 'ringing' ? 'warning.main' :
+                                           callProgress.status === 'completed' ? 'success.main' :
+                                           callProgress.status === 'failed' ? 'error.main' : 'grey.300'
+                            }}>
+                                <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+                                    <Typography variant="subtitle2" fontWeight={600}>
+                                        Current Status
+                                    </Typography>
+                                    <Chip
+                                        icon={
+                                            callProgress.status === 'in-progress' ? <PhoneInTalk sx={{ fontSize: 16 }} /> :
+                                            callProgress.status === 'ringing' ? <PhoneCallback sx={{ fontSize: 16 }} /> :
+                                            callProgress.status === 'completed' ? <CheckCircle sx={{ fontSize: 16 }} /> :
+                                            callProgress.status === 'failed' ? <Cancel sx={{ fontSize: 16 }} /> :
+                                            <AccessTime sx={{ fontSize: 16 }} />
+                                        }
+                                        label={callProgress.status?.replace('-', ' ').toUpperCase() || 'INITIATING'}
+                                        color={
+                                            callProgress.status === 'in-progress' ? 'success' :
+                                            callProgress.status === 'ringing' ? 'warning' :
+                                            callProgress.status === 'completed' ? 'success' :
+                                            callProgress.status === 'failed' ? 'error' : 'default'
+                                        }
+                                        size="small"
+                                        sx={{ fontWeight: 600, textTransform: 'capitalize' }}
+                                    />
+                                </Box>
+                                
+                                {/* Duration Info */}
+                                {(callProgress.duration || callProgress.activeCallTime || callProgress.ringingTime) && (
+                                    <Box display="flex" gap={2} mt={1.5}>
+                                        {callProgress.duration > 0 && (
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary" display="block">
+                                                    Duration
+                                                </Typography>
+                                                <Typography variant="body2" fontWeight={600}>
+                                                    {Math.floor(callProgress.duration / 60)}:{(callProgress.duration % 60).toString().padStart(2, '0')}
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                        {callProgress.activeCallTime > 0 && (
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary" display="block">
+                                                    Active
+                                                </Typography>
+                                                <Typography variant="body2" fontWeight={600} color="success.main">
+                                                    {Math.floor(callProgress.activeCallTime / 60)}:{(callProgress.activeCallTime % 60).toString().padStart(2, '0')}
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                        {callProgress.ringingTime > 0 && (
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary" display="block">
+                                                    Ringing
+                                                </Typography>
+                                                <Typography variant="body2" fontWeight={600} color="warning.main">
+                                                    {callProgress.ringingTime}s
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                    </Box>
+                                )}
+                            </Box>
+
+                            {/* SIP Events Timeline */}
+                            <Box>
+                                <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                                    Call Timeline
+                                </Typography>
+                                <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 250, overflowY: 'auto', bgcolor: 'background.paper' }}>
+                                    <Stack spacing={1}>
+                                        {callProgress.timeline.length === 0 ? (
+                                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+                                                Waiting for call events...
+                                            </Typography>
+                                        ) : (
+                                            callProgress.timeline.map((e, idx) => (
+                                                <Box 
+                                                    key={idx} 
+                                                    sx={{ 
+                                                        display: 'flex', 
+                                                        alignItems: 'center', 
+                                                        gap: 1.5,
+                                                        p: 1,
+                                                        borderRadius: 1,
+                                                        bgcolor: idx === callProgress.timeline.length - 1 ? 'action.selected' : 'transparent',
+                                                        transition: 'background-color 0.2s'
+                                                    }}
+                                                >
+                                                    <Box sx={{ 
+                                                        width: 8, 
+                                                        height: 8, 
+                                                        borderRadius: '50%',
+                                                        bgcolor: e.sipCode === 200 ? 'success.main' :
+                                                                e.sipCode === 183 ? 'info.main' :
+                                                                e.sipCode === 180 ? 'warning.main' :
+                                                                e.sipCode === 100 ? 'grey.500' :
+                                                                e.sipCode === 'BYE' ? 'error.main' :
+                                                                'primary.main',
+                                                        flexShrink: 0
+                                                    }} />
+                                                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                                                        <Typography variant="body2" sx={{ fontWeight: idx === callProgress.timeline.length - 1 ? 600 : 400 }}>
+                                                            {e.label}
+                                                        </Typography>
+                                                        {e.sipCode && (
+                                                            <Typography variant="caption" color="text.secondary">
+                                                                SIP {e.sipCode} {e.sipMessage || ''}
+                                                            </Typography>
+                                                        )}
+                                                    </Box>
+                                                    <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                                                        {new Date(e.t).toLocaleTimeString()}
+                                                    </Typography>
+                                                </Box>
+                                            ))
+                                        )}
+                                    </Stack>
+                                </Paper>
+                            </Box>
+                        </Stack>
+                    </DialogContent>
+                </Dialog>
                 {/* Header */}
                 <AppBar
                     position="static"
@@ -2211,6 +2686,19 @@ const LeadsPage = () => {
                                             {activating ? 'Activating...' : `Activate (${selectedLeads.size})`}
                                         </Button>
                                     )}
+                                    <Button
+                                        variant="contained"
+                                        color="primary"
+                                        startIcon={<Phone />}
+                                        onClick={handleBulkCall}
+                                        size="small"
+                                        sx={{ 
+                                            flex: { xs: '1 1 auto', sm: '0 0 auto' },
+                                            fontWeight: 'bold',
+                                        }}
+                                    >
+                                        Call Selected ({selectedLeads.size})
+                                    </Button>
                                         <Button
                                             variant="outlined"
                                             startIcon={<Close sx={{ display: { xs: 'none', sm: 'block' } }} />}
@@ -2572,12 +3060,44 @@ const LeadsPage = () => {
                                                             </Typography>
                                                         </TableCell>
                                                         <TableCell>
-                                                            <IconButton
-                                                                size="small"
-                                                                onClick={(e) => handleMenuOpen(e, lead)}
-                                                            >
-                                                                <MoreVert />
-                                                            </IconButton>
+                                                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                                                                {lead.phone && (
+                                                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                                                        <IconButton
+                                                                            size="small"
+                                                                            color={callStatuses[lead._id] === 'in-progress' ? 'success' : 
+                                                                                   callStatuses[lead._id] === 'ringing' ? 'warning' : 'primary'}
+                                                                            onClick={() => handleCallLead(lead)}
+                                                                            disabled={callStatuses[lead._id] === 'ringing' || callStatuses[lead._id] === 'in-progress'}
+                                                                            title={callStatuses[lead._id] === 'in-progress' ? 'Call in progress' : 
+                                                                                   callStatuses[lead._id] === 'ringing' ? 'Call ringing' : 'Call Lead'}
+                                                                        >
+                                                                            {callStatuses[lead._id] === 'in-progress' ? <PhoneInTalk /> : 
+                                                                             callStatuses[lead._id] === 'ringing' ? <PhoneCallback /> : <Phone />}
+                                                                        </IconButton>
+                                                                        {callStatuses[lead._id] && (
+                                                                            <Chip 
+                                                                                label={callStatuses[lead._id].replace('-', ' ').toUpperCase()} 
+                                                                                size="small"
+                                                                                color={callStatuses[lead._id] === 'in-progress' ? 'success' : 
+                                                                                       callStatuses[lead._id] === 'ringing' ? 'warning' : 'default'}
+                                                                                sx={{ 
+                                                                                    height: 20, 
+                                                                                    fontSize: '0.65rem',
+                                                                                    fontWeight: 600,
+                                                                                    textTransform: 'capitalize'
+                                                                                }}
+                                                                            />
+                                                                        )}
+                                                                    </Box>
+                                                                )}
+                                                                <IconButton
+                                                                    size="small"
+                                                                    onClick={(e) => handleMenuOpen(e, lead)}
+                                                                >
+                                                                    <MoreVert />
+                                                                </IconButton>
+                                                            </Box>
                                                         </TableCell>
                                                     </TableRow>
                                                     <TableRow>

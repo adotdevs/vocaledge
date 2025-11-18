@@ -19,8 +19,8 @@ app.use(cookieParser());
 const cron = require("node-cron");
 const getLeadModel = require("./crmDB/models/leadsModel");
 let ALLOWED_ORIGINS = [
-  "https://vocaledge.io",
-  "https://www.vocaledge.io", 
+  "http://vocaledge.io",
+  "https://www.vocaledge.io",
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:3002",
@@ -329,5 +329,7 @@ app.use("/api/v1", coins);
 app.use("/api/v1", user);
 app.use("/api/v1", file);
 app.use("/api/v1", crm);
+const call = require("./routes/callRoutes");
+app.use("/api/v1", call);
 
 module.exports = app;

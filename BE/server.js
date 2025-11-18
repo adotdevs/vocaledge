@@ -11,6 +11,18 @@ app.use(bodyParser.urlencoded({ extended: true }));
 const database = require("./config/database");
 database();
 
+// Initialize CRM database connection at startup
+const connectCRMDatabase = require("./config/crmDatabase");
+(async () => {
+  try {
+    await connectCRMDatabase();
+    console.log("✅ CRM Database initialized at startup");
+  } catch (error) {
+    console.error("❌ Failed to initialize CRM Database at startup:", error.message);
+    // Don't exit - let it retry on first use
+  }
+})();
+
 const cloudinary = require("cloudinary");
 const http = require('http');
 const { Server } = require('socket.io');
@@ -61,6 +73,21 @@ io.on('connection', (socket) => {
 
 // Make io available globally for emitting events
 global.io = io;
+
+// Initialize VoIP agent
+const WebRTCVoiceAgent = require('./voip/webrtcVoiceAgent');
+const { updateCallStatusInternal } = require('./controllers/callController');
+let voipAgent = null;
+try {
+    voipAgent = new WebRTCVoiceAgent();
+    global.voipAgent = voipAgent;
+    // Make updateCallStatus available globally for VoIP agent
+    global.updateCallStatusInternal = updateCallStatusInternal;
+    console.log('✅ VoIP agent initialized successfully');
+} catch (error) {
+    console.error('❌ Failed to initialize VoIP agent:', error);
+    console.error('   VoIP calling features will not be available');
+}
 
 // ✅ Background Email Queue Processor (runs automatically)
 const processEmailQueue = async () => {
@@ -315,6 +342,98 @@ processEmailQueue().then(() => {
 });
 
 // ✅ Cron job: Delete 'sent' emails older than 10 days (runs daily at midnight)
+// Scheduled calls cron job - check every minute
+cron.schedule('* * * * *', async () => {
+    try {
+        if (!global.voipAgent) return;
+        
+        const getCallModel = require('./crmDB/models/callModel');
+        const Call = await getCallModel();
+        
+        // Find scheduled calls that should be executed now
+        const now = new Date();
+        const scheduledCalls = await Call.find({
+            status: 'scheduled',
+            scheduledAt: { $lte: now }
+        }).limit(10); // Process max 10 at a time
+        
+        for (const call of scheduledCalls) {
+            try {
+                // Update status to ringing
+                call.status = 'ringing';
+                call.startedAt = new Date();
+                await call.save();
+                
+                // Emit Socket.io event
+                if (global.io) {
+                    global.io.emit('call:status:update', {
+                        callId: call._id,
+                        sessionId: call.sessionId,
+                        leadId: call.leadId,
+                        status: 'ringing'
+                    });
+                }
+                
+                // Fetch lead information for personalized conversation
+                const getLeadModel = require('./crmDB/models/leadsModel');
+                const Lead = await getLeadModel();
+                const lead = await Lead.findById(call.leadId);
+                
+                const leadInfo = lead ? {
+                    firstName: lead.firstName || null,
+                    lastName: lead.lastName || null,
+                    email: lead.email || null,
+                    phone: lead.phone || null,
+                    country: lead.country || null,
+                    brand: lead.Brand || null,
+                    address: lead.Address || null,
+                    status: lead.status || null
+                } : {};
+                
+                // Initiate call
+                const callSession = await global.voipAgent.makeCall(call.phoneNumber, 'shimmer', null, { 
+                    leadId: call.leadId,
+                    callId: call._id.toString(),
+                    sessionId: call.sessionId,
+                    leadInfo: leadInfo // Pass lead information for personalized conversation
+                });
+                
+                // Update call with VoIP session ID if different
+                if (callSession && callSession.id && callSession.id !== call.sessionId) {
+                    call.sessionId = callSession.id;
+                    await call.save();
+                }
+                
+                // Update to in-progress after a delay
+                setTimeout(async () => {
+                    const updatedCall = await Call.findById(call._id);
+                    if (updatedCall && updatedCall.status === 'ringing') {
+                        updatedCall.status = 'in-progress';
+                        await updatedCall.save();
+                        
+                        if (global.io) {
+                            global.io.emit('call:status:update', {
+                                callId: call._id,
+                                sessionId: call.sessionId,
+                                leadId: call.leadId,
+                                status: 'in-progress'
+                            });
+                        }
+                    }
+                }, 2000);
+                
+            } catch (error) {
+                console.error(`Error executing scheduled call ${call._id}:`, error);
+                call.status = 'failed';
+                call.endedAt = new Date();
+                await call.save();
+            }
+        }
+    } catch (error) {
+        console.error('Error in scheduled calls cron:', error);
+    }
+});
+
 cron.schedule('0 0 * * *', async () => {
   try {
     console.log('\n🧹 ========================================');
