@@ -84,6 +84,7 @@ import "./assets/css/stylemain.css";
 import React from 'react'; import './i18n'
 import Router from './config/router';
 import { useTranslation } from 'react-i18next';
+import ChatBot from './components/ChatBot/ChatBot';
 
 const App = () => {
 
@@ -91,7 +92,7 @@ const App = () => {
     return (
         <div>
             <Router />
-
+            <ChatBot />
         </div>
     );
 }

@@ -9,6 +9,7 @@ import TonCoin from '../../../assets/images/new/3.png';
 import { toast } from 'react-toastify';
 import { useAuthUser } from 'react-auth-kit';
 import { createUserTransactionApi, getCoinsUserApi, getLinksApi, getsignUserApi, getUserCoinApi, getStakingSettingsApi, getStakingRewardsApi } from '../../../Api/Service'
+import { getTransactionsForCoin } from './assets/coinConfig';
 import axios from 'axios';
 import { Button, Card, Col, Form, DropdownDivider, InputGroup, Modal, Row, Spinner } from 'react-bootstrap';
 import './style.css'
@@ -66,6 +67,7 @@ const Staking = () => {
     const [isLoading, setisLoading] = useState(true);
     const [isDisable, setisDisable] = useState(false);
     const [liveBtc, setliveBtc] = useState(null);
+    const [liveEth, setliveEth] = useState(null);
     const [UserTransactions, setUserTransactions] = useState([]);
     const [UserData, setUserData] = useState(true);
     const [isGetting, setisGetting] = useState(true);
@@ -178,6 +180,11 @@ const Staking = () => {
                     btcPrice = userCoins.btcPrice.quote.USD.price;
                 }
                 setliveBtc(btcPrice);
+                let ethPrice = 2640;
+                if (userCoins && userCoins.ethPrice && userCoins.ethPrice.quote && userCoins.ethPrice.quote.USD) {
+                    ethPrice = userCoins.ethPrice.quote.USD.price;
+                }
+                setliveEth(ethPrice);
                 setisLoading(false);
 
                 // Calculate balances for all coins
@@ -190,19 +197,10 @@ const Staking = () => {
                     };
 
                     const searchTerm = transactionNameMap[coinKey] || coinKey.toLowerCase();
-                    const coinTransactions = userCoins.getCoin.transactions.filter(transaction =>
-                        transaction.trxName.toLowerCase().includes(searchTerm)
+                    newBalances[coinKey] = getTransactionsForCoin(
+                        searchTerm,
+                        userCoins.getCoin.transactions
                     );
-
-                    const completedTransactions = coinTransactions.filter(transaction =>
-                        transaction.status.includes('completed')
-                    );
-
-                    let totalBalance = 0;
-                    for (let i = 0; i < completedTransactions.length; i++) {
-                        totalBalance += completedTransactions[i].amount;
-                    }
-                    newBalances[coinKey] = totalBalance;
                 });
 
                 setBalances(newBalances);
@@ -210,7 +208,7 @@ const Staking = () => {
                 // Calculate total portfolio value
                 const coinPrices = {
                     bitcoin: btcPrice,
-                    ethereum: 2640,
+                    ethereum: ethPrice,
                     tether: 1,
                     bnb: 350,
                     xrp: 0.5,
@@ -824,7 +822,7 @@ const Staking = () => {
                                                 Total Balance{" "}
                                                 {`${balances[currentCrypto].toFixed(8)} (${(
                                                     balances[currentCrypto] * (currentCrypto === 'bitcoin' ? liveBtc :
-                                                        currentCrypto === 'ethereum' ? 2640 :
+                                                        currentCrypto === 'ethereum' ? (liveEth || 2640) :
                                                             currentCrypto === 'tether' ? 1 :
                                                                 currentCrypto === 'bnb' ? 350 :
                                                                     currentCrypto === 'xrp' ? 0.5 :

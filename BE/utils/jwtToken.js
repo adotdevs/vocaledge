@@ -2,26 +2,37 @@
 const jwtToken = (user, statusCode, res, req) => {
   const token = user.generateToken();
 
-  const isProd = process.env.NODE_ENV === 'production';
-  const secure = isProd || process.env.COOKIE_SECURE === 'true';
+  const origin = req.headers.origin || req.headers.referer || '';
+  const host = req.hostname || '';
+
+  // Treat localhost/127.0.0.1 as development for cookie behavior,
+  // even if NODE_ENV is set to "production" in the env file.
+  const isLocalhost =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    (origin && (origin.includes('localhost') || origin.includes('127.0.0.1')));
+
+  const isProd = process.env.NODE_ENV === 'production' && !isLocalhost;
+
+  // Only use Secure cookies when we're not on localhost
+  const secure =
+    !isLocalhost && (isProd || process.env.COOKIE_SECURE === 'true');
   const sameSite = secure ? 'None' : 'Lax';
 
-  // Determine cookie domain based on request origin
+  // Determine cookie domain based on request origin (production only)
   let cookieDomain = undefined;
 
   if (isProd) {
-    const origin = req.headers.origin || req.headers.referer || '';
-
     if (origin.includes('vocaledge.io')) {
       cookieDomain = '.vocaledge.io';
     } else if (process.env.COOKIE_DOMAIN) {
-      cookieDomain = process.env.COOKIE_DOMAIN; 
+      cookieDomain = process.env.COOKIE_DOMAIN;
     }
   }
 
   // Clear any existing cookies with different domains first
   res.clearCookie('jwttoken', { path: '/' });
-  res.clearCookie('jwttoken', { path: '/', domain: '.vocaledge.io' }); 
+  res.clearCookie('jwttoken', { path: '/', domain: '.vocaledge.io' });
 
   const options = {
     expires: new Date(

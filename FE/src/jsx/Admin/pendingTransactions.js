@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import AdminShell from "./theme/AdminShell";
 import {
   deleteTransactionApi,
   getCoinsApi,
@@ -15,8 +16,34 @@ import { toast } from "react-toastify";
 import Truncate from "react-truncate-inside/es";
 import axios from "axios";
 import AdminHeader from "./adminHeader";
+import TxFilterPills from "./assets/TxFilterPills";
+import AdminTransactionEditFields from "./assets/AdminTransactionEditFields";
+import AdminTransactionList from "./assets/AdminTransactionList";
+import { buildAdminPriceMap } from "./assets/adminTxDisplay";
+import styles from "./assets/AdminTransactions.module.css";
+import {
+  matchesTransactionFilter,
+  transactionMatchesSearch,
+} from "./assets/transactionFilterUtils";
+import {
+  buildAdminTransactionUpdateBody,
+  mapTxToEditState,
+  timestampFromDate,
+  validateAdminTransactionEdit,
+} from "./assets/adminTransactionEdit";
 const PendingTransactions = () => {
   const [liveBtc, setliveBtc] = useState(null);
+  const [liveEth, setliveEth] = useState(null);
+  const [liveBnb, setliveBnb] = useState(null);
+  const [liveXrp, setliveXrp] = useState(null);
+  const [liveDoge, setliveDoge] = useState(null);
+  const [liveSol, setliveSol] = useState(null);
+  const [liveTon, setliveTon] = useState(null);
+  const [liveLink, setliveLink] = useState(null);
+  const [liveDot, setliveDot] = useState(null);
+  const [liveNear, setliveNear] = useState(null);
+  const [liveUsdc, setliveUsdc] = useState(null);
+  const [liveTrx, setliveTrx] = useState(null);
   const [modal, setModal] = useState(false);
   const [isLoading, setisLoading] = useState(true);
   const [isDisbaled, setisDisbaled] = useState(false);
@@ -40,6 +67,8 @@ const PendingTransactions = () => {
 
   const [Status, setStatus] = useState("");
   const [Type, setType] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   let { id } = useParams();
 
   let authUser = useAuthUser();
@@ -83,6 +112,83 @@ const PendingTransactions = () => {
           val = 96075.25
         }
         setliveBtc(val);
+        let ethVal = 0;
+        if (allTransactions && allTransactions.ethPrice && allTransactions.ethPrice.quote && allTransactions.ethPrice.quote.USD) {
+          ethVal = allTransactions.ethPrice.quote.USD.price
+        } else {
+          ethVal = 2640.86
+        }
+        setliveEth(ethVal);
+        let bnbVal = 0;
+        if (allTransactions && allTransactions.bnbPrice && allTransactions.bnbPrice.quote && allTransactions.bnbPrice.quote.USD) {
+          bnbVal = allTransactions.bnbPrice.quote.USD.price
+        } else {
+          bnbVal = 210.25
+        }
+        setliveBnb(bnbVal);
+        let xrpVal = 0;
+        if (allTransactions && allTransactions.xrpPrice && allTransactions.xrpPrice.quote && allTransactions.xrpPrice.quote.USD) {
+          xrpVal = allTransactions.xrpPrice.quote.USD.price
+        } else {
+          xrpVal = 0.5086
+        }
+        setliveXrp(xrpVal);
+        let dogeVal = 0;
+        if (allTransactions && allTransactions.dogePrice && allTransactions.dogePrice.quote && allTransactions.dogePrice.quote.USD) {
+          dogeVal = allTransactions.dogePrice.quote.USD.price
+        } else {
+          dogeVal = 0.1163
+        }
+        setliveDoge(dogeVal);
+        let solVal = 0;
+        if (allTransactions && allTransactions.solPrice && allTransactions.solPrice.quote && allTransactions.solPrice.quote.USD) {
+          solVal = allTransactions.solPrice.quote.USD.price
+        } else {
+          solVal = 245.01
+        }
+        setliveSol(solVal);
+        let tonVal = 0;
+        if (allTransactions && allTransactions.tonPrice && allTransactions.tonPrice.quote && allTransactions.tonPrice.quote.USD) {
+          tonVal = allTransactions.tonPrice.quote.USD.price
+        } else {
+          tonVal = 5.76
+        }
+        setliveTon(tonVal);
+        let linkVal = 0;
+        if (allTransactions && allTransactions.linkPrice && allTransactions.linkPrice.quote && allTransactions.linkPrice.quote.USD) {
+          linkVal = allTransactions.linkPrice.quote.USD.price
+        } else {
+          linkVal = 12.52
+        }
+        setliveLink(linkVal);
+        let dotVal = 0;
+        if (allTransactions && allTransactions.dotPrice && allTransactions.dotPrice.quote && allTransactions.dotPrice.quote.USD) {
+          dotVal = allTransactions.dotPrice.quote.USD.price
+        } else {
+          dotVal = 4.76
+        }
+        setliveDot(dotVal);
+        let nearVal = 0;
+        if (allTransactions && allTransactions.nearPrice && allTransactions.nearPrice.quote && allTransactions.nearPrice.quote.USD) {
+          nearVal = allTransactions.nearPrice.quote.USD.price
+        } else {
+          nearVal = 5.59
+        }
+        setliveNear(nearVal);
+        let usdcVal = 0;
+        if (allTransactions && allTransactions.usdcPrice && allTransactions.usdcPrice.quote && allTransactions.usdcPrice.quote.USD) {
+          usdcVal = allTransactions.usdcPrice.quote.USD.price
+        } else {
+          usdcVal = 0.99
+        }
+        setliveUsdc(usdcVal);
+        let trxVal = 0;
+        if (allTransactions && allTransactions.trxPrice && allTransactions.trxPrice.quote && allTransactions.trxPrice.quote.USD) {
+          trxVal = allTransactions.trxPrice.quote.USD.price
+        } else {
+          trxVal = 0.1531
+        }
+        setliveTrx(trxVal);
         setUserTransactions(allTransactions.Transaction.reverse());
 
         // setUserTransactions(pendingTransactionsLengthArray);
@@ -123,20 +229,8 @@ const PendingTransactions = () => {
   let toggleModal = async (data) => {
     setStatus(data.status);
     setType(data.type);
-    setsingleTransaction({
-      selectedPayment: data.selectedPayment,
-      withdraw: data.withdraw,
-      amount: data.amount,
-      txId: data.txId,
-      fromAddress: data.fromAddress,
-      note: data.note,
-      reference: data.reference,
-      _id: data._id,
-      createdAt: data.createdAt,
-      type: data.type,
-      trxName: data.trxName,
-    });
-    setTimestamp(new Date(data.createdAt).toISOString().slice(0, 16))
+    setsingleTransaction(mapTxToEditState(data));
+    setTimestamp(timestampFromDate(data.createdAt));
     
     setModal(true);
     try {
@@ -157,16 +251,7 @@ const PendingTransactions = () => {
   };
   let toggleModalClose = () => {
     setStatus("");
-    setsingleTransaction({
-      amount: "",
-      txId: "",
-      fromAddress: "",
-      reference: "",
-      note: "",
-      _id: "",
-      createdAt: "",
-      trxName: "",
-    });
+    setsingleTransaction(mapTxToEditState());
     setuserDetail({});
 
     setType("");
@@ -175,56 +260,28 @@ const PendingTransactions = () => {
   };
 
   const approveTransaction = async (txid) => {
-    let amount = txid.amount;
-    let _id = txid._id;
-    let txId = txid.txId;
-    let withdraw = txid.withdraw;
-    let selectedPayment = txid.selectedPayment;
-    let trxName = txid.trxName;
-    let note = txid.note;
-    let reference = txid.reference;
-    let fromAddress = txid.fromAddress;
-    let status = Status;
-    let type = Type;
-    
-    let createdAt = timestamp;
-    // Assuming Status is a string, trim it
-
-    // Check if all required fields are non-empty after trimming
-    if (
-      amount === 0 ||
-      amount === "" ||
-      _id === "" ||
-      txId === "" ||
-      trxName === "" ||
-      fromAddress === "" ||
-      status === "" ||
-      type === ""
-       || error !== ""
-    ) {
-      toast.error("All fields are required.");
+    const validationError = validateAdminTransactionEdit({
+      tx: txid,
+      status: Status,
+      type: Type,
+      createdAt: timestamp,
+      dateError: error,
+    });
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
 
-    let body = {
-      withdraw,
-      selectedPayment,
-      amount,
-      txId,
-      trxName,
-      _id,
-      note,
-      reference,
-      type,
-      fromAddress,
-      status,
-
-      createdAt
-    };
+    const body = buildAdminTransactionUpdateBody({
+      tx: txid,
+      status: Status,
+      type: Type,
+      createdAt: timestamp,
+    });
 
     try {
       setisDisbaled(true);
-      const userCoins = await updateTransactionApi(_id, body);
+      const userCoins = await updateTransactionApi(txid._id, body);
 
       if (userCoins.success) {
         toast.dismiss();
@@ -291,6 +348,77 @@ const PendingTransactions = () => {
 
     // getSignleUser();
   }, []);
+  const filteredGlobalTransactions = useMemo(() => {
+    const rows = [];
+    for (const userCoin of UserTransactions || []) {
+      const ownerUserId = userCoin?.user?._id || userCoin?.user || "";
+      const ownerEmail = userCoin?.user?.email || "";
+      for (const tx of userCoin.transactions || []) {
+        if (!matchesTransactionFilter(tx, filter)) continue;
+        if (
+          !transactionMatchesSearch(
+            { ...tx, ownerEmail },
+            searchQuery
+          )
+        )
+          continue;
+        rows.push({
+          ...tx,
+          ownerUserId,
+          ownerEmail,
+        });
+      }
+    }
+    return rows.sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+  }, [UserTransactions, filter, searchQuery]);
+  const allFlatTransactions = useMemo(() => {
+    const rows = [];
+    for (const userCoin of UserTransactions || []) {
+      const ownerUserId = userCoin?.user?._id || userCoin?.user || "";
+      const ownerEmail = userCoin?.user?.email || "";
+      for (const tx of userCoin.transactions || []) {
+        rows.push({
+          ...tx,
+          ownerUserId,
+          ownerEmail,
+        });
+      }
+    }
+    return rows;
+  }, [UserTransactions]);
+  const priceMap = useMemo(
+    () =>
+      buildAdminPriceMap({
+        liveBtc,
+        liveEth,
+        liveBnb,
+        liveXrp,
+        liveDoge,
+        liveSol,
+        liveTon,
+        liveLink,
+        liveDot,
+        liveNear,
+        liveUsdc,
+        liveTrx,
+      }),
+    [
+      liveBtc,
+      liveEth,
+      liveBnb,
+      liveXrp,
+      liveDoge,
+      liveSol,
+      liveTon,
+      liveLink,
+      liveDot,
+      liveNear,
+      liveUsdc,
+      liveTrx,
+    ]
+  );
   // Copy
   const [timer, setTimer] = useState(null);
   const [copyStatus, setCopyStatus] = useState(false);
@@ -318,30 +446,25 @@ const PendingTransactions = () => {
 
   // Copy
   return (
-    <div className="admin">
-      <div>
-        <div className="bg-muted-100 dark:bg-muted-900 pb-20">
+    <AdminShell><div className={`admin ${styles.page}`}>
+      <div className="bg-muted-100 dark:bg-muted-900 min-h-screen pb-20">
+        <div>
           <SideBar state={Active} toggle={toggleBar} />
-          <div className="bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
-            <div className="mx-auto w-full max-w-7xl">
+          <div className="admin-tx admin-tx-page relative min-h-screen w-full px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
+            <div className="admin-tx-shell mx-auto w-full max-w-7xl">
 
-              <AdminHeader toggle={toggleBar} pageName="Pending Transactions" />
-              <div className>
-                <div>
-                  <div className="mb-6 flex w-full flex-col items-center justify-between gap-4 sm:flex-row">
-                    <div className="flex w-full items-center gap-4 sm:w-auto">
-                      <div className="relative w-full sm:w-auto">
-                        {/**/}
-                        <div className="group/nui-input relative">
+              <AdminHeader toggle={toggleBar} pageName="Transactions" />
+              <div className="admin-tx-sticky">
+                    <div className={`admin-tx-toolbar ${styles.toolbar}`}>
+                    <div className={`admin-tx-search ${styles.search}`}>
                           <input
                             id="ninja-input-8"
                             type="text"
-                            className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded-full"
-                            placeholder="Filter transactions..."
+                            placeholder="Filter transactions or email..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                           />
-                          {/**/}
-                          {/**/}
-                          <div className="text-muted-400 group-focus-within/nui-input:text-primary-500 absolute start-0 top-0 flex items-center justify-center transition-colors duration-300 peer-disabled:cursor-not-allowed peer-disabled:opacity-75 h-10 w-10">
+                          <div className={`admin-tx-search-icon ${styles.searchIcon}`}>
                             <svg
                               data-v-cd102a71
                               xmlns="http://www.w3.org/2000/svg"
@@ -365,235 +488,29 @@ const PendingTransactions = () => {
                               </g>
                             </svg>
                           </div>
-                          {/**/}
-                        </div>
-                      </div>
                     </div>
-                    <div className="flex w-full items-center justify-end gap-4 sm:w-auto" />
-                  </div>
-                  <div>
-                    {/*  */}
-                    {isLoading ? (
-                      <div className="mx-auto loading-pg w-full text-center max-w-xs">
-                        <div className="mx-auto max-w-xs new">
-                          <svg
-                            data-v-cd102a71
-                            xmlns="http://www.w3.org/2000/svg"
-                            xmlnsXlink="http://www.w3.org/1999/xlink"
-                            aria-hidden="true"
-                            role="img"
-                            className="icon h-12 w-12 text-primary-500"
-                            width="1em"
-                            height="1em"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              fill="currentColor"
-                              d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-                              opacity=".25"
-                            />
-                            <path
-                              fill="currentColor"
-                              d="M10.72,19.9a8,8,0,0,1-6.5-9.79A7.77,7.77,0,0,1,10.4,4.16a8,8,0,0,1,9.49,6.52A1.54,1.54,0,0,0,21.38,12h.13a1.37,1.37,0,0,0,1.38-1.54,11,11,0,1,0-12.7,12.39A1.54,1.54,0,0,0,12,21.34h0A1.47,1.47,0,0,0,10.72,19.9Z"
-                            >
-                              <animateTransform
-                                attributeName="transform"
-                                dur="0.75s"
-                                repeatCount="indefinite"
-                                type="rotate"
-                                values="0 12 12;360 12 12"
-                              />
-                            </path>
-                          </svg>
-                        </div>
-                        <div className="mx-auto max-w-sm">
-                          <h4 className="font-heading text-xl font-medium leading-normal leading-normal text-muted-800 mb-1 mt-4 dark:text-white">
-                            Loading Transactions
-                          </h4>
-                          <p className="text-muted-400 font-sans text-sm">
-                            Please wait while we load transactions.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid gap-4 grid-cols-1">
-                        {/*  */}
-                        {UserTransactions.filter(
-                          (Transaction) => !Transaction.isHidden
-                        ).map((transaction) => {
-                          return (
-                            transaction.transactions &&
-                            transaction.transactions.map(
-                              (sinlgeUserTx, index) => {
-                                return sinlgeUserTx.status === "pending" ? (
-                                  <div key={index}>
-                                    <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 rounded-xl p-3">
-                                      <div className="flex w-full items-center gap-2">
-                                        {sinlgeUserTx.type === "deposit" ? (
-                                          <div className="relative inline-flex shrink-0 items-center justify-center outline-none h-12 w-12 nui-mask nui-mask-blob bg-success-100 text-success-400">
-                                            <div className="flex h-full w-full items-center justify-center overflow-hidden text-center transition-all duration-300">
-                                              <svg
-                                                data-v-cd102a71
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                xmlnsXlink="http://www.w3.org/1999/xlink"
-                                                aria-hidden="true"
-                                                role="img"
-                                                className="icon"
-                                                width="1em"
-                                                height="1em"
-                                                viewBox="0 0 24 24"
-                                              >
-                                                <path
-                                                  fill="currentColor"
-                                                  d="M11 20V7.825l-5.6 5.6L4 12l8-8l8 8l-1.4 1.425l-5.6-5.6V20z"
-                                                />
-                                              </svg>
-                                            </div>
-                                          </div>
-                                        ) : sinlgeUserTx.type === "withdraw" ? (
-                                          <div className="relative inline-flex shrink-0 items-center justify-center outline-none h-12 w-12 nui-mask nui-mask-blob bg-danger-100 text-danger-400">
-                                            <div className="flex h-full w-full items-center justify-center overflow-hidden text-center transition-all duration-300">
-                                              <svg
-                                                data-v-cd102a71
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                xmlnsXlink="http://www.w3.org/1999/xlink"
-                                                aria-hidden="true"
-                                                role="img"
-                                                className="icon"
-                                                width="1em"
-                                                height="1em"
-                                                viewBox="0 0 24 24"
-                                              >
-                                                <path
-                                                  fill="currentColor"
-                                                  d="M11 4v12.175l-5.6-5.6L4 12l8 8l8-8l-1.4-1.425l-5.6 5.6V4z"
-                                                />
-                                              </svg>
-                                            </div>
-                                            {/**/}
-                                            {/**/}
-                                          </div>
-                                        ) : (
-                                          ""
-                                        )}
-                                        <div>
-                                          <p
-                                            className="font-heading capitalize text-sm font-medium leading-normal leading-normal"
-                                            tag="h3"
-                                          >
-                                            {sinlgeUserTx.trxName}{" "}
-                                            <span className="text-muted-400 capitalize">
-                                              ({sinlgeUserTx.status})
-                                            </span>
-                                          </p>
-                                          <p className="font-alt text-xs font-normal leading-normal leading-normal text-muted-400 mt-1">
-                                            {sinlgeUserTx.amount.toFixed(8)}
-                                            {`($${(() => {
-                                              switch (sinlgeUserTx.trxName.toLowerCase()) {
-                                                case "bitcoin":
-                                                  return (sinlgeUserTx.amount * liveBtc).toFixed(2);
-                                                case "ethereum":
-                                                  return (sinlgeUserTx.amount * 2640).toFixed(2);
-                                                case "tether":
-                                                  return sinlgeUserTx.amount.toFixed(2);
-                                                case "bnb":
-                                                  return (sinlgeUserTx.amount * 210.25).toFixed(2); // Example price
-                                                case "xrp":
-                                                  return (sinlgeUserTx.amount * 0.5086).toFixed(2); // Example price
-                                                case "dogecoin":
-                                                  return (sinlgeUserTx.amount * 0.5086).toFixed(2); // Example price
-                                                case "solana":
-                                                  return (sinlgeUserTx.amount * 245.01).toFixed(2); // Example price
-                                                case "euro":
-                                                  return (sinlgeUserTx.amount * 1.08).toFixed(2); // Example price
-                                                case "toncoin":
-                                                  return (sinlgeUserTx.amount * 5.76).toFixed(2); // Example price
-                                                case "chainlink":
-                                                  return (sinlgeUserTx.amount * 12.52).toFixed(2); // Example price
-                                                case "polkadot":
-                                                  return (sinlgeUserTx.amount * 4.76).toFixed(2); // Example price
-                                                case "near protocol":
-                                                  return (sinlgeUserTx.amount * 5.59).toFixed(2); // Example price
-                                                case "usd coin":
-                                                  return (sinlgeUserTx.amount * 0.99).toFixed(2); // Example price
-                                                case "tron":
-                                                  return (sinlgeUserTx.amount * 0.1531).toFixed(2); // Example price
-                                                default:
-                                                  return (0).toFixed(2);
-                                              }
-
-                                            })()})`}
-                                          </p>
-                                          <p className="font-alt text-xs font-normal leading-normal leading-normal text-muted-400 md:hidden mt-1">
-                                            At:{" "}
-                                            {new Date(
-                                              sinlgeUserTx.createdAt
-                                            ).toLocaleString()}
-                                          </p>
-                                        </div>
-                                        <div className="ms-auto flex items-center gap-2">
-                                          <p
-                                            className="font-heading text-sm font-medium leading-normal leading-normal me-2 text-gray-500 hidden md:block"
-                                            tag="h3"
-                                          >
-                                            At:{" "}
-                                            {new Date(
-                                              sinlgeUserTx.createdAt
-                                            ).toLocaleString()}
-                                          </p>
-                                          <button
-                                            onClick={() =>
-                                              toggleModal(sinlgeUserTx)
-                                            }
-                                            type="button"
-                                            className="disabled:opacity-60 disabled:cursor-not-allowed hover:shadow-none false false text-muted-700 bg-white border border-muted-300 dark:text-white dark:bg-muted-700 dark:hover:bg-muted-600 dark:border-muted-600 hover:bg-muted-50 rounded-md h-8 w-8 p-1 nui-focus relative inline-flex items-center justify-center space-x-1 font-sans text-sm font-normal leading-5 no-underline outline-none transition-all duration-300"
-                                          >
-                                            <svg
-                                              data-v-cd102a71
-                                              xmlns="http://www.w3.org/2000/svg"
-                                              xmlnsXlink="http://www.w3.org/1999/xlink"
-                                              aria-hidden="true"
-                                              role="img"
-                                              className="icon h-5 w-5"
-                                              width="1em"
-                                              height="1em"
-                                              viewBox="0 0 24 24"
-                                            >
-                                              <g
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                              >
-                                                <path d="M1 12s4-8 11-8s11 8 11 8s-4 8-11 8s-11-8-11-8" />
-                                                <circle cx={12} cy={12} r={3} />
-                                              </g>
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                    {/**/}
-                                  </div>
-                                ) : (
-                                  ""
-                                );
-                              }
-                            )
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                    <TxFilterPills
+                      filter={filter}
+                      onChange={setFilter}
+                      count={isLoading ? undefined : filteredGlobalTransactions.length}
+                    />
+                    </div>
+              </div>
+              <div className="admin-tx-scroll">
+                    <AdminTransactionList
+                      loading={isLoading}
+                      items={filteredGlobalTransactions}
+                      allTransactions={allFlatTransactions}
+                      prices={priceMap}
+                      onOpen={toggleModal}
+                    />
               </div>
             </div>
           </div>
         </div>
       </div>
       {modal && (
-        <div>
+        <div className="admin-tx">
           <div
             className="relative z-[9999]"
             id="headlessui-dialog-55"
@@ -601,18 +518,18 @@ const PendingTransactions = () => {
             aria-modal="true"
             data-headlessui-state="open"
           >
-            <div className="bg-muted-800/70 dark:bg-muted-900/80 fixed inset-0" />
+            <div className="admin-tx-modal-overlay bg-black/70 fixed inset-0" />
             <div className="fixed inset-0 overflow-x-auto">
               <div className="flex min-h-full items-center justify-center p-4 text-center">
                 <div
                   id="headlessui-dialog-panel-58"
                   data-headlessui-state="open"
-                  className="dark:bg-muted-800 w-full bg-white text-left align-middle shadow-xl transition-all rounded-lg max-w-2xl"
+                  className="admin-tx-modal"
                 >
-                  <div className="flex w-full items-center justify-between p-4 md:p-6">
+                  <div className="admin-tx-modal-header flex w-full items-center justify-between">
                     <div className="lg:flex lg:items-center lg:justify-between">
                       <div className="min-w-0 flex-1">
-                        <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight dark:text-white">
+                        <h2 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight">
                           Transaction Details
                         </h2>
                         <div className="mt-1 flex flex-col sm:mt-0 sm:flex-row sm:flex-wrap sm:space-x-6">
@@ -639,7 +556,7 @@ const PendingTransactions = () => {
                           <span className="block">
                             <Link
                               to={`/admin/user/${userDetail._id}/general`}
-                              className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700 dark:hover:text-gray-200 dark:ring-gray-600 dark:ring-inset"
+                              className="admin-tx-profile-link"
                             >
                               <svg
                                 className="-ml-0.5 mr-1.5 h-5 w-5 text-gray-400"
@@ -662,7 +579,7 @@ const PendingTransactions = () => {
                     <button
                       onClick={toggleModalClose}
                       type="button"
-                      className="flex h-9 w-9 items-center justify-center transition-colors duration-300 disabled:opacity-30 hover:bg-muted-100 dark:hover:bg-muted-700 text-muted-700 dark:text-muted-50 rounded-full"
+                      className="admin-tx-modal-x"
                     >
                       <svg
                         aria-hidden="true"
@@ -680,8 +597,12 @@ const PendingTransactions = () => {
                       </svg>
                     </button>
                   </div>
-                  <div className="p-4 md:p-6 overflow-auto">
+                  <div className="admin-tx-modal-body">
                     <dl className="grid grid-cols-1 gap-x-4 gap-y-4 md:gap-y-8 sm:grid-cols-2 mb-3">
+                      <AdminTransactionEditFields
+                        transaction={singleTransaction}
+                        onChange={setsingleTransaction}
+                      />
                       <div className="sm:col-span-1">
                         <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
                           Transaction ID
@@ -690,17 +611,19 @@ const PendingTransactions = () => {
                           <a
                             href="javascript:void(0)"
                             className="font-medium inline-flex text-gray-900 dark:text-white flex items-center hover:text-gray-600 dark:hover:text-gray-400 text-xs"
-                            onClick={() =>
-                              handleCopyToClipboard(singleTransaction.txId)
-                            }
                           >
                             {" "}
-                            <Truncate
-                              text={singleTransaction._id}
-                              offset={6}
-                              width="100"
+                            <input
+                              type="text"
+                              className="border  py-1 p-3"
+                              onChange={handleInput}
+                              value={singleTransaction.txId || ""}
+                              name="txId"
                             />
                             <svg
+                              onClick={() =>
+                                handleCopyToClipboard(singleTransaction.txId)
+                              }
                               data-v-cd102a71
                               xmlns="http://www.w3.org/2000/svg"
                               xmlnsXlink="http://www.w3.org/1999/xlink"
@@ -836,7 +759,7 @@ const PendingTransactions = () => {
                               type="text"
                               className="border  py-1 p-3"
                               onChange={handleInput}
-                              value={singleTransaction.fromAddress}
+                              value={singleTransaction.fromAddress || ""}
                               name="fromAddress"
                             />
                             <svg
@@ -891,8 +814,8 @@ const PendingTransactions = () => {
                                 type="text"
                                 className="border  py-1 p-3"
                                 onChange={handleInput}
-                                value={singleTransaction.selectedPayment}
-                                readOnly={true}
+                                value={singleTransaction.selectedPayment || ""}
+                                name="selectedPayment"
                               />
                               <svg
                                 onClick={() =>
@@ -946,12 +869,12 @@ const PendingTransactions = () => {
                                 type="text"
                                 className="border  py-1 p-3"
                                 onChange={handleInput}
-                                value={singleTransaction.txId}
-                                name="txId"
+                                value={singleTransaction.selectedPayment || ""}
+                                name="selectedPayment"
                               />
                               <svg
                                 onClick={() =>
-                                  handleCopyToClipboard(singleTransaction.txId)
+                                  handleCopyToClipboard(singleTransaction.selectedPayment)
                                 }
                                 data-v-cd102a71
                                 xmlns="http://www.w3.org/2000/svg"
@@ -999,8 +922,13 @@ const PendingTransactions = () => {
                               <span>
                                 <input
                                   type="number"
+                                  step="any"
                                   onChange={handleInput}
-                                  value={Math.abs(singleTransaction.amount)} // Convert to positive value
+                                  value={
+                                    Number.isFinite(Number(singleTransaction.amount))
+                                      ? Math.abs(Number(singleTransaction.amount))
+                                      : ""
+                                  }
                                   name="amount"
                                   className="border w-102 py-1 p-3"
                                 />
@@ -1033,14 +961,14 @@ const PendingTransactions = () => {
                                     ? (
                                       Math.abs(
                                         parseFloat(singleTransaction.amount)
-                                      ) * 245.01 || 0
+                                      ) * (liveSol || 245.01) || 0
                                     ).toFixed(2)
                                     :
                                     singleTransaction.trxName.toLowerCase() === "ethereum"
                                       ? (
                                         Math.abs(
                                           parseFloat(singleTransaction.amount)
-                                        ) * 2640.86 || 0
+                                        ) * (liveEth || 2640.86) || 0
                                       ).toFixed(2)
                                       : singleTransaction.trxName.toLowerCase() === "tether"
                                         ? (
@@ -1052,63 +980,63 @@ const PendingTransactions = () => {
                                           ? (
                                             Math.abs(
                                               parseFloat(singleTransaction.amount)
-                                            ) * 210.25 || 0
-                                          ).toFixed(2) // Example price
+                                            ) * (liveBnb || 210.25) || 0
+                                          ).toFixed(2)
                                           : singleTransaction.trxName.toLowerCase() === "xrp"
                                             ? (
                                               Math.abs(
                                                 parseFloat(singleTransaction.amount)
-                                              ) * 0.5086 || 0
-                                            ).toFixed(2) // Example price
+                                              ) * (liveXrp || 0.5086) || 0
+                                            ).toFixed(2)
                                             : singleTransaction.trxName.toLowerCase() === "dogecoin"
                                               ? (
                                                 Math.abs(
                                                   parseFloat(singleTransaction.amount)
-                                                ) * 0.1163 || 0
-                                              ).toFixed(2) // Example price
+                                                ) * (liveDoge || 0.1163) || 0
+                                              ).toFixed(2)
                                               : singleTransaction.trxName.toLowerCase() === "toncoin"
                                                 ? (
                                                   Math.abs(
                                                     parseFloat(singleTransaction.amount)
-                                                  ) * 5.76 || 0
-                                                ).toFixed(2) // Example price
+                                                  ) * (liveTon || 5.76) || 0
+                                                ).toFixed(2)
                                                 : singleTransaction.trxName.toLowerCase() === "chainlink"
                                                   ? (
                                                     Math.abs(
                                                       parseFloat(singleTransaction.amount)
-                                                    ) * 12.52 || 0
-                                                  ).toFixed(2) // Example price
+                                                    ) * (liveLink || 12.52) || 0
+                                                  ).toFixed(2)
                                                   : singleTransaction.trxName.toLowerCase() === "polkadot"
                                                     ? (
                                                       Math.abs(
                                                         parseFloat(singleTransaction.amount)
-                                                      ) * 4.76 || 0
-                                                    ).toFixed(2) // Example price
+                                                      ) * (liveDot || 4.76) || 0
+                                                    ).toFixed(2)
                                                     : singleTransaction.trxName.toLowerCase() === "near protocol"
                                                       ? (
                                                         Math.abs(
                                                           parseFloat(singleTransaction.amount)
-                                                        ) * 5.59 || 0
-                                                      ).toFixed(2) // Example price
+                                                        ) * (liveNear || 5.59) || 0
+                                                      ).toFixed(2)
                                                       : singleTransaction.trxName.toLowerCase() === "usd coin"
                                                         ? (
                                                           Math.abs(
                                                             parseFloat(singleTransaction.amount)
-                                                          ) * 0.99 || 0
-                                                        ).toFixed(2) // Example price
+                                                          ) * (liveUsdc || 0.99) || 0
+                                                        ).toFixed(2)
                                                         : singleTransaction.trxName.toLowerCase() === "tron"
                                                           ? (
                                                             Math.abs(
                                                               parseFloat(singleTransaction.amount)
-                                                            ) * 0.1531 || 0
-                                                          ).toFixed(2) // Example price
+                                                            ) * (liveTrx || 0.1531) || 0
+                                                          ).toFixed(2)
                                                           : (0).toFixed(2)
                               })`}</span>
 
                             <svg
                               onClick={() =>
                                 handleCopyToClipboard(
-                                  singleTransaction.amount.toFixed(8)
+                                  Number(singleTransaction.amount || 0).toFixed(8)
                                 )
                               }
                               data-v-cd102a71
@@ -1209,7 +1137,7 @@ const PendingTransactions = () => {
                                         Completed
                                       </div>
                                     </>
-                                  ) : Status === "failed" ? (
+                                  ) : Status === "failed" || Status === "rejected" ? (
                                     <>
                                       <div className="relative inline-flex shrink-0 items-center justify-center h-8 w-8 rounded-lg -ms-2 me-2 !h-6 !w-6">
                                         <svg
@@ -1231,9 +1159,11 @@ const PendingTransactions = () => {
                                       </div>
 
                                       <div className="truncate text-left">
-                                        Failed
+                                        {Status === "rejected" ? "Rejected" : "Failed"}
                                       </div>
                                     </>
+                                  ) : Status ? (
+                                    <div className="truncate text-left capitalize">{Status}</div>
                                   ) : (
                                     <>
                                       <span className="border-muted-300 dark:border-muted-700 pointer-events-none absolute inset-y-0 end-0 flex items-center justify-center border-l w-10">
@@ -1381,6 +1311,41 @@ const PendingTransactions = () => {
                                     </div>
                                     {/**/}
                                   </li>
+                                  <li
+                                    onClick={() => setStatus("rejected")}
+                                    className="relative flex cursor-pointer select-none items-center px-3 py-2 rounded"
+                                    id="headlessui-listbox.option-138"
+                                    role="option"
+                                    tabIndex={-1}
+                                    aria-selected="false"
+                                  >
+                                    <div className="relative inline-flex shrink-0 items-center justify-center h-10 w-10 rounded-lg text-muted-500 dark:text-muted-400 -ms-2 me-1">
+                                      <svg
+                                        data-v-cd102a71
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        xmlnsXlink="http://www.w3.org/1999/xlink"
+                                        aria-hidden="true"
+                                        role="img"
+                                        className="icon h-5 w-5  text-primary-500"
+                                        width="1em"
+                                        height="1em"
+                                        viewBox="0 0 256 256"
+                                      >
+                                        <path
+                                          fill="currentColor"
+                                          d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128L50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z"
+                                        />
+                                      </svg>
+                                    </div>
+                                    <div>
+                                      <h4 className="font-heading text-sm font-normal leading-normal leading-normal text-muted-800 block truncate dark:text-white">
+                                        Rejected
+                                      </h4>
+                                      <p className="font-sans text-xs font-normal leading-normal leading-normal text-muted-400">
+                                        Rejected
+                                      </p>
+                                    </div>
+                                  </li>
                                 </ul>
                               )}
 
@@ -1520,7 +1485,7 @@ const PendingTransactions = () => {
                           <input
                             type="text"
                             onChange={handleInput}
-                            value={singleTransaction.note}
+                            value={singleTransaction.note || ""}
                             name="note"
                             className="border w-1001   py-1 p-3"
                           />
@@ -1539,47 +1504,37 @@ const PendingTransactions = () => {
                           <input
                             type="text"
                             onChange={handleInput}
-                            value={singleTransaction.reference}
+                            value={singleTransaction.reference || ""}
                             name="reference"
                             className="border w-1001   py-1 p-3"
                           />
                         </a>
                       </dd>
                     </div>
-                    <div
-                      className="flex  justify-center mt-5
-                  "
-                    >
+                  </div>
+                  <div className="admin-tx-modal-footer">
+                        <button
+                          onClick={toggleModalClose}
+                          data-v-71bb21a6
+                          type="button"
+                          className="admin-tx-btn-close"
+                        >
+                          Close
+                        </button>
                       <button
                         onClick={() => approveTransaction(singleTransaction)}
                         disabled={isDisbaled}
-                        className="is-button rounded bg-primary-500 py-1 p-3 dark:bg-primary-500 hover:enabled:bg-primary-400 dark:hover:enabled:bg-primary-400 text-white hover:enabled:shadow-lg hover:enabled:shadow-primary-500/50 dark:hover:enabled:shadow-primary-800/20 focus-visible:outline-primary-400/70 focus-within:outline-primary-400/70 focus-visible:bg-primary-500 active:enabled:bg-primary-500 dark:focus-visible:outline-primary-400 dark:focus-within:outline-primary-400 dark:focus-visible:bg-primary-500 dark:active:enabled:bg-primary-500"
+                        className="admin-tx-btn-update"
                       >
                         Update
                       </button>
                       <button
                         onClick={() => deleteTransaction(singleTransaction)}
                         disabled={isDisbaled}
-                        className="is-button rounded bg-danger-500 ms-2 py-1 p-3 dark:bg-danger-500 hover:enabled:bg-danger-400 dark:hover:enabled:bg-danger-400 text-white hover:enabled:shadow-lg hover:enabled:shadow-danger-500/50 dark:hover:enabled:shadow-danger-800/20 focus-visible:outline-danger-400/70 focus-within:outline-danger-400/70 focus-visible:bg-danger-500 active:enabled:bg-danger-500 dark:focus-visible:outline-danger-400 dark:focus-within:outline-danger-400 dark:focus-visible:bg-danger-500 dark:active:enabled:bg-danger-500"
+                        className="admin-tx-btn-delete"
                       >
                         Delete
                       </button>
-                    </div>
-                  </div>
-
-                  <div className="flex w-full items-center gap-x-2 justify-end">
-                    <div className="p-4 md:p-6">
-                      <div className="flex gap-x-2">
-                        <button
-                          onClick={toggleModalClose}
-                          data-v-71bb21a6
-                          type="button"
-                          className="is-button rounded is-button-default"
-                        >
-                          Close
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1588,6 +1543,7 @@ const PendingTransactions = () => {
         </div>
       )}
     </div>
+    </AdminShell>
   );
 };
 

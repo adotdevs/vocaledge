@@ -41,6 +41,7 @@ import {
     hardDeleteAllLeadsApiWithProgress,
 } from "../../../Api/Service";
 import Sidebar from "./Sidebar.js";
+import CrmAppBarActions from './components/CrmAppBarActions';
 import { toast } from "react-toastify";
 
 const RecycleBin = () => {
@@ -341,7 +342,7 @@ const RecycleBin = () => {
     };
 
     return (
-        <Box sx={{ display: "block", height: "100vh", bgcolor: "grey.50" }}>
+        <Box sx={{ display: "block", height: "100vh", bgcolor: "background.default" }}>
             <Box>
                 <Sidebar
                     setisMobileMenu={setisMobileMenu}
@@ -378,6 +379,9 @@ const RecycleBin = () => {
                                 <Typography variant="h5" fontWeight="bold" color="text.primary">Recycle Bin</Typography>
                                 <Typography variant="body2" color="text.secondary">Deleted leads are kept for 30 days</Typography>
                             </Box>
+                        </Box>
+                        <Box sx={{ display: "flex", alignItems: "center" }}>
+                            <CrmAppBarActions />
                         </Box>
                     </Toolbar>
                 </AppBar>

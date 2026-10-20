@@ -6,6 +6,9 @@ import SidebarExtraContent from "./SidebarExtraContent";
 import { logoutApi } from "../../../Api/Service";
 import { useSignOut } from 'react-auth-kit';
 import { toast } from "react-toastify";
+import { useDispatch, useSelector } from "react-redux";
+import { navtoggle } from "../../../store/actions/AuthActions";
+import "./SidebarNav.css";
 
 const reducer = (previousState, updatedState) => ({
   ...previousState,
@@ -20,16 +23,28 @@ const SideBar = () => {
   let Navigate = useNavigate();
   let signOut = useSignOut();
   const location = useLocation();
-  const { ChangeIconSidebar } = useContext(ThemeContext);
+  const dispatch = useDispatch();
+  const sideMenu = useSelector((state) => state.sideMenu);
+  const { ChangeIconSidebar, windowWidth } = useContext(ThemeContext);
   let Latest = new Date();
 
   const [state, setState] = useReducer(reducer, initialState);
 
+  const closeMobileSidebar = () => {
+    if (windowWidth <= 768 && sideMenu) {
+      dispatch(navtoggle());
+    }
+  };
+
+  const handleMenuClick = () => {
+    closeMobileSidebar();
+  };
+
   useEffect(() => {
     const currentPath = location.pathname;
     MenuList.forEach((item) => {
-      // Check if path starts with the item's route (e.g., /transactions or /transactions/:id)
-      if (currentPath.startsWith(item.to)) {
+      const itemPath = String(item.to || "").split("?")[0];
+      if (!item.external && itemPath && currentPath.startsWith(itemPath)) {
         setState({ active: item.title });
       }
     });
@@ -61,7 +76,15 @@ const SideBar = () => {
   const MenuList = useMenuList();
 
   return (
-    <div onMouseEnter={() => ChangeIconSidebar(true)} onMouseLeave={() => ChangeIconSidebar(false)} className="dlabnav">
+    <>
+      {sideMenu && windowWidth <= 768 && (
+        <div
+          className="sidebar-mobile-overlay"
+          onClick={closeMobileSidebar}
+          aria-hidden="true"
+        />
+      )}
+      <div onMouseEnter={() => ChangeIconSidebar(true)} onMouseLeave={() => ChangeIconSidebar(false)} className="dlabnav">
       <SidebarExtraContent />
       {/* <span className="main-menu">Main Menu</span> */}
       <div className="menu-scroll new-bg-dark">
@@ -72,16 +95,28 @@ const SideBar = () => {
                 key={index}
                 className={
                   state.active === item.title ||
-                    location.pathname.startsWith(item.to) ? "mm-active" : ""
+                    (!item.external && location.pathname.startsWith(String(item.to || "").split("?")[0])) ? "mm-active" : ""
                 }
               >
-                <Link
-                  to={item.to}
-                  onClick={item.title === "Logout" ? onLogout : undefined} // Handle Logout click
-                >
-                  {item.iconStyle}
-                  <span className="nav-text">{item.title}</span>
-                </Link>
+                {item.external ? (
+                  <a
+                    href={item.to}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => handleMenuClick(item)}
+                  >
+                    {item.iconStyle}
+                    <span className="nav-text">{item.title}</span>
+                  </a>
+                ) : (
+                  <Link
+                    to={item.to}
+                    onClick={() => handleMenuClick(item)}
+                  >
+                    {item.iconStyle}
+                    <span className="nav-text">{item.title}</span>
+                  </Link>
+                )}
               </li>
             ))}
           </ul>
@@ -98,10 +133,24 @@ const SideBar = () => {
             </div>
             <div className="info">
               <p>Contact our support</p>
-              <Link to={"/support"} className="btn bg-white text-black w-75 btn-sm">
+              <Link to={"/support"} onClick={closeMobileSidebar} className="btn bg-white text-black w-75 btn-sm">
                 Support
               </Link>
             </div>
+          </div>
+
+          <div className="sidebar-logout-wrap">
+            <button
+              type="button"
+              className="sidebar-logout-btn"
+              onClick={() => {
+                closeMobileSidebar();
+                onLogout();
+              }}
+            >
+              <i className="material-symbols-outlined">logout</i>
+              <span className="nav-text">Logout</span>
+            </button>
           </div>
 
           <br />
@@ -113,6 +162,7 @@ const SideBar = () => {
         </div>
       </div>
     </div>
+    </>
   );
 };
 

@@ -1,6 +1,5 @@
 import React, { useContext, useEffect, useState } from "react";
 import Nav from "../../layouts/nav";
-import RightWalletBar from "../../layouts/nav/RightWalletBar";
 import Footer from "../../layouts/Footer";
 import { ThemeContext } from "../../../context/ThemeContext";
 import PaymentMethods from "../report/PaymentMethods";
@@ -12,7 +11,7 @@ import KycSec from "../dashboard/KycSec.js";
 import { Spinner } from "react-bootstrap";
 
 const Kyc = () => {
-  const { sidebariconHover, headWallet } = useContext(ThemeContext);
+  const { sidebariconHover } = useContext(ThemeContext);
   const sideMenu = useSelector((state) => state.sideMenu);
   const authUser = useAuthUser();
   const Navigate = useNavigate();
@@ -31,12 +30,12 @@ const Kyc = () => {
         <Spinner animation="border" variant="primary" />
         <div style={{ opacity: 0, position: "absolute", left: "-2000%" }}><KycSec isLoading={isLoading} setisLoading={setisLoading} /></div>
       </div> : <div
-        id="main-wrapper "
-        className={`show main-kyc wallet-open ${headWallet ? "" : "active"} ${sidebariconHover ? "iconhover-toggle" : ""
-          } ${sideMenu ? "menu-toggle" : ""}`}
+        id="main-wrapper"
+          className={`show ${sidebariconHover ? "iconhover-toggle" : ""} ${
+            sideMenu ? "menu-toggle" : ""
+          }`}
       >
         <Nav />
-        {/* <RightWalletBar /> */}
         <div className="content-body new-bg-light">
           <div
             className="container-fluid"

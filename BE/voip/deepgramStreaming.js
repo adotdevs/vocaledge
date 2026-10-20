@@ -62,7 +62,7 @@ class DeepgramStreaming extends EventEmitter {
                 smart_format: true,
                 interim_results: true,
                 encoding: 'linear16',
-                sample_rate: 8000,
+                sample_rate: 16000, // HD Voice: 16kHz for high-quality audio
                 channels: 1
             };
             
@@ -214,11 +214,33 @@ class DeepgramStreaming extends EventEmitter {
      */
     handleTranscript(data) {
         try {
-            const transcript = data.channel?.alternatives?.[0]?.transcript || '';
-            const isFinal = data.is_final || false;
-            const confidence = data.channel?.alternatives?.[0]?.confidence || 0;
+            // Handle different possible data structures
+            let transcript = '';
+            let isFinal = false;
+            let confidence = 0;
+            
+            // Try standard structure first
+            if (data.channel?.alternatives?.[0]?.transcript) {
+                transcript = data.channel.alternatives[0].transcript;
+                confidence = data.channel.alternatives[0].confidence || 0;
+                isFinal = data.is_final || false;
+            } else if (data.alternatives?.[0]?.transcript) {
+                // Alternative structure
+                transcript = data.alternatives[0].transcript;
+                confidence = data.alternatives[0].confidence || 0;
+                isFinal = data.is_final || false;
+            } else if (data.transcript) {
+                // Simple structure
+                transcript = data.transcript;
+                confidence = data.confidence || 0;
+                isFinal = data.is_final || false;
+            }
 
-            if (!transcript) {
+            if (!transcript || transcript.trim().length === 0) {
+                // Log for debugging when we receive data but no transcript
+                if (data && typeof data === 'object') {
+                    console.log(`⚠️ Deepgram Results received but no transcript found. Data structure: ${JSON.stringify(data).substring(0, 200)}`);
+                }
                 return; // No transcript in this result
             }
 
@@ -314,7 +336,7 @@ class DeepgramStreaming extends EventEmitter {
 
     /**
      * Send audio chunk to Deepgram
-     * @param {Buffer} audioChunk - PCM audio data (16-bit, 8kHz or 16kHz, mono)
+     * @param {Buffer} audioChunk - PCM audio data (16-bit, 16kHz HD Voice, mono)
      */
     sendAudioChunk(audioChunk) {
         if (!this.isConnected || !this.connection) {
@@ -521,9 +543,13 @@ class DeepgramStreaming extends EventEmitter {
 
     /**
      * Get current transcript (final or partial)
+     * @param {boolean} finalOnly - If true, only return final transcript (not partial)
      * @returns {string}
      */
-    getCurrentTranscript() {
+    getCurrentTranscript(finalOnly = false) {
+        if (finalOnly) {
+            return this.finalTranscript || '';
+        }
         return this.finalTranscript || this.partialTranscript;
     }
 

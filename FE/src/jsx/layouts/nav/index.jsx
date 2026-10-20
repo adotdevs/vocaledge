@@ -7,6 +7,8 @@ import ChatBox from "../ChatBox";
 import bgimg from '../../../assets/images/bg-1.png';
 import { useAuthUser } from "react-auth-kit";
 import { useNavigate } from "react-router-dom";
+import { getRestrictionsApi } from "../../../Api/Service";
+import { hasWalletAccess } from "../../../utils/walletAccess";
 
 const JobieNav = ({ title, onClick: ClickToAddEvent, onClick2, onClick3 }) => {
   const [toggle, setToggle] = useState("");
@@ -17,6 +19,49 @@ const JobieNav = ({ title, onClick: ClickToAddEvent, onClick2, onClick3 }) => {
   const authUser = useAuthUser();
   const Navigate = useNavigate();
 
+  // DISABLED: Permission checking is disabled to prevent flickering
+  // useEffect(() => {
+  //   const checkAccessAndRedirect = async () => {
+  //     const user = authUser()?.user;
+  //     if (!user) {
+  //       return;
+  //     }
+
+  //     if (user.role === "user") {
+  //       // Users stay on wallet pages if they have access (checked by route protection)
+  //       return;
+  //     } else if (user.role === "admin" || user.role === "subadmin") {
+  //       // Check wallet access for admin/subadmin
+  //       try {
+  //         const globalSettingsResponse = await getRestrictionsApi();
+  //         const globalSettings = globalSettingsResponse.success 
+  //           ? globalSettingsResponse.data 
+  //           : { walletEnabled: true };
+          
+  //         const hasWallet = hasWalletAccess(user, globalSettings);
+          
+  //         // If no wallet access, redirect to CRM (if they have CRM access)
+  //         if (!hasWallet) {
+  //           const hasCrmAccess = (user.role === "admin" && user.adminPermissions?.accessCrm === true) ||
+  //             (user.role === "subadmin" && user.permissions?.accessCrm === true);
+            
+  //           if (hasCrmAccess) {
+  //             Navigate("/admin/dashboard/crm");
+  //           } else {
+  //             Navigate("/auth/login");
+  //           }
+  //           return;
+  //         }
+          
+  //         // If they have wallet access, let them stay (don't auto-redirect to admin dashboard)
+  //       } catch (error) {
+  //         console.error("Error checking access:", error);
+  //       }
+  //     }
+  //   };
+
+  //   checkAccessAndRedirect();
+  // }, []);
   useEffect(() => {
     if (authUser().user.role === "user") {
       return;

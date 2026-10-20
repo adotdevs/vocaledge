@@ -1,0 +1,239 @@
+.euroAccountPage {
+  min-width: 0;
+}
+
+.heroCard {
+  background: color-mix(in srgb, var(--admin-accent) 16%, var(--admin-surface-1));
+  border: 1px solid var(--admin-border);
+  border-radius: 20px;
+  padding: 28px;
+  color: var(--admin-text-primary);
+  box-shadow: var(--admin-shadow);
+}
+
+.heroTitle {
+  margin: 0 0 8px;
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--admin-text-primary) !important;
+}
+
+.heroSubtitle {
+  margin: 0;
+  color: var(--admin-text-secondary) !important;
+  max-width: 720px;
+  line-height: 1.6;
+}
+
+.panel {
+  background: var(--admin-surface-1);
+  border: 1px solid var(--admin-border);
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.panelHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.panelTitle {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+}
+
+.panelSubtitle {
+  margin: 6px 0 0;
+  color: var(--admin-text-secondary);
+  font-size: 0.925rem;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.formFieldFull {
+  grid-column: 1 / -1;
+}
+
+.formLabel {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--admin-text-secondary);
+}
+
+/* Override global .admin input/textarea reset (padding: 0; margin: 0) */
+:global(.admin) .euroAccountPage .formInput,
+:global(.admin) .euroAccountPage .formTextarea {
+  width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--admin-text-primary);
+  background-color: var(--admin-surface-2);
+  background-image: none;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+:global(.admin) .euroAccountPage .formInput:focus,
+:global(.admin) .euroAccountPage .formTextarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+:global(.admin) .euroAccountPage .formTextarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.actionsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+/* Override global .admin button { background: transparent; padding: 0 } reset */
+:global(.admin) .euroAccountPage .btnPrimary,
+:global(.admin) .euroAccountPage .btnSecondary,
+:global(.admin) .euroAccountPage .btnDanger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-family: inherit;
+  line-height: 1.2;
+  text-transform: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+:global(.admin) .euroAccountPage .btnPrimary {
+  color: #ffffff !important;
+  background-color: #2563eb !important;
+  background-image: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.24);
+}
+
+:global(.admin) .euroAccountPage .btnPrimary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+:global(.admin) .euroAccountPage .btnSecondary {
+  color: var(--admin-text-primary) !important;
+  background-color: var(--admin-surface-1) !important;
+  border-color: var(--admin-border-strong) !important;
+}
+
+:global(.admin) .euroAccountPage .btnSecondary:hover:not(:disabled) {
+  background-color: var(--admin-surface-2) !important;
+}
+
+:global(.admin) .euroAccountPage .btnDanger {
+  color: #be123c !important;
+  background-color: #fff1f2 !important;
+  border-color: #fecdd3 !important;
+}
+
+:global(.admin) .euroAccountPage .btnPrimary:disabled,
+:global(.admin) .euroAccountPage .btnSecondary:disabled,
+:global(.admin) .euroAccountPage .btnDanger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.detailsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.detailItem {
+  background: var(--admin-surface-2);
+  border: 1px solid var(--admin-border);
+  border-radius: 14px;
+  padding: 16px;
+  text-align: left;
+}
+
+.detailItemFull {
+  grid-column: 1 / -1;
+}
+
+.detailLabel {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.detailValue {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--admin-text-primary);
+  word-break: break-word;
+  text-align: left;
+}
+
+.metaText {
+  margin-top: 16px;
+  color: #64748b;
+  font-size: 0.875rem;
+}
+
+.loadingWrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 280px;
+}
+
+@media (max-width: 768px) {
+  .formGrid,
+  .detailsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .heroCard,
+  .panel {
+    padding: 20px;
+  }
+}

@@ -1,40 +1,59 @@
 import React, { useEffect, useState } from "react";
+import AdminSkeleton from "../theme/AdminSkeleton";
+import skel from "../theme/AdminSkeleton.module.css";
 import SideBar from "../../layouts/AdminSidebar/Sidebar";
 import UserSideBar from "./UserSideBar";
-import Log from "../../../assets/images/img/log.jpg";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthUser } from "react-auth-kit";
 import {
-  createTransactionApi,
-  getCoinsApi,
+  deleteKycDocumentApi,
+  getKycDocumentApi,
   patchCoinsApi,
   signleUsersApi,
-  updateCoinAddressApi,
   updateKycApi,
 } from "../../../Api/Service";
+import {
+  getKycDocumentPreviewUrl,
+  isCloudinaryPdfUrl,
+} from "../../../utils/cloudinaryKyc";
 import { toast } from "react-toastify";
+import su from "./SingleUserLayout.module.css";
 import AdminHeader from "../adminHeader";
-const UserVerifications = () => {
-  let { id } = useParams();
-  let authUser = useAuthUser();
-  let Navigate = useNavigate();
-  const [isDisable, setisDisable] = useState(false);
-  const [UserData, setUserData] = useState({});
+import MemberShell from "./hub/MemberShell";
 
+const ShieldIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6">
+    <path d="M12 13q1.45 0 2.475-1.025T15.5 9.5q0-1.45-1.025-2.475T12 6q-1.45 0-2.475 1.025T8.5 9.5q0 1.45 1.025 2.475T12 13m0 6.9q1.475-.475 2.613-1.487t1.987-2.288q-1.075-.55-2.238-.837T12 15q-1.2 0-2.363.288t-2.237.837q.85 1.275 1.988 2.288T12 19.9m0 2q-.175 0-.325-.025t-.3-.075Q8 20.675 6 17.638T4 11.1V6.375q0-.625.363-1.125t.937-.725l6-2.25q.35-.125.7-.125t.7.125l6 2.25q.575.225.938.725T20 6.375V11.1q0 3.5-2 6.538T12.625 21.8q-.15.05-.3.075T12 21.9" />
+  </svg>
+);
+
+const DownloadIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+  </svg>
+);
+
+const DocumentIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-8 w-8 text-muted-400">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+  </svg>
+);
+
+const UserVerifications = ({ embedded = false }) => {
+  const { id } = useParams();
+  const authUser = useAuthUser();
+  const Navigate = useNavigate();
+  const [isDisable, setisDisable] = useState(false);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [UserData, setUserData] = useState({});
+  const [previewErrors, setPreviewErrors] = useState({ cnic: false, bill: false });
   const [Active, setActive] = useState(false);
 
-  let toggleBar = () => {
-    if (Active === true) {
-      setActive(false);
-    } else {
-      setActive(true);
-    }
-  };
+  const toggleBar = () => setActive((prev) => !prev);
 
   const getSignleUser = async () => {
     try {
       const signleUser = await signleUsersApi(id);
-
       if (signleUser.success) {
         setUserData(signleUser.signleUser);
       } else {
@@ -43,27 +62,21 @@ const UserVerifications = () => {
       }
     } catch (error) {
       toast.dismiss();
-      toast.error(error);
+      toast.error(error?.message || "Failed to load user");
     } finally {
       setisDisable(false);
+      setIsPageLoading(false);
     }
   };
-  const updateKyc = async (e) => {
-    try {
-      let status;
-      if (e === true) {
-        status = "completed";
-      } else if (e === false) {
-        status = "pending";
-      }
-      setisDisable(true);
-      let body = {
-        kyc: e,
-        status,
-      };
-      const signleUser = await updateKycApi(id, body);
 
-      await patchCoinsApi(id);if (signleUser.success) {
+  const updateKyc = async (approve) => {
+    try {
+      setisDisable(true);
+      const body = { kyc: approve };
+      const signleUser = await updateKycApi(id, body);
+      await patchCoinsApi(id);
+
+      if (signleUser.success) {
         toast.dismiss();
         toast.success(signleUser.msg);
         getSignleUser();
@@ -74,235 +87,321 @@ const UserVerifications = () => {
       }
     } catch (error) {
       toast.dismiss();
-      toast.error(error);
+      toast.error(error?.message || "Failed to update KYC");
       setisDisable(false);
-    } finally {
     }
   };
 
-  // Transaction
-  const openCnic = () => {
-    // Create a new window/tab with the data URL
-    const newTab = window.open();
-    newTab.document.write(
-      '<html><head><meta name="viewport" content="width=device-width, minimum-scale=0.1"><title>Base64 Image</title></head><body style="margin: 0px; height: 100%; background-color: rgb(14, 14, 14);"><img style="display: block;-webkit-user-select: none;margin: auto;background-color: hsl(0, 0%, 90%);transition: background-color 300ms;" src="' +
-      UserData.submitDoc.cnic +
-      '" alt="Base64 Image"></body></html>'
+  const deleteKycDocument = async (docType) => {
+    const label = docType === "cnic" ? "Government ID" : "Proof of Address";
+    if (!window.confirm(`Delete ${label}? This removes the file from Cloudinary and cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setisDisable(true);
+      const result = await deleteKycDocumentApi(id, docType);
+
+      if (result.success) {
+        toast.success(result.msg || "Document deleted");
+        setPreviewErrors((prev) => ({ ...prev, [docType]: false }));
+        getSignleUser();
+      } else {
+        toast.error(result.msg || "Failed to delete document");
+        setisDisable(false);
+      }
+    } catch (error) {
+      toast.error(error?.message || "Failed to delete document");
+      setisDisable(false);
+    }
+  };
+
+  const downloadPdfDocument = (docType, filename) => {
+    getKycDocumentApi(id, docType).then((response) => {
+      const blobData = response?.data;
+      if (!(blobData instanceof Blob)) {
+        return;
+      }
+
+      const blob =
+        blobData.type === "application/pdf"
+          ? blobData
+          : new Blob([blobData], { type: "application/pdf" });
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `${filename}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    });
+  };
+
+  const renderDocumentCard = ({
+    title,
+    subtitle,
+    url,
+    docType,
+    fileLabel,
+  }) => {
+    const isPdf = isCloudinaryPdfUrl(url);
+    const previewUrl = isPdf ? getKycDocumentPreviewUrl(url) : url;
+    const hasPreviewError = previewErrors[docType];
+
+    return (
+      <div className={`${su.panel} flex h-full flex-col overflow-hidden rounded-xl border border-muted-200 bg-white shadow-sm dark:border-muted-700 dark:bg-muted-900`}>
+        <div className="border-b border-muted-200 px-5 py-4 dark:border-muted-700">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-heading text-base font-semibold text-muted-800 dark:text-muted-100">
+                {title}
+              </h3>
+              <p className="mt-0.5 text-sm text-muted-500 dark:text-muted-400">
+                {subtitle}
+              </p>
+            </div>
+            {isPdf ? (
+              <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                PDF
+              </span>
+            ) : (
+              <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
+                Image
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-1 flex-col p-5">
+          <div className="relative mb-4 flex min-h-[280px] flex-1 items-center justify-center overflow-hidden rounded-lg border border-dashed border-muted-200 bg-muted-50 dark:border-muted-700 dark:bg-muted-800/50">
+            {hasPreviewError ? (
+              <div className="flex flex-col items-center gap-2 px-4 text-center">
+                <DocumentIcon />
+                <p className="text-sm text-muted-500">Preview unavailable</p>
+              </div>
+            ) : previewUrl ? (
+              <img
+                src={previewUrl}
+                alt={`${title} preview`}
+                className="max-h-[320px] w-full object-contain"
+                onError={() =>
+                  setPreviewErrors((prev) => ({ ...prev, [docType]: true }))
+                }
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-2 px-4 text-center">
+                <DocumentIcon />
+                <p className="text-sm text-muted-500">No preview available</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {isPdf ? (
+              <button
+                type="button"
+                onClick={() => downloadPdfDocument(docType, fileLabel)}
+                className="relative inline-flex items-center gap-2 rounded-md border border-info-500 bg-info-500 px-4 py-2 text-sm font-normal text-white transition hover:bg-info-400"
+              >
+                <DownloadIcon />
+                Download PDF
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => deleteKycDocument(docType)}
+              disabled={isDisable}
+              className="relative inline-flex items-center gap-2 rounded-md border border-danger-500 bg-white px-4 py-2 text-sm font-normal text-danger-600 transition hover:bg-danger-50 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-muted-900 dark:hover:bg-danger-950/30"
+            >
+              Delete document
+            </button>
+          </div>
+        </div>
+      </div>
     );
   };
-  const openBill = () => {
-    // Create a new window/tab with the data URL
-    const newTab = window.open();
-    newTab.document.write(
-      '<html><head><meta name="viewport" content="width=device-width, minimum-scale=0.1"><title>Base64 Image</title></head><body style="margin: 0px; height: 100%; background-color: rgb(14, 14, 14);"><img style="display: block;-webkit-user-select: none;margin: auto;background-color: hsl(0, 0%, 90%);transition: background-color 300ms;" src="' +
-      UserData.submitDoc.bill +
-      '" alt="Base64 Image"></body></html>'
-    );
-  };
+
   useEffect(() => {
     if (authUser().user.role === "user") {
       Navigate("/dashboard");
       return;
     }
+    setIsPageLoading(true);
     getSignleUser();
-  }, []);
-  return (
-    <div className="admin">
-      <div>
-        <div className="bg-muted-100 dark:bg-muted-900 pb-20">
-          <SideBar state={Active} toggle={toggleBar} />
-          <div className="bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
-            <div className="mx-auto w-full max-w-7xl">
+  }, [id]);
 
-              <AdminHeader toggle={toggleBar} pageName="User Management" />
-              <div
-                className="nuxt-loading-indicator"
-                style={{
-                  position: "fixed",
-                  top: "0px",
-                  right: "0px",
-                  left: "0px",
-                  pointerEvents: "none",
-                  width: "auto",
-                  height: "3px",
-                  opacity: 0,
-                  background: "var(--color-primary-500)",
-                  transform: "scaleX(0)",
-                  transformOrigin: "left center",
-                  transition:
-                    "transform 0.1s ease 0s, height 0.4s ease 0s, opacity 0.4s ease 0s",
-                  zIndex: 999999,
-                }}
-              />
-              <seokit />
-              <div className="min-h-screen overflow-hidden">
-                <div className="grid gap-8 sm:grid-cols-12">
-                  <UserSideBar userid={id} />
-                  <div className="col-span-12 sm:col-span-8">
-                    <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 rounded-md">
-                      <div className="flex items-center justify-between p-4">
-                        <div>
-                          <p
-                            className="font-heading text-sm font-medium leading-normal leading-normal uppercase tracking-wider"
-                            tag="h2"
-                          >
-                            {" "}
-                            Manage Verifications{" "}
+  const submitDoc = UserData.submitDoc;
+  const hasCnicDoc = Boolean(submitDoc?.cnic);
+  const hasBillDoc = Boolean(submitDoc?.bill);
+  const hasAnyDocs = hasCnicDoc || hasBillDoc;
+  const hasBothDocs = hasCnicDoc && hasBillDoc;
+  const submissionLabel = hasBothDocs
+    ? "Documents submitted"
+    : hasAnyDocs
+      ? "Partial submission"
+      : "Awaiting submission";
+  const kycApproved = UserData.kyc === true;
+  const userName = [UserData.firstName, UserData.lastName].filter(Boolean).join(" ");
+
+  return (
+    <MemberShell embedded={embedded}><div className={embedded ? undefined : "admin"}>
+      <div className={embedded ? undefined : "bg-muted-100 pb-20 dark:bg-muted-900"}>
+        {!embedded && <SideBar state={Active} toggle={toggleBar} />}
+        <div className={embedded ? undefined : "relative min-h-screen w-full overflow-x-hidden bg-muted-100 px-4 transition-all duration-300 dark:bg-muted-900 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]"}>
+          <div className={embedded ? undefined : "mx-auto w-full max-w-7xl"}>
+            {!embedded && <AdminHeader toggle={toggleBar} pageName="User Management" />}
+
+            <div className={embedded ? undefined : "min-h-screen overflow-hidden pt-2"}>
+              <div className={embedded ? undefined : su.frame}>
+                {!embedded && <UserSideBar userid={id} />}
+
+                <div className={embedded ? undefined : su.main}>
+                  <div className="space-y-6">
+                    {/* Header card */}
+                    <div className={`${su.panel} overflow-hidden rounded-xl border border-muted-200 bg-white shadow-sm dark:border-muted-700 dark:bg-muted-900`}>
+                      <div className={`${su.panelHead} border-b border-muted-200 px-6 py-5 dark:border-muted-700`}>
+                        <div className="flex flex-col gap-4">
+                          <div className="flex items-start gap-4">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary-500/15 text-primary-500">
+                              <ShieldIcon />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h1 className="font-heading text-xl font-semibold text-muted-900 dark:text-muted-50">
+                                KYC Verification
+                              </h1>
+                              <p className="mt-1 text-sm text-muted-500 dark:text-muted-400">
+                                Review identity documents before approving access
+                                {userName ? ` for ${userName}` : ""}.
+                              </p>
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                {isPageLoading ? (
+                                  <>
+                                    <span className={`${skel.bone} ${skel.chip}`} />
+                                    <span className={`${skel.bone} ${skel.chip}`} />
+                                  </>
+                                ) : (
+                                  <>
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                                        kycApproved
+                                          ? "bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-200"
+                                          : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                                      }`}
+                                      style={{ color: kycApproved ? "#16a34a" : "#eab308" }}
+                                    >
+                                      {kycApproved ? "KYC Approved" : "KYC Pending"}
+                                    </span>
+                                    <span className="inline-flex items-center rounded-full bg-muted-100 px-3 py-1 text-xs font-medium text-muted-600 dark:bg-muted-800 dark:text-muted-300">
+                                      {submissionLabel}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex w-full items-center justify-end border-t border-muted-200 pt-4 dark:border-muted-700">
+                            {isPageLoading ? (
+                              <span className={`${skel.bone} ${skel.search}`} />
+                            ) : !kycApproved ? (
+                              <button
+                                onClick={() => updateKyc(true)}
+                                type="button"
+                                disabled={isDisable}
+                                className="relative inline-flex h-10 min-w-[140px] items-center justify-center rounded-md border border-info-500 bg-info-500 px-5 py-2 text-sm font-normal text-white transition-all duration-300 hover:bg-info-400 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isDisable ? (
+                                  <span className="nui-placeload animate-nui-placeload h-4 w-16 rounded" />
+                                ) : (
+                                  "Approve KYC"
+                                )}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => updateKyc(false)}
+                                type="button"
+                                disabled={isDisable}
+                                className="relative inline-flex h-10 min-w-[140px] items-center justify-center rounded-md border border-danger-500 bg-danger-500 px-5 py-2 text-sm font-normal text-white transition-all duration-300 hover:bg-danger-400 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isDisable ? (
+                                  <span className="nui-placeload animate-nui-placeload h-4 w-16 rounded" />
+                                ) : (
+                                  "Revoke KYC"
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {!isPageLoading && !hasAnyDocs && (
+                        <div className="px-6 py-8 text-center">
+                          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted-100 dark:bg-muted-800">
+                            <DocumentIcon />
+                          </div>
+                          <h2 className="text-lg font-semibold text-muted-800 dark:text-muted-100">
+                            No documents to review
+                          </h2>
+                          <p className="mx-auto mt-2 max-w-md text-sm text-muted-500 dark:text-muted-400">
+                            This user has not submitted both required KYC documents yet.
+                            Approval will be available once ID and proof of address are uploaded.
                           </p>
                         </div>
-                      </div>
-                      <div className="pt-6">
-                        <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 relative px-2 py-6 sm:py-4 top-px first:rounded-t-lg last:rounded-b-lg [&:not(:first-child)]:border-t-0">
-                          <div className="flex w-full flex-col sm:flex-row sm:items-center">
-                            <div className="relative mb-4 flex grow items-center gap-2 px-6 sm:mb-0 sm:px-2 h-10">
-                              <span className="text-muted-400 absolute hidden font-sans text-xs font-medium uppercase sm:-top-10 sm:start-2 sm:block">
-                                verification
-                              </span>
-                              <div
-                                className="relative inline-flex shrink-0 items-center justify-center h-10 w-10 rounded-lg bg-primary-500/20 text-primary-500"
-                                icon="material-symbols:shield-person-rounded"
-                              >
-                                <svg
-                                  data-v-cd102a71
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  xmlnsXlink="http://www.w3.org/1999/xlink"
-                                  aria-hidden="true"
-                                  role="img"
-                                  className="icon h-5 w-5"
-                                  width="1em"
-                                  height="1em"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    fill="currentColor"
-                                    d="M12 13q1.45 0 2.475-1.025T15.5 9.5q0-1.45-1.025-2.475T12 6q-1.45 0-2.475 1.025T8.5 9.5q0 1.45 1.025 2.475T12 13m0 6.9q1.475-.475 2.613-1.487t1.987-2.288q-1.075-.55-2.238-.837T12 15q-1.2 0-2.363.288t-2.237.837q.85 1.275 1.988 2.288T12 19.9m0 2q-.175 0-.325-.025t-.3-.075Q8 20.675 6 17.638T4 11.1V6.375q0-.625.363-1.125t.937-.725l6-2.25q.35-.125.7-.125t.7.125l6 2.25q.575.225.938.725T20 6.375V11.1q0 3.5-2 6.538T12.625 21.8q-.15.05-.3.075T12 21.9"
-                                  />
-                                </svg>
-                              </div>
-                              <div>
-                                <h4 className="font-heading text-sm font-medium leading-tight text-muted-700 dark:text-muted-100">
-                                  <span>Type: KYC</span>
-                                </h4>
-                                <p className="font-alt text-xs font-normal leading-tight text-muted-500 dark:text-muted-400">
-                                  <span>
-                                    Status:{" "}
-                                    <span className="">
-                                      {UserData.submitDoc &&
-                                        UserData.submitDoc.status
-                                        ? UserData.submitDoc.status ===
-                                          "pending"
-                                          ? "Not submitted"
-                                          : UserData.submitDoc.status ===
-                                            "completed"
-                                            ? "Submitted"
-                                            : ""
-                                        : "Loading..."}
-                                    </span>
-                                  </span>
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                              <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-80">
-                                <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0">
-                                  action
-                                </span>
-                                {UserData.kyc === false ? (
-                                  <button
-                                    onClick={() => updateKyc(true)}
-                                    type="button"
-                                    disabled={isDisable}
-                                    className="relative font-sans font-normal text-sm inline-flex items-center justify-center leading-5 no-underline h-8 px-3 py-2 space-x-1 border nui-focus transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed hover:enabled:shadow-none border-info-500 text-info-50 bg-info-500 dark:bg-info-500 dark:border-info-500 text-white hover:enabled:bg-info-400 dark:hover:enabled:bg-info-400 hover:enabled:shadow-lg hover:enabled:shadow-info-500/50 dark:hover:enabled:shadow-info-800/20 focus-visible:outline-info-400/70 focus-within:outline-info-400/70 focus-visible:bg-info-500 active:enabled:bg-info-500 dark:focus-visible:outline-info-400/70 dark:focus-within:outline-info-400/70 dark:focus-visible:bg-info-500 dark:active:enabled:bg-info-500 rounded-md mr-2"
-                                  >
-                                    <span>
-                                      {isDisable ? (
-                                        <div>
-                                          <div className="nui-placeload animate-nui-placeload h-4 w-8 rounded mx-auto"></div>
-                                        </div>
-                                      ) : (
-                                        "Approve"
-                                      )}
-                                    </span>
-                                  </button>
-                                ) : UserData.kyc === true ? (
-                                  <button
-                                    onClick={() => updateKyc(false)}
-                                    type="button"
-                                    disabled={isDisable}
-                                    className="relative font-sans font-normal text-sm inline-flex items-center justify-center leading-5 no-underline h-8 px-3 py-2 space-x-1 border nui-focus transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed hover:enabled:shadow-none border-danger-500 text-danger-50 bg-danger-500 dark:bg-danger-500 dark:border-danger-500 text-white hover:enabled:bg-danger-400 dark:hover:enabled:bg-danger-400 hover:enabled:shadow-lg hover:enabled:shadow-danger-500/50 dark:hover:enabled:shadow-danger-800/20 focus-visible:outline-danger-400/70 focus-within:outline-danger-400/70 focus-visible:bg-danger-500 active:enabled:bg-danger-500 dark:focus-visible:outline-danger-400/70 dark:focus-within:outline-danger-400/70 dark:focus-visible:bg-danger-500 dark:active:enabled:bg-danger-500 rounded-md mr-2"
-                                  >
-                                    <span>
-                                      {isDisable ? (
-                                        <div>
-                                          <div className="nui-placeload animate-nui-placeload h-4 w-8 rounded mx-auto"></div>
-                                        </div>
-                                      ) : (
-                                        "Revoke"
-                                      )}
-                                    </span>
-                                  </button>
-                                ) : (
-                                  ""
-                                )}
-                                {/**/}
-                                {/**/}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      {UserData.submitDoc &&
-                        UserData.submitDoc.status === "completed" &&
-                        UserData.submitDoc.bill &&
-                        UserData.submitDoc.cnic ? (
-                        <div className="data px-5 py-5">
-                          <h1>Documents submitted by the user:</h1>
-                          <div className="flex-wraps">
-                            <div className="py-5">
-                              <h1>Cnic:</h1>
-                              <p onClick={openCnic} className="cursor-pointer">
-                                {UserData.submitDoc.cnic && (
-                                  <img
-                                    style={{ width: "350px" }}
-                                    src={UserData.submitDoc.cnic}
-                                    alt=""
-                                  />
-                                )}
-                              </p>
-                            </div>
-                            <div className="py-5">
-                              <h1>Bill:</h1>
-                              <p onClick={openBill} className="cursor-pointer">
-                                {UserData.submitDoc.bill && (
-                                  <img
-                                    style={{ width: "350px" }}
-                                    src={UserData.submitDoc.bill}
-                                    alt=""
-                                  />
-                                )}
-                              </p>
-                            </div>
-                          </div>
-
-                          <h1>
-                            Note: If you approve or revoke user KYC, the
-                            submitted documents will be deleted
-                          </h1>
-                        </div>
-                      ) : (
-                        ""
                       )}
                     </div>
-                    {/**/}
+
+                    {isPageLoading && (
+                      <AdminSkeleton variant="docs" rows={2} />
+                    )}
+
+                    {!isPageLoading && hasAnyDocs && (
+                      <>
+                        <div className="grid gap-6 md:grid-cols-2">
+                          {hasCnicDoc &&
+                            renderDocumentCard({
+                              title: "Government ID",
+                              subtitle: "Passport, national ID, or driving licence",
+                              url: submitDoc.cnic,
+                              docType: "cnic",
+                              fileLabel: `${userName || "user"}-id-document`.replace(/\s+/g, "-").toLowerCase(),
+                            })}
+                          {hasBillDoc &&
+                            renderDocumentCard({
+                              title: "Proof of Address",
+                              subtitle: "Utility bill, bank statement, or council tax",
+                              url: submitDoc.bill,
+                              docType: "bill",
+                              fileLabel: `${userName || "user"}-proof-of-address`.replace(/\s+/g, "-").toLowerCase(),
+                            })}
+                        </div>
+
+                        <div className="flex gap-3 rounded-xl border border-blue-200 bg-blue-50 px-5 py-4 dark:border-blue-900/50 dark:bg-blue-950/30">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="mt-0.5 h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400">
+                            <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm8.706-1.442c1.146-.573 2.437.463 2.126 1.706l-.709 2.836a1.125 1.125 0 01-1.683.622l-.984-.984a.75.75 0 111.06-1.06l.547.547 1.06-4.242-1.06 4.242-1.437-.718zM12 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
+                          </svg>
+                          <div>
+                            <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                              Document retention
+                            </p>
+                            <p className="mt-1 text-sm text-blue-800/90 dark:text-blue-200/80">
+                              KYC documents stay available after approval and are stored on Cloudinary.
+                              Use <strong>Delete document</strong> on each card only when you need to
+                              remove a file permanently.
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
-              {/**/}
             </div>
           </div>
         </div>
       </div>
     </div>
+    </MemberShell>
   );
 };
 

@@ -172,6 +172,9 @@ class NetworkManager {
      * @returns {number} Available port number
      */
     async getAvailablePort() {
+        // First, aggressively clean up stale ports in the pool
+        await this.cleanupStalePorts();
+        
         // Find an available port
         const step = this.requireEvenPorts ? 2 : 1;
         let startPort = this.portRange.min;
@@ -179,18 +182,105 @@ class NetworkManager {
             startPort += 1; // ensure even start
         }
 
+        // Try to find an available port
         for (let port = startPort; port <= this.portRange.max; port += step) {
             if (!this.portPool.has(port)) {
                 // Test if port is actually available
                 if (await this.isPortAvailable(port)) {
                     this.portPool.add(port);
-                    console.log(`🔌 Allocated port: ${port}`);
+                    console.log(`🔌 Allocated port: ${port} (pool size: ${this.portPool.size})`);
+                    return port;
+                }
+            }
+        }
+
+        // If we get here, all ports in range are either in pool or in use
+        // Attempt aggressive cleanup and retry
+        try {
+            console.warn(`⚠️ No available ports found (pool has ${this.portPool.size} ports); attempting aggressive cleanup...`);
+            await this.cleanupStalePorts(true); // Force cleanup
+            
+            // Retry allocation after cleanup
+            for (let port = startPort; port <= this.portRange.max; port += step) {
+                if (!this.portPool.has(port)) {
+                    if (await this.isPortAvailable(port)) {
+                        this.portPool.add(port);
+                        console.log(`🔌 Allocated port (after cleanup): ${port} (pool size: ${this.portPool.size})`);
+                        return port;
+                    }
+                }
+            }
+        } catch (reclaimErr) {
+            console.warn('⚠️ Error during port cleanup attempt:', reclaimErr.message);
+        }
+        
+        // Final attempt: clear entire pool if it's too large (likely stale)
+        if (this.portPool.size > 100) {
+            console.warn(`⚠️ Port pool is very large (${this.portPool.size} ports) - clearing and retrying...`);
+            this.portPool.clear();
+            
+            // Retry one more time with empty pool
+            for (let port = startPort; port <= this.portRange.max; port += step) {
+                if (await this.isPortAvailable(port)) {
+                    this.portPool.add(port);
+                    console.log(`🔌 Allocated port (after pool clear): ${port}`);
                     return port;
                 }
             }
         }
         
-        throw new Error('No available ports in range');
+        throw new Error(`No available ports in range ${this.portRange.min}-${this.portRange.max} (pool size: ${this.portPool.size})`);
+    }
+
+    /**
+     * Clean up stale ports from the pool
+     * @param {boolean} force - Force cleanup even if pool seems fine
+     */
+    async cleanupStalePorts(force = false) {
+        if (this.portPool.size === 0) {
+            return; // Nothing to clean
+        }
+        
+        // Only do expensive cleanup if pool is large or forced
+        if (!force && this.portPool.size < 50) {
+            return; // Pool is reasonable size, skip cleanup
+        }
+        
+        console.log(`🧹 Cleaning up stale ports (pool size: ${this.portPool.size})...`);
+        const candidates = Array.from(this.portPool);
+        let reclaimed = 0;
+        
+        // Check ports in parallel (batch of 10 at a time to avoid overwhelming)
+        const batchSize = 10;
+        for (let i = 0; i < candidates.length; i += batchSize) {
+            const batch = candidates.slice(i, i + batchSize);
+            const checks = await Promise.all(
+                batch.map(async (p) => {
+                    try {
+                        const free = await this.isPortAvailable(p);
+                        if (free) {
+                            this.portPool.delete(p);
+                            reclaimed++;
+                            return p;
+                        }
+                    } catch (_) {
+                        // Port check failed - assume it's in use, keep in pool
+                    }
+                    return null;
+                })
+            );
+            
+            const freed = checks.filter(p => p !== null);
+            if (freed.length > 0) {
+                console.log(`🧹 Reclaimed ${freed.length} stale port(s): ${freed.join(', ')}`);
+            }
+        }
+        
+        if (reclaimed > 0) {
+            console.log(`✅ Cleanup complete: reclaimed ${reclaimed} port(s), pool size now: ${this.portPool.size}`);
+        } else {
+            console.log(`✅ Cleanup complete: no stale ports found, pool size: ${this.portPool.size}`);
+        }
     }
 
     /**
@@ -226,8 +316,19 @@ class NetworkManager {
     releasePort(port) {
         if (this.portPool.has(port)) {
             this.portPool.delete(port);
-            console.log(`🔌 Released port: ${port}`);
+            console.log(`🔌 Released port: ${port} (pool size: ${this.portPool.size})`);
+        } else {
+            console.warn(`⚠️ Attempted to release port ${port} that wasn't in pool`);
         }
+    }
+
+    /**
+     * Clear all ports from the pool (emergency cleanup)
+     */
+    clearPortPool() {
+        const size = this.portPool.size;
+        this.portPool.clear();
+        console.log(`🧹 Cleared ${size} port(s) from pool`);
     }
 
     /**

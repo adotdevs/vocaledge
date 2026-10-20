@@ -2,7 +2,6 @@ import React, { useState, useEffect, useContext } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useSelector } from "react-redux";
 import Nav from "../../layouts/nav";
-import RightWalletBar from "../../layouts/nav/RightWalletBar";
 import Footer from "../../layouts/Footer";
 import { ThemeContext } from "../../../context/ThemeContext";
 import { 
@@ -39,7 +38,7 @@ import {
 } from '../../../Api/Service';
 
 const ReferralPromo = () => {
-  const { sidebariconHover, headWallet } = useContext(ThemeContext);
+  const { sidebariconHover } = useContext(ThemeContext);
   const sideMenu = useSelector((state) => state.sideMenu);
   const authUser = useAuthUser();
   const navigate = useNavigate();
@@ -142,20 +141,16 @@ const ReferralPromo = () => {
   };
 
   return (
-    <div
+      <div
       id="main-wrapper"
-      className={`show wallet-open ${headWallet ? "" : "active"} ${
+      className={`show ${
         sidebariconHover ? "iconhover-toggle" : ""
       } ${sideMenu ? "menu-toggle" : ""}`}
     >
       <Nav />
-      <RightWalletBar />
-      <div className="content-body new-bg-light">
-        <div
-          className="container-fluid"
-          style={{ minHeight: window.screen.height - 45 }}
-        >
-          {loading ? (
+<div className="content-body new-bg-light">
+        <div className="container-fluid" style={{ minHeight: window.screen.height - 45 }}>
+{loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80vh' }}>
               <CircularProgress />
             </Box>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import SideBar from "../../layouts/AdminSidebar/Sidebar";
 import UserSideBar from "./UserSideBar";
 import Log from "../../../assets/images/img/log.jpg";
@@ -13,10 +13,30 @@ import {
   updateTransactionApi,
 } from "../../../Api/Service";
 import axios from "axios";
+import {
+  convertFiatToUserCurrency,
+  getFiatUsdEquivalent,
+  getUserDisplayCurrency,
+  isFiatCoin,
+} from "../../../utils/euroCoinUtils";
 
 import Truncate from "react-truncate-inside/es";
 import AdminHeader from "../adminHeader";
-const UserTransactions = () => {
+import TxFilterPills from "../assets/TxFilterPills";
+import AdminTransactionEditFields from "../assets/AdminTransactionEditFields";
+import AdminTransactionList from "../assets/AdminTransactionList";
+import { buildAdminPriceMap } from "../assets/adminTxDisplay";
+import styles from "../assets/AdminTransactions.module.css";
+import su from "./SingleUserLayout.module.css";
+import MemberShell from "./hub/MemberShell";
+import { matchesTransactionFilter } from "../assets/transactionFilterUtils";
+import {
+  buildAdminTransactionUpdateBody,
+  mapTxToEditState,
+  timestampFromDate,
+  validateAdminTransactionEdit,
+} from "../assets/adminTransactionEdit";
+const UserTransactions = ({ embedded = false }) => {
   const [modal, setModal] = useState(false);
   const [isLoading, setisLoading] = useState(true);
   const [UserTransactions, setUserTransactions] = useState([]);
@@ -36,10 +56,22 @@ const UserTransactions = () => {
     trxName: "",
   });
   const [liveBtc, setliveBtc] = useState(null);
+  const [liveEth, setliveEth] = useState(null);
+  const [liveBnb, setliveBnb] = useState(null);
+  const [liveXrp, setliveXrp] = useState(null);
+  const [liveDoge, setliveDoge] = useState(null);
+  const [liveSol, setliveSol] = useState(null);
+  const [liveTon, setliveTon] = useState(null);
+  const [liveLink, setliveLink] = useState(null);
+  const [liveDot, setliveDot] = useState(null);
+  const [liveNear, setliveNear] = useState(null);
+  const [liveUsdc, setliveUsdc] = useState(null);
+  const [liveTrx, setliveTrx] = useState(null);
   const [activeStatus, setactiveStatus] = useState(false);
 
   const [Status, setStatus] = useState("");
   const [Type, setType] = useState("");
+  const [filter, setFilter] = useState("all");
   let { id } = useParams();
 
   let authUser = useAuthUser();
@@ -103,6 +135,83 @@ const UserTransactions = () => {
           val = 96075.25
         }
         setliveBtc(val);
+        let ethVal = 0;
+        if (userCoins && userCoins.ethPrice && userCoins.ethPrice.quote && userCoins.ethPrice.quote.USD) {
+          ethVal = userCoins.ethPrice.quote.USD.price
+        } else {
+          ethVal = 2640
+        }
+        setliveEth(ethVal);
+        let bnbVal = 0;
+        if (userCoins && userCoins.bnbPrice && userCoins.bnbPrice.quote && userCoins.bnbPrice.quote.USD) {
+          bnbVal = userCoins.bnbPrice.quote.USD.price
+        } else {
+          bnbVal = 210.25
+        }
+        setliveBnb(bnbVal);
+        let xrpVal = 0;
+        if (userCoins && userCoins.xrpPrice && userCoins.xrpPrice.quote && userCoins.xrpPrice.quote.USD) {
+          xrpVal = userCoins.xrpPrice.quote.USD.price
+        } else {
+          xrpVal = 0.5086
+        }
+        setliveXrp(xrpVal);
+        let dogeVal = 0;
+        if (userCoins && userCoins.dogePrice && userCoins.dogePrice.quote && userCoins.dogePrice.quote.USD) {
+          dogeVal = userCoins.dogePrice.quote.USD.price
+        } else {
+          dogeVal = 0.1163
+        }
+        setliveDoge(dogeVal);
+        let solVal = 0;
+        if (userCoins && userCoins.solPrice && userCoins.solPrice.quote && userCoins.solPrice.quote.USD) {
+          solVal = userCoins.solPrice.quote.USD.price
+        } else {
+          solVal = 245.01
+        }
+        setliveSol(solVal);
+        let tonVal = 0;
+        if (userCoins && userCoins.tonPrice && userCoins.tonPrice.quote && userCoins.tonPrice.quote.USD) {
+          tonVal = userCoins.tonPrice.quote.USD.price
+        } else {
+          tonVal = 5.76
+        }
+        setliveTon(tonVal);
+        let linkVal = 0;
+        if (userCoins && userCoins.linkPrice && userCoins.linkPrice.quote && userCoins.linkPrice.quote.USD) {
+          linkVal = userCoins.linkPrice.quote.USD.price
+        } else {
+          linkVal = 12.52
+        }
+        setliveLink(linkVal);
+        let dotVal = 0;
+        if (userCoins && userCoins.dotPrice && userCoins.dotPrice.quote && userCoins.dotPrice.quote.USD) {
+          dotVal = userCoins.dotPrice.quote.USD.price
+        } else {
+          dotVal = 4.76
+        }
+        setliveDot(dotVal);
+        let nearVal = 0;
+        if (userCoins && userCoins.nearPrice && userCoins.nearPrice.quote && userCoins.nearPrice.quote.USD) {
+          nearVal = userCoins.nearPrice.quote.USD.price
+        } else {
+          nearVal = 5.59
+        }
+        setliveNear(nearVal);
+        let usdcVal = 0;
+        if (userCoins && userCoins.usdcPrice && userCoins.usdcPrice.quote && userCoins.usdcPrice.quote.USD) {
+          usdcVal = userCoins.usdcPrice.quote.USD.price
+        } else {
+          usdcVal = 0.99
+        }
+        setliveUsdc(usdcVal);
+        let trxVal = 0;
+        if (userCoins && userCoins.trxPrice && userCoins.trxPrice.quote && userCoins.trxPrice.quote.USD) {
+          trxVal = userCoins.trxPrice.quote.USD.price
+        } else {
+          trxVal = 0.1531
+        }
+        setliveTrx(trxVal);
         setisLoading(false);
 
         return;
@@ -137,20 +246,8 @@ const UserTransactions = () => {
   let toggleModal = async (data) => {
     setStatus(data.status);
     setType(data.type);
-    setsingleTransaction({
-      selectedPayment: data.selectedPayment,
-      withdraw: data.withdraw,
-      amount: data.amount,
-      txId: data.txId,
-      fromAddress: data.fromAddress,
-      note: data.note,
-      reference: data.reference,
-      _id: data._id,
-      createdAt: data.createdAt,
-      type: data.type,
-      trxName: data.trxName,
-    });
-    setTimestamp(new Date(data.createdAt).toISOString().slice(0, 16))
+    setsingleTransaction(mapTxToEditState(data));
+    setTimestamp(timestampFromDate(data.createdAt));
     setModal(true);
     try {
       let _id = data._id;
@@ -170,16 +267,7 @@ const UserTransactions = () => {
   };
   let toggleModalClose = () => {
     setStatus("");
-    setsingleTransaction({
-      amount: "",
-      txId: "",
-      fromAddress: "",
-      note: "",
-      reference: "",
-      _id: "",
-      createdAt: "",
-      trxName: "",
-    });
+    setsingleTransaction(mapTxToEditState());
     setuserDetail({});
 
     setType("");
@@ -187,53 +275,28 @@ const UserTransactions = () => {
     setModal(false);
   };
   const approveTransaction = async (txid) => {
-    let amount = txid.amount;
-    let _id = txid._id;
-    let txId = txid.txId;
-    let withdraw = txid.withdraw;
-    let selectedPayment = txid.selectedPayment;
-    let trxName = txid.trxName;
-    let note = txid.note;
-    let reference = txid.reference;
-    let fromAddress = txid.fromAddress;
-    let status = Status;
-    let type = Type;
-    let createdAt = timestamp;
-    // Assuming Status is a string, trim it
-
-    // Check if all required fields are non-empty after trimming
-    if (
-      amount === 0 ||
-      amount === "" ||
-      _id === "" ||
-      txId === "" ||
-      trxName === "" ||
-      fromAddress === "" ||
-      status === "" ||
-      type === "" || error !== ""
-    ) {
-      toast.error("All fields are required.");
+    const validationError = validateAdminTransactionEdit({
+      tx: txid,
+      status: Status,
+      type: Type,
+      createdAt: timestamp,
+      dateError: error,
+    });
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
 
-    let body = {
-      withdraw,
-      selectedPayment,
-      amount,
-      txId,
-      trxName,
-      _id,
-      note,
-      reference,
-      type,
-      fromAddress,
-      status,
-      createdAt
-    };
+    const body = buildAdminTransactionUpdateBody({
+      tx: txid,
+      status: Status,
+      type: Type,
+      createdAt: timestamp,
+    });
 
     try {
       setisDisbaled(true);
-      const userCoins = await updateTransactionApi(_id, body);
+      const userCoins = await updateTransactionApi(txid._id, body);
 
       if (userCoins.success) {
         toast.dismiss();
@@ -286,6 +349,41 @@ const UserTransactions = () => {
 
     getSignleUser();
   }, []);
+  const filteredTransactions = useMemo(
+    () => UserTransactions.filter((tx) => matchesTransactionFilter(tx, filter)),
+    [UserTransactions, filter]
+  );
+  const priceMap = useMemo(
+    () =>
+      buildAdminPriceMap({
+        liveBtc,
+        liveEth,
+        liveBnb,
+        liveXrp,
+        liveDoge,
+        liveSol,
+        liveTon,
+        liveLink,
+        liveDot,
+        liveNear,
+        liveUsdc,
+        liveTrx,
+      }),
+    [
+      liveBtc,
+      liveEth,
+      liveBnb,
+      liveXrp,
+      liveDoge,
+      liveSol,
+      liveTon,
+      liveLink,
+      liveDot,
+      liveNear,
+      liveUsdc,
+      liveTrx,
+    ]
+  );
   // Copy
   const [copyStatus, setCopyStatus] = useState(false);
 
@@ -333,14 +431,14 @@ const UserTransactions = () => {
     }, []);
   // Copy
   return (
-    <div className="admin">
+    <MemberShell embedded={embedded}><div className={embedded ? styles.page : `admin ${styles.page}`}>
       <div>
-        <div className="bg-muted-100 dark:bg-muted-900 pb-20">
-          <SideBar state={Active} toggle={toggleBar} />
-          <div className="bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
-            <div className="mx-auto w-full max-w-7xl">
+        <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 min-h-screen pb-20"}>
+          {!embedded && <SideBar state={Active} toggle={toggleBar} />}
+          <div className={embedded ? "admin-tx" : "admin-tx admin-tx-page relative min-h-screen w-full px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]"}>
+            <div className={embedded ? undefined : "admin-tx-shell mx-auto w-full max-w-7xl"}>
 
-              <AdminHeader toggle={toggleBar} pageName="User Management" />
+              {!embedded && <AdminHeader toggle={toggleBar} pageName="User Management" />}
               <div
                 className="nuxt-loading-indicator"
                 style={{
@@ -361,191 +459,34 @@ const UserTransactions = () => {
                 }}
               />
               <seokit />
-              <div className="min-h-screen overflow-hidden">
-                <div className="grid gap-8 sm:grid-cols-12">
-                  <UserSideBar userid={id} />
-                  <div className="col-span-12 sm:col-span-8">
-                    <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white duration-300 rounded-md">
-                      <div className="flex items-center justify-between p-4">
-                        <div>
-                          <p
-                            className="font-heading text-sm font-medium leading-normal leading-normal uppercase tracking-wider"
-                            tag="h2"
-                          >
-                            {" "}
-                            Manage Tranasctions{" "}
-                          </p>
-                        </div>
+              <div className={embedded ? "admin-tx-user-grid" : `admin-tx-user-grid ${su.frame}`}>
+                  {!embedded && <UserSideBar userid={id} />}
+                  <div className={embedded ? "admin-tx-user-col" : `admin-tx-user-col ${su.main}`}>
+                    <div className="admin-tx-sticky">
+                      <div className={`admin-tx-toolbar ${styles.toolbar}`}>
+                        <TxFilterPills
+                          title="Manage Transactions"
+                          filter={filter}
+                          onChange={setFilter}
+                          count={isLoading ? undefined : filteredTransactions.length}
+                        />
                       </div>
-                      {isLoading && (
-                        <div className="  p-5">Loading Transactions...</div>
-                      )}
-                      {!isLoading && (
-                        <div className="pt-6">
-                          {UserTransactions.filter(
-                            (transaction) => !transaction.isHidden
-                          ).map((transaction, index) => (
-                            <div key={index}>
-                              <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 rounded-xl p-3">
-                                <div className="flex w-full items-center gap-2">
-                                  {transaction.type === "deposit" ? (
-                                    <div className="relative inline-flex shrink-0 items-center justify-center outline-none h-12 w-12 nui-mask nui-mask-blob bg-success-100 text-success-400">
-                                      <div className="flex h-full w-full items-center justify-center overflow-hidden text-center transition-all duration-300">
-                                        <svg
-                                          data-v-cd102a71
-                                          xmlns="http://www.w3.org/2000/svg"
-                                          xmlnsXlink="http://www.w3.org/1999/xlink"
-                                          aria-hidden="true"
-                                          role="img"
-                                          className="icon"
-                                          width="1em"
-                                          height="1em"
-                                          viewBox="0 0 24 24"
-                                        >
-                                          <path
-                                            fill="currentColor"
-                                            d="M11 20V7.825l-5.6 5.6L4 12l8-8l8 8l-1.4 1.425l-5.6-5.6V20z"
-                                          />
-                                        </svg>
-                                      </div>
-                                    </div>
-                                  ) : transaction.type === "withdraw" ? (
-                                    <div className="relative inline-flex shrink-0 items-center justify-center outline-none h-12 w-12 nui-mask nui-mask-blob bg-danger-100 text-danger-400">
-                                      <div className="flex h-full w-full items-center justify-center overflow-hidden text-center transition-all duration-300">
-                                        <svg
-                                          data-v-cd102a71
-                                          xmlns="http://www.w3.org/2000/svg"
-                                          xmlnsXlink="http://www.w3.org/1999/xlink"
-                                          aria-hidden="true"
-                                          role="img"
-                                          className="icon"
-                                          width="1em"
-                                          height="1em"
-                                          viewBox="0 0 24 24"
-                                        >
-                                          <path
-                                            fill="currentColor"
-                                            d="M11 4v12.175l-5.6-5.6L4 12l8 8l8-8l-1.4-1.425l-5.6 5.6V4z"
-                                          />
-                                        </svg>
-                                      </div>
-                                      {/**/}
-                                      {/**/}
-                                    </div>
-                                  ) : (
-                                    ""
-                                  )}
-                                  <div>
-                                    <p
-                                      className="font-heading capitalize text-sm font-medium leading-normal leading-normal"
-                                      tag="h3"
-                                    >
-                                      {transaction.trxName}{" "}
-                                      <span className="text-muted-400 capitalize">
-                                        ({transaction.status})
-                                      </span>
-                                    </p>
-                                    <p className="font-alt text-xs font-normal leading-normal leading-normal text-muted-400 mt-1">
-                                      {transaction.amount.toFixed(8)}{" "}
-                                      <span className="text-muted-500">
-                                        {`($${(() => {
-                                          switch (transaction.trxName.toLowerCase()) {
-                                            case "bitcoin":
-                                              return (transaction.amount * liveBtc).toFixed(2);
-                                            case "ethereum":
-                                              return (transaction.amount * 2640).toFixed(2);
-                                            case "tether":
-                                              return transaction.amount.toFixed(2);
-                                            case "bnb":
-                                              return (transaction.amount * 210.25).toFixed(2); // Example price
-                                            case "xrp":
-                                              return (transaction.amount * 0.5086).toFixed(2); // Example price
-                                            case "dogecoin":
-                                              return (transaction.amount * 0.1163).toFixed(2); // Example price
-                                            case "solana":
-                                              return (transaction.amount * 245.01).toFixed(2); // Example price
-                                            case "euro":
-                                              return (transaction.amount * 1.08).toFixed(2);
-                                            case "toncoin":
-                                              return (transaction.amount * 5.76).toFixed(2); // Example price
-                                            case "chainlink":
-                                              return (transaction.amount * 12.52).toFixed(2); // Example price
-                                            case "polkadot":
-                                              return (transaction.amount * 4.76).toFixed(2); // Example price
-                                            case "near protocol":
-                                              return (transaction.amount * 5.59).toFixed(2); // Example price
-                                            case "usd coin":
-                                              return (transaction.amount * 0.99).toFixed(2); // Example price
-                                            case "tron":
-                                              return (transaction.amount * 0.1531).toFixed(2); // Example price
-                                            default:
-                                              return (0).toFixed(2);
-                                          }
-
-                                        })()})`}
-                                      </span>
-
-                                    </p>
-                                    <p className="font-alt text-xs font-normal leading-normal leading-normal text-muted-400 md:hidden mt-1">
-                                      At:{" "}
-                                      {new Date(
-                                        transaction.createdAt
-                                      ).toLocaleString()}
-                                    </p>
-                                  </div>
-                                  <div className="ms-auto flex items-center gap-2">
-                                    <p
-                                      className="font-heading text-sm font-medium leading-normal leading-normal me-2 text-gray-500 hidden md:block"
-                                      tag="h3"
-                                    >
-                                      At:{" "}
-                                      {new Date(
-                                        transaction.createdAt
-                                      ).toLocaleString()}
-                                    </p>
-                                    <button
-                                      onClick={() => toggleModal(transaction)}
-                                      type="button"
-                                      className="disabled:opacity-60 disabled:cursor-not-allowed hover:shadow-none false false text-muted-700 bg-white border border-muted-300 dark:text-white dark:bg-muted-700 dark:hover:bg-muted-600 dark:border-muted-600 hover:bg-muted-50 rounded-md h-8 w-8 p-1 nui-focus relative inline-flex items-center justify-center space-x-1 font-sans text-sm font-normal leading-5 no-underline outline-none transition-all duration-300"
-                                    >
-                                      <svg
-                                        data-v-cd102a71
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        xmlnsXlink="http://www.w3.org/1999/xlink"
-                                        aria-hidden="true"
-                                        role="img"
-                                        className="icon h-5 w-5"
-                                        width="1em"
-                                        height="1em"
-                                        viewBox="0 0 24 24"
-                                      >
-                                        <g
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                          strokeWidth={2}
-                                        >
-                                          <path d="M1 12s4-8 11-8s11 8 11 8s-4 8-11 8s-11-8-11-8" />
-                                          <circle cx={12} cy={12} r={3} />
-                                        </g>
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                              {/**/}
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                    </div>
+                    <div className="admin-tx-scroll">
+                    <AdminTransactionList
+                      loading={isLoading}
+                      items={filteredTransactions}
+                      allTransactions={UserTransactions}
+                      prices={priceMap}
+                      userDetail={userDetail}
+                      onOpen={toggleModal}
+                    />
                     </div>
                   </div>
                 </div>
-              </div>
-              {/**/}
             </div>
           </div>
+
 
           <div>
             {/**/}
@@ -661,7 +602,7 @@ const UserTransactions = () => {
       </div>
       {/* Modal 1 */}
       {modal && (
-        <div>
+        <div className="admin-tx">
           <div
             className="relative z-[9999]"
             id="headlessui-dialog-55"
@@ -669,18 +610,18 @@ const UserTransactions = () => {
             aria-modal="true"
             data-headlessui-state="open"
           >
-            <div className="bg-muted-800/70 dark:bg-muted-900/80 fixed inset-0" />
+            <div className="admin-tx-modal-overlay bg-black/70 fixed inset-0" />
             <div className="fixed inset-0 overflow-x-auto">
               <div className="flex min-h-full items-center justify-center p-4 text-center">
                 <div
                   id="headlessui-dialog-panel-58"
                   data-headlessui-state="open"
-                  className="dark:bg-muted-800 w-full bg-white text-left align-middle shadow-xl transition-all rounded-lg max-w-2xl"
+                  className="admin-tx-modal"
                 >
-                  <div className="flex w-full items-center justify-between p-4 md:p-6">
+                  <div className="admin-tx-modal-header flex w-full items-center justify-between">
                     <div className="lg:flex lg:items-center lg:justify-between">
                       <div className="min-w-0 flex-1">
-                        <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight dark:text-white">
+                        <h2 className="text-2xl font-bold leading-7 text-white sm:truncate sm:text-3xl sm:tracking-tight">
                           Transaction Details
                         </h2>
                         <div className="mt-1 flex flex-col sm:mt-0 sm:flex-row sm:flex-wrap sm:space-x-6">
@@ -707,7 +648,7 @@ const UserTransactions = () => {
                           <span className="block">
                             <Link
                               to={`/admin/user/${userDetail._id}/general`}
-                              className="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700 dark:hover:text-gray-200 dark:ring-gray-600 dark:ring-inset"
+                              className="admin-tx-profile-link"
                             >
                               <svg
                                 className="-ml-0.5 mr-1.5 h-5 w-5 text-gray-400"
@@ -729,7 +670,7 @@ const UserTransactions = () => {
                     <button
                       onClick={toggleModalClose}
                       type="button"
-                      className="flex h-9 w-9 items-center justify-center transition-colors duration-300 disabled:opacity-30 hover:bg-muted-100 dark:hover:bg-muted-700 text-muted-700 dark:text-muted-50 rounded-full"
+                      className="admin-tx-modal-x"
                     >
                       <svg
                         aria-hidden="true"
@@ -747,8 +688,12 @@ const UserTransactions = () => {
                       </svg>
                     </button>
                   </div>
-                  <div className="p-4 md:p-6 overflow-auto">
+                  <div className="admin-tx-modal-body">
                     <dl className="grid grid-cols-1 gap-x-4 gap-y-4 md:gap-y-8 sm:grid-cols-2 mb-3">
+                      <AdminTransactionEditFields
+                        transaction={singleTransaction}
+                        onChange={setsingleTransaction}
+                      />
                       <div className="sm:col-span-1">
                         <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
                           Transaction ID
@@ -757,17 +702,19 @@ const UserTransactions = () => {
                           <a
                             href="javascript:void(0)"
                             className="font-medium inline-flex text-gray-900 dark:text-white flex items-center hover:text-gray-600 dark:hover:text-gray-400 text-xs"
-                            onClick={() =>
-                              handleCopyToClipboard(singleTransaction.txId)
-                            }
                           >
                             {" "}
-                            <Truncate
-                              text={singleTransaction._id}
-                              offset={6}
-                              width="100"
+                            <input
+                              type="text"
+                              className="border  py-1 p-3"
+                              onChange={handleInput}
+                              value={singleTransaction.txId || ""}
+                              name="txId"
                             />
                             <svg
+                              onClick={() =>
+                                handleCopyToClipboard(singleTransaction.txId)
+                              }
                               data-v-cd102a71
                               xmlns="http://www.w3.org/2000/svg"
                               xmlnsXlink="http://www.w3.org/1999/xlink"
@@ -809,17 +756,19 @@ const UserTransactions = () => {
                               <a
                                 href="javascript:void(0)"
                                 className="font-medium inline-flex text-gray-900 dark:text-white flex items-center hover:text-gray-600 dark:hover:text-gray-400 text-xs"
-                                onClick={() =>
-                                  handleCopyToClipboard(singleTransaction.txId)
-                                }
                               >
                                 {" "}
-                                <Truncate
-                                  text={singleTransaction.txId}
-                                  offset={6}
-                                  width="100"
+                                <input
+                                  type="text"
+                                  className="border  py-1 p-3"
+                                  onChange={handleInput}
+                                  value={singleTransaction.txId || ""}
+                                  name="txId"
                                 />
                                 <svg
+                                  onClick={() =>
+                                    handleCopyToClipboard(singleTransaction.txId)
+                                  }
                                   data-v-cd102a71
                                   xmlns="http://www.w3.org/2000/svg"
                                   xmlnsXlink="http://www.w3.org/1999/xlink"
@@ -904,7 +853,7 @@ const UserTransactions = () => {
                               type="text"
                               className="border  py-1 p-3"
                               onChange={handleInput}
-                              value={singleTransaction.fromAddress}
+                              value={singleTransaction.fromAddress || ""}
                               name="fromAddress"
                             />
                             <svg
@@ -959,8 +908,8 @@ const UserTransactions = () => {
                                 type="text"
                                 className="border  py-1 p-3"
                                 onChange={handleInput}
-                                value={singleTransaction.selectedPayment}
-                                readOnly
+                                value={singleTransaction.selectedPayment || ""}
+                                name="selectedPayment"
                               />
                               <svg
                                 onClick={() =>
@@ -1014,12 +963,12 @@ const UserTransactions = () => {
                                 type="text"
                                 className="border  py-1 p-3"
                                 onChange={handleInput}
-                                value={singleTransaction.txId}
-                                name="txId"
+                                value={singleTransaction.selectedPayment || ""}
+                                name="selectedPayment"
                               />
                               <svg
                                 onClick={() =>
-                                  handleCopyToClipboard(singleTransaction.txId)
+                                  handleCopyToClipboard(singleTransaction.selectedPayment)
                                 }
                                 data-v-cd102a71
                                 xmlns="http://www.w3.org/2000/svg"
@@ -1067,12 +1016,17 @@ const UserTransactions = () => {
                               <span>
                                 <input
                                   type="number"
+                                  step="any"
                                   onChange={handleInput}
-                                  value={Math.abs(singleTransaction.amount)} // Convert to positive value
+                                  value={
+                                    Number.isFinite(Number(singleTransaction.amount))
+                                      ? Math.abs(Number(singleTransaction.amount))
+                                      : ""
+                                  }
                                   name="amount"
                                   className="border w-102 py-1 p-3"
                                 />
-                                {singleTransaction.trxName.toLowerCase() === "bitcoin"
+                                {(singleTransaction.trxName || "").toLowerCase() === "bitcoin"
                                   ? " BTC"
                                   : singleTransaction.trxName.toLowerCase() === "ethereum"
                                     ? " ETH"
@@ -1081,7 +1035,13 @@ const UserTransactions = () => {
                                       : singleTransaction.trxName.toLowerCase() === "bnb"
                                         ? " BNB"
                                         : singleTransaction.trxName.toLowerCase() === "euro"
-                                          ? "EUR"
+                                          ? " EUR"
+                                          : singleTransaction.trxName.toLowerCase() === "dollar"
+                                            ? " USD"
+                                            : singleTransaction.trxName.toLowerCase() === "swiss franc"
+                                              ? " CHF"
+                                              : singleTransaction.trxName.toLowerCase() === "danish krone"
+                                                ? " DKK"
                                           : singleTransaction.trxName.toLowerCase() === "solana"
                                             ? "SOL"
                                             : singleTransaction.trxName.toLowerCase() === "xrp"
@@ -1116,7 +1076,7 @@ const UserTransactions = () => {
                                   ? (
                                     Math.abs(
                                       parseFloat(singleTransaction.amount)
-                                    ) * 2640.86 || 0
+                                    ) * (liveEth || 2640.86) || 0
                                   ).toFixed(2)
                                   : singleTransaction.trxName.toLowerCase() === "tether"
                                     ? (
@@ -1128,63 +1088,68 @@ const UserTransactions = () => {
                                       ? (
                                         Math.abs(
                                           parseFloat(singleTransaction.amount)
-                                        ) * 210.25 || 0
-                                      ).toFixed(2) // Example price
+                                        ) * (liveBnb || 210.25) || 0
+                                      ).toFixed(2)
                                       : singleTransaction.trxName.toLowerCase() === "xrp"
                                         ? (
                                           Math.abs(
                                             parseFloat(singleTransaction.amount)
-                                          ) * 0.5086 || 0
-                                        ).toFixed(2) // Example price
+                                          ) * (liveXrp || 0.5086) || 0
+                                        ).toFixed(2)
                                         : singleTransaction.trxName.toLowerCase() === "dogecoin"
                                           ? (
                                             Math.abs(
                                               parseFloat(singleTransaction.amount)
-                                            ) * 0.1163 || 0
-                                          ).toFixed(2) // Example price
+                                            ) * (liveDoge || 0.1163) || 0
+                                          ).toFixed(2)
                                           : singleTransaction.trxName.toLowerCase() === "toncoin"
                                             ? (
                                               Math.abs(
                                                 parseFloat(singleTransaction.amount)
-                                              ) * 5.76 || 0
-                                            ).toFixed(2) // Example price
+                                              ) * (liveTon || 5.76) || 0
+                                            ).toFixed(2)
                                             : singleTransaction.trxName.toLowerCase() === "chainlink"
                                               ? (
                                                 Math.abs(
                                                   parseFloat(singleTransaction.amount)
-                                                ) * 12.52 || 0
-                                              ).toFixed(2) // Example price
+                                                ) * (liveLink || 12.52) || 0
+                                              ).toFixed(2)
                                               : singleTransaction.trxName.toLowerCase() === "polkadot"
                                                 ? (
                                                   Math.abs(
                                                     parseFloat(singleTransaction.amount)
-                                                  ) * 4.76 || 0
-                                                ).toFixed(2) // Example price
+                                                  ) * (liveDot || 4.76) || 0
+                                                ).toFixed(2)
                                                 : singleTransaction.trxName.toLowerCase() === "near protocol"
                                                   ? (
                                                     Math.abs(
                                                       parseFloat(singleTransaction.amount)
-                                                    ) * 5.59 || 0
-                                                  ).toFixed(2) // Example price
+                                                    ) * (liveNear || 5.59) || 0
+                                                  ).toFixed(2)
                                                   : singleTransaction.trxName.toLowerCase() === "usd coin"
                                                     ? (
                                                       Math.abs(
                                                         parseFloat(singleTransaction.amount)
-                                                      ) * 0.99 || 0
-                                                    ).toFixed(2) // Example price
+                                                      ) * (liveUsdc || 0.99) || 0
+                                                    ).toFixed(2)
                                                     : singleTransaction.trxName.toLowerCase() === "tron"
                                                       ? (
                                                         Math.abs(
                                                           parseFloat(singleTransaction.amount)
-                                                        ) * 0.1531 || 0
-                                                      ).toFixed(2) // Example price
-                                                      : (0).toFixed(2)
+                                                        ) * (liveTrx || 0.1531) || 0
+                                                      ).toFixed(2)
+                                                      : isFiatCoin(singleTransaction.trxName)
+                                                        ? getFiatUsdEquivalent(
+                                                            singleTransaction.amount,
+                                                            singleTransaction.trxName
+                                                          )
+                                                        : (0).toFixed(2)
                                 })`}</span>
 
                             <svg
                               onClick={() =>
                                 handleCopyToClipboard(
-                                  singleTransaction.amount.toFixed(8)
+                                  Number(singleTransaction.amount || 0).toFixed(8)
                                 )
                               }
                               data-v-cd102a71
@@ -1285,7 +1250,7 @@ const UserTransactions = () => {
                                         Completed
                                       </div>
                                     </>
-                                  ) : Status === "failed" ? (
+                                  ) : Status === "failed" || Status === "rejected" ? (
                                     <>
                                       <div className="relative inline-flex shrink-0 items-center justify-center h-8 w-8 rounded-lg -ms-2 me-2 !h-6 !w-6">
                                         <svg
@@ -1307,9 +1272,11 @@ const UserTransactions = () => {
                                       </div>
 
                                       <div className="truncate text-left">
-                                        Failed
+                                        {Status === "rejected" ? "Rejected" : "Failed"}
                                       </div>
                                     </>
+                                  ) : Status ? (
+                                    <div className="truncate text-left capitalize">{Status}</div>
                                   ) : (
                                     <>
                                       <span className="border-muted-300 dark:border-muted-700 pointer-events-none absolute inset-y-0 end-0 flex items-center justify-center border-l w-10">
@@ -1457,6 +1424,41 @@ const UserTransactions = () => {
                                     </div>
                                     {/**/}
                                   </li>
+                                  <li
+                                    onClick={() => setStatus("rejected")}
+                                    className="relative flex cursor-pointer select-none items-center px-3 py-2 rounded"
+                                    id="headlessui-listbox.option-138"
+                                    role="option"
+                                    tabIndex={-1}
+                                    aria-selected="false"
+                                  >
+                                    <div className="relative inline-flex shrink-0 items-center justify-center h-10 w-10 rounded-lg text-muted-500 dark:text-muted-400 -ms-2 me-1">
+                                      <svg
+                                        data-v-cd102a71
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        xmlnsXlink="http://www.w3.org/1999/xlink"
+                                        aria-hidden="true"
+                                        role="img"
+                                        className="icon h-5 w-5  text-primary-500"
+                                        width="1em"
+                                        height="1em"
+                                        viewBox="0 0 256 256"
+                                      >
+                                        <path
+                                          fill="currentColor"
+                                          d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128L50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z"
+                                        />
+                                      </svg>
+                                    </div>
+                                    <div>
+                                      <h4 className="font-heading text-sm font-normal leading-normal leading-normal text-muted-800 block truncate dark:text-white">
+                                        Rejected
+                                      </h4>
+                                      <p className="font-sans text-xs font-normal leading-normal leading-normal text-muted-400">
+                                        Rejected
+                                      </p>
+                                    </div>
+                                  </li>
                                 </ul>
                               )}
 
@@ -1596,7 +1598,7 @@ const UserTransactions = () => {
                           <input
                             type="text"
                             onChange={handleInput}
-                            value={singleTransaction.note}
+                            value={singleTransaction.note || ""}
                             name="note"
                             className="border w-1001   py-1 p-3"
                           />
@@ -1615,47 +1617,37 @@ const UserTransactions = () => {
                           <input
                             type="text"
                             onChange={handleInput}
-                            value={singleTransaction.reference}
+                            value={singleTransaction.reference || ""}
                             name="reference"
                             className="border w-1001   py-1 p-3"
                           />
                         </a>
                       </dd>
                     </div>
-                    <div
-                      className="flex  justify-center mt-5
-                  "
-                    >
+                  </div>
+                  <div className="admin-tx-modal-footer">
+                        <button
+                          onClick={toggleModalClose}
+                          data-v-71bb21a6
+                          type="button"
+                          className="admin-tx-btn-close"
+                        >
+                          Close
+                        </button>
                       <button
                         onClick={() => approveTransaction(singleTransaction)}
                         disabled={isDisbaled}
-                        className="is-button rounded bg-primary-500 py-1 p-3 dark:bg-primary-500 hover:enabled:bg-primary-400 dark:hover:enabled:bg-primary-400 text-white hover:enabled:shadow-lg hover:enabled:shadow-primary-500/50 dark:hover:enabled:shadow-primary-800/20 focus-visible:outline-primary-400/70 focus-within:outline-primary-400/70 focus-visible:bg-primary-500 active:enabled:bg-primary-500 dark:focus-visible:outline-primary-400 dark:focus-within:outline-primary-400 dark:focus-visible:bg-primary-500 dark:active:enabled:bg-primary-500"
+                        className="admin-tx-btn-update"
                       >
                         Update
                       </button>
                       <button
                         onClick={() => deleteTransaction(singleTransaction)}
                         disabled={isDisbaled}
-                        className="is-button rounded bg-danger-500 ms-2 py-1 p-3 dark:bg-danger-500 hover:enabled:bg-danger-400 dark:hover:enabled:bg-danger-400 text-white hover:enabled:shadow-lg hover:enabled:shadow-danger-500/50 dark:hover:enabled:shadow-danger-800/20 focus-visible:outline-danger-400/70 focus-within:outline-danger-400/70 focus-visible:bg-danger-500 active:enabled:bg-danger-500 dark:focus-visible:outline-danger-400 dark:focus-within:outline-danger-400 dark:focus-visible:bg-danger-500 dark:active:enabled:bg-danger-500"
+                        className="admin-tx-btn-delete"
                       >
                         Delete
                       </button>
-                    </div>
-                  </div>
-
-                  <div className="flex w-full items-center gap-x-2 justify-end">
-                    <div className="p-4 md:p-6">
-                      <div className="flex gap-x-2">
-                        <button
-                          onClick={toggleModalClose}
-                          data-v-71bb21a6
-                          type="button"
-                          className="is-button rounded is-button-default"
-                        >
-                          Close
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1666,6 +1658,7 @@ const UserTransactions = () => {
 
       {/* Modal 1 */}
     </div>
+    </MemberShell>
   );
 };
 

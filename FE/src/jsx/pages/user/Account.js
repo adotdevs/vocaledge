@@ -1,6 +1,5 @@
 import React, { useContext, useEffect } from "react";
 import Nav from "../../layouts/nav";
-import RightWalletBar from "../../layouts/nav/RightWalletBar";
 import Footer from "../../layouts/Footer";
 import { ThemeContext } from "../../../context/ThemeContext";
 import PaymentMethods from "../report/PaymentMethods";
@@ -11,7 +10,7 @@ import { useNavigate } from "react-router-dom";
 import AllDocuments from "../dashboard/Documents";
 
 const Account = () => {
-  const { sidebariconHover, headWallet } = useContext(ThemeContext);
+  const { sidebariconHover } = useContext(ThemeContext);
   const sideMenu = useSelector((state) => state.sideMenu);
   const authUser = useAuthUser();
   const Navigate = useNavigate();
@@ -25,20 +24,16 @@ const Account = () => {
     }
   }, []);
   return (
-    <div
+      <div
       id="main-wrapper"
-      className={`show wallet-open ${headWallet ? "" : "active"} ${
+      className={`show ${
         sidebariconHover ? "iconhover-toggle" : ""
       } ${sideMenu ? "menu-toggle" : ""}`}
     >
       <Nav />
-      <RightWalletBar />
-      <div className="content-body new-bg-light">
-        <div
-          className="container-fluid"
-          style={{ minHeight: window.screen.height - 45 }}
-        >
-          <PaymentMethods />
+<div className="content-body new-bg-light">
+        <div className="container-fluid" style={{ minHeight: window.screen.height - 45 }}>
+<PaymentMethods />
         </div>
       </div>
       <Footer />

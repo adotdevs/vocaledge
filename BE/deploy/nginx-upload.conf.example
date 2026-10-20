@@ -1,0 +1,93 @@
+# VPS-wide upload limits (nginx on Ubuntu / Hostinger)
+#
+# ═══════════════════════════════════════════════════════════
+# ONE-TIME FIX FOR ALL SERVICES ON THE VPS
+# ═══════════════════════════════════════════════════════════
+#
+# Default nginx limit is 1MB — breaks KYC, tickets, CRM, any file API.
+#
+# SSH into VPS and run:
+#
+#   sudo bash /path/to/vocaledge/BE/deploy/fix-nginx-uploads.sh
+#
+# Custom size (e.g. 200MB for all sites):
+#
+#   sudo LIMIT=200m bash BE/deploy/fix-nginx-uploads.sh
+#
+# ═══════════════════════════════════════════════════════════
+# MANUAL — GLOBAL (recommended, affects every site)
+# ═══════════════════════════════════════════════════════════
+#
+# Create /etc/nginx/conf.d/00-vps-upload-limits.conf :
+#
+#   client_max_body_size 100m;
+#   client_body_timeout 300s;
+#   client_body_buffer_size 256k;
+#   proxy_read_timeout 300s;
+#   proxy_send_timeout 300s;
+#
+# Ubuntu nginx includes conf.d inside http { } — this applies to ALL vhosts.
+#
+#   sudo nginx -t
+#   sudo systemctl reload nginx
+#
+# ═══════════════════════════════════════════════════════════
+# MANUAL — inside nginx.conf (alternative)
+# ═══════════════════════════════════════════════════════════
+#
+# Edit /etc/nginx/nginx.conf , inside the http { } block add:
+#
+#   http {
+#       client_max_body_size 100m;
+#       ...
+#   }
+#
+# ═══════════════════════════════════════════════════════════
+# PER-SITE OVERRIDE (optional)
+# ═══════════════════════════════════════════════════════════
+#
+# Inside one server { } block only:
+#
+#   server {
+#       client_max_body_size 500m;   # bigger than global default
+#       ...
+#   }
+#
+# A smaller value in server {} can REDUCE limit for that site only.
+#
+# ═══════════════════════════════════════════════════════════
+# APACHE (if you use Apache instead of nginx)
+# ═══════════════════════════════════════════════════════════
+#
+# In apache config or .htaccess:
+#   LimitRequestBody 104857600
+#
+# Or in VirtualHost:
+#   <Directory /var/www/>
+#       LimitRequestBody 104857600
+#   </Directory>
+#
+#   sudo systemctl reload apache2
+#
+# ═══════════════════════════════════════════════════════════
+# NODE / EXPRESS (app level — already set in vocaledge BE)
+# ═══════════════════════════════════════════════════════════
+#
+# app.js: express.json({ limit: "50mb" })
+# multer: fileSize limits per route
+#
+# These only matter AFTER nginx lets the request through.
+#
+# ═══════════════════════════════════════════════════════════
+# CLOUDFLARE
+# ═══════════════════════════════════════════════════════════
+#
+# Proxied domains: usually up to 100MB on free plan.
+# 413 with nginx HTML page = fix VPS nginx first.
+#
+# ═══════════════════════════════════════════════════════════
+# VERIFY
+# ═══════════════════════════════════════════════════════════
+#
+#   sudo nginx -T | grep client_max_body_size
+#   curl -I https://api.vocaledge.io/api/v1/getLinks

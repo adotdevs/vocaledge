@@ -35,7 +35,48 @@ const ticketSchema = new mongoose.Schema({
         createdAt: {
             type: Date,
             default: Date.now
-        }
+        },
+        editedAt: {
+            type: Date,
+            default: null
+        },
+        editHistory: [{
+            previousDescription: {
+                type: String,
+                required: true
+            },
+            editedAt: {
+                type: Date,
+                default: Date.now
+            },
+            editedBy: {
+                type: String,
+                enum: ['user', 'admin'],
+                required: true
+            }
+        }],
+        emailFailed: {
+            type: Boolean,
+            default: false
+        },
+        attachments: [{
+            url: {
+                type: String,
+                required: true
+            },
+            fileName: {
+                type: String,
+                default: ''
+            },
+            mimeType: {
+                type: String,
+                default: ''
+            },
+            uploadedAt: {
+                type: Date,
+                default: Date.now
+            }
+        }]
     }],
     createdAt: {
         type: Date,

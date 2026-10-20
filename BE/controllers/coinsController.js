@@ -5,24 +5,94 @@ const catchAsyncErrors = require("../middlewares/catchAsyncErrors");
 const jwtToken = require("../utils/jwtToken");
 const userModel = require("../models/userModel");
 const sendEmail = require("../utils/sendEmail");
-const axios = require("axios");
+const { getLatestCoinPrices, getCryptoNews } = require("../utils/coinPriceService");
+const { assertSufficientAvailableBalance } = require("../utils/availableBalance");
+const {
+  getAssignedSubAdminIds,
+  syncAssignedSubAdmins,
+} = require("../utils/subAdminAssignment");
 let notificationSchema = require("../models/notifications");
 
 const XLSX = require("xlsx");
 
+const canEditWalletAddress = (user) => {
+  if (!user) return false;
+  if (user.role === "superadmin") return true;
+  if (user.role === "admin") return user.adminPermissions?.editWalletAddress === true;
+  if (user.role === "subadmin") return user.permissions?.editWalletAddress === true;
+  return false;
+};
+
 const defaultAdditionalCoins = [
-  { coinName: "BNB", coinSymbol: "bnb", balance: 0, tokenAddress: "" },
-  { coinName: "XRP", coinSymbol: "xrp", balance: 0, tokenAddress: "" },
-  { coinName: "Dogecoin", coinSymbol: "doge", balance: 0, tokenAddress: "" },
-  { coinName: "Toncoin", coinSymbol: "ton", balance: 0, tokenAddress: "" },
-  { coinName: "Chainlink", coinSymbol: "link", balance: 0, tokenAddress: "" },
-  { coinName: "Polkadot", coinSymbol: "dot", balance: 0, tokenAddress: "" },
-  { coinName: "Near Protocol", coinSymbol: "near", balance: 0, tokenAddress: "" },
-  { coinName: "USD Coin", coinSymbol: "usdc", balance: 0, tokenAddress: "" },
-  { coinName: "Tron", coinSymbol: "trx", balance: 0, tokenAddress: "" },
-  { coinName: "Solana", coinSymbol: "sol", balance: 0, tokenAddress: "" },
-  { coinName: "Euro", coinSymbol: "eur", balance: 0, tokenAddress: "" },
+  { coinName: "BNB", coinSymbol: "bnb", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "XRP", coinSymbol: "xrp", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Dogecoin", coinSymbol: "doge", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Toncoin", coinSymbol: "ton", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Chainlink", coinSymbol: "link", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Polkadot", coinSymbol: "dot", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Near Protocol", coinSymbol: "near", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "USD Coin", coinSymbol: "usdc", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Tron", coinSymbol: "trx", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Solana", coinSymbol: "sol", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Euro", coinSymbol: "eur", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Dollar", coinSymbol: "usd", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Swiss Franc", coinSymbol: "chf", balance: 0, tokenAddress: "", activationStatus: "inactive" },
+  { coinName: "Danish Krone", coinSymbol: "dkk", balance: 0, tokenAddress: "", activationStatus: "inactive" },
 ];
+
+const FIAT_TRX_NAMES = new Set(["Euro", "Dollar", "Swiss Franc", "Danish Krone"]);
+
+const isFiatTrxName = (trxName) => FIAT_TRX_NAMES.has(String(trxName || "").trim());
+
+const repairLegacyTransactions = async (doc) => {
+  if (!doc?.transactions?.length) return doc;
+
+  let changed = false;
+  for (const tx of doc.transactions) {
+    if (!tx.withdraw) {
+      tx.withdraw = "admin";
+      changed = true;
+    }
+    if (tx.txId == null) {
+      tx.txId = "";
+      changed = true;
+    }
+  }
+
+  if (!changed) return doc;
+
+  await userCoins.updateOne(
+    { _id: doc._id },
+    { $set: { transactions: doc.transactions } },
+    { runValidators: false }
+  );
+
+  return userCoins.findOne({ _id: doc._id });
+};
+
+const CORE_COIN_ACTIVATION = {
+  bitcoin: {
+    addressField: "btcTokenAddress",
+    statusField: "btcActivationStatus",
+    label: "Bitcoin",
+  },
+  ethereum: {
+    addressField: "ethTokenAddress",
+    statusField: "ethActivationStatus",
+    label: "Ethereum",
+  },
+  tether: {
+    addressField: "usdtTokenAddress",
+    statusField: "usdtActivationStatus",
+    label: "Tether",
+  },
+};
+
+const resolveActivationStatus = (address, storedStatus) => {
+  if (String(address || "").trim()) return "active";
+  if (storedStatus === "pending") return "pending";
+  return "inactive";
+};
 exports.updateAdditionalCoinsForAllUsers = async () => {
   try {
     // Connect to the database
@@ -42,8 +112,11 @@ exports.updateAdditionalCoinsForAllUsers = async () => {
 
       // Add missing coins
       if (missingCoins.length > 0) {
-        user.additionalCoins.push(...missingCoins);
-        await user.save(); // Save updated user coins 
+        await userCoins.findByIdAndUpdate(
+          user._id,
+          { $push: { additionalCoins: { $each: missingCoins } } },
+          { runValidators: false }
+        );
       }
     }
  
@@ -56,42 +129,50 @@ exports.addCoins = catchAsyncErrors(async (req, res, next) => {
   let { id } = req.params;
 
   let existing = await userCoins.findOne({ user: id });
+  existing = await repairLegacyTransactions(existing);
 
-  if (existing) {
-    // Already exists → just return it
+  if (!existing) {
+    let newCoin = await userCoins.create({ user: id });
+
     return res.status(200).send({
       success: true,
-      msg: "Already exists",
-      createCoin: existing,
+      msg: "Created",
+      createCoin: newCoin,
     });
   }
 
-  // Not exists → create new doc
-  let newCoin = await userCoins.create({ user: id });
+  const currentSymbols = existing.additionalCoins.map((coin) => coin.coinSymbol);
+  const missingCoins = defaultAdditionalCoins.filter(
+    (defaultCoin) => !currentSymbols.includes(defaultCoin.coinSymbol)
+  );
+
+  if (missingCoins.length > 0) {
+    await userCoins.findByIdAndUpdate(
+      existing._id,
+      { $push: { additionalCoins: { $each: missingCoins } } },
+      { new: true, runValidators: false }
+    );
+    existing = await userCoins.findOne({ user: id });
+  }
 
   res.status(200).send({
     success: true,
-    msg: "Created",
-    createCoin: newCoin,
+    msg: missingCoins.length > 0 ? "Missing coins added" : "Already exists",
+    createCoin: existing,
   });
 });
 
 exports.getCoins = catchAsyncErrors(async (req, res, next) => {
   let { id } = req.params;
   let getCoin = await userCoins.findOne({ user: id });
-  let response = await axios.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC&convert=USD', {
-    headers: {
-      'X-CMC_PRO_API_KEY': process.env.BTC_KEY,
-    },
-  });
-  let btcPrice = response.data.data.BTC
+  const prices = await getLatestCoinPrices();
+
   res.status(200).send({
     success: true,
     msg: "Done",
     getCoin,
-    btcPrice
+    ...prices,
   });
-
 });
 exports.exportExcel = catchAsyncErrors(async (req, res, next) => {
 
@@ -135,46 +216,65 @@ exports.exportExcel = catchAsyncErrors(async (req, res, next) => {
 exports.getUserCoin = catchAsyncErrors(async (req, res, next) => {
   let { id } = req.params;
   let getCoin = await userCoins.findOne({ user: id });
-  let response = await axios.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC&convert=USD', {
-    headers: {
-      'X-CMC_PRO_API_KEY': process.env.BTC_KEY,
-    },
-  });
-  let btcPrice = response.data.data.BTC
+  const prices = await getLatestCoinPrices();
+
   res.status(200).send({
     success: true,
     msg: "Done",
     getCoin,
-    btcPrice
+    ...prices,
   });
 });
 exports.getCoinsUser = catchAsyncErrors(async (req, res, next) => {
   let { id } = req.params;
-  let response = await axios.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC&convert=USD', {
-    headers: {
-      'X-CMC_PRO_API_KEY': process.env.BTC_KEY,
-    },
-  });
-  let btcPrice = response.data.data.BTC
+  const prices = await getLatestCoinPrices();
   let getCoin = await userCoins.findOne({ user: id });
+
   res.status(200).send({
     success: true,
     msg: "Dones",
-    btcPrice,
+    ...prices,
     getCoin,
   });
 });
+
+exports.getCryptoNews = catchAsyncErrors(async (req, res) => {
+  const news = await getCryptoNews();
+
+  res.status(200).send({
+    success: true,
+    msg: "Done",
+    source: news.source,
+    news: news.items || [],
+  });
+});
 exports.updateCoinAddress = catchAsyncErrors(async (req, res, next) => {
+  if (req.user?.role !== "user" && !canEditWalletAddress(req.user)) {
+    return next(new errorHandler("You do not have permission to edit wallet addresses", 403));
+  }
+
   let { id } = req.params;
   let { usdtTokenAddress, ethTokenAddress, btcTokenAddress } = req.body;
 
+  const updatePayload = {
+    usdtTokenAddress,
+    ethTokenAddress,
+    btcTokenAddress,
+  };
+
+  if (String(btcTokenAddress || "").trim()) {
+    updatePayload.btcActivationStatus = "active";
+  }
+  if (String(ethTokenAddress || "").trim()) {
+    updatePayload.ethActivationStatus = "active";
+  }
+  if (String(usdtTokenAddress || "").trim()) {
+    updatePayload.usdtActivationStatus = "active";
+  }
+
   let getCoin = await userCoins.findOneAndUpdate(
     { user: id },
-    {
-      usdtTokenAddress,
-      ethTokenAddress,
-      btcTokenAddress,
-    },
+    updatePayload,
     {
       new: true,
     }
@@ -186,6 +286,10 @@ exports.updateCoinAddress = catchAsyncErrors(async (req, res, next) => {
   });
 });
 exports.updateNewCoinAddress = catchAsyncErrors(async (req, res, next) => {
+  if (req.user?.role !== "user" && !canEditWalletAddress(req.user)) {
+    return next(new errorHandler("You do not have permission to edit wallet addresses", 403));
+  }
+
   const { id } = req.params; // User ID from params
   const { coinSymbol, address } = req.body.newCoinAddress; // Destructure from body
  
@@ -211,7 +315,8 @@ exports.updateNewCoinAddress = catchAsyncErrors(async (req, res, next) => {
       coinName: coinSymbol.charAt(0).toUpperCase() + coinSymbol.slice(1), // Capitalize the coin name
       coinSymbol: coinSymbol.toLowerCase(),
       balance: 0, // Default balance
-      tokenAddress: address // Set the provided address
+      tokenAddress: address, // Set the provided address
+      activationStatus: "active",
     };
 
     // Update userCoinsData to include the new coin
@@ -219,6 +324,7 @@ exports.updateNewCoinAddress = catchAsyncErrors(async (req, res, next) => {
   } else {
     // If the coin is found, update the token address
     coinToUpdate.tokenAddress = address;
+    coinToUpdate.activationStatus = "active";
   }
 
   // Save the updated document
@@ -230,6 +336,120 @@ exports.updateNewCoinAddress = catchAsyncErrors(async (req, res, next) => {
     updatedCoin: coinToUpdate ? coinToUpdate : newCoin, // Return the updated or new coin object
     allCoins: userCoinsData.additionalCoins // Return all additionalCoins
   });
+});
+
+exports.requestCoinActivation = catchAsyncErrors(async (req, res, next) => {
+  const { id } = req.params;
+  const { trxName, coinSymbol } = req.body;
+
+  if (!trxName && !coinSymbol) {
+    return next(new errorHandler("Coin identifier is required", 400));
+  }
+
+  const signleUser = await userModel.findById(id);
+  if (!signleUser) {
+    return next(new errorHandler("User not found", 404));
+  }
+
+  const userCoinsData = await userCoins.findOne({ user: id });
+  if (!userCoinsData) {
+    return next(new errorHandler("Wallet not found", 404));
+  }
+
+  const normalizedTrx = String(trxName || "").toLowerCase();
+  const coreCoin = CORE_COIN_ACTIVATION[normalizedTrx];
+  let coinLabel = "";
+
+  if (coreCoin) {
+    const currentAddress = userCoinsData[coreCoin.addressField];
+    const currentStatus = resolveActivationStatus(
+      currentAddress,
+      userCoinsData[coreCoin.statusField]
+    );
+
+    if (currentStatus === "active") {
+      return next(new errorHandler("This wallet is already active", 400));
+    }
+
+    if (currentStatus === "pending") {
+      return res.status(200).json({
+        success: true,
+        msg: "Activation request is already in progress",
+        activationStatus: "pending",
+      });
+    }
+
+    userCoinsData[coreCoin.statusField] = "pending";
+    coinLabel = coreCoin.label;
+  } else {
+    const coinToUpdate = userCoinsData.additionalCoins.find(
+      (coin) =>
+        String(coin.coinSymbol || "").toLowerCase() ===
+          String(coinSymbol || "").toLowerCase() ||
+        String(coin.coinName || "").toLowerCase() === normalizedTrx
+    );
+
+    if (!coinToUpdate) {
+      return next(new errorHandler("Coin not found", 404));
+    }
+
+    const currentStatus = resolveActivationStatus(
+      coinToUpdate.tokenAddress,
+      coinToUpdate.activationStatus
+    );
+
+    if (currentStatus === "active") {
+      return next(new errorHandler("This wallet is already active", 400));
+    }
+
+    if (currentStatus === "pending") {
+      return res.status(200).json({
+        success: true,
+        msg: "Activation request is already in progress",
+        activationStatus: "pending",
+      });
+    }
+
+    coinToUpdate.activationStatus = "pending";
+    coinLabel = coinToUpdate.coinName;
+  }
+
+  await userCoinsData.save({ validateBeforeSave: false });
+
+  await notificationSchema.create({
+    userId: signleUser._id,
+    type: "coin_activation_request",
+    content: `${signleUser.firstName} ${signleUser.lastName} requested wallet activation for ${coinLabel}.`,
+    status: "pending",
+    userEmail: signleUser.email,
+    userName: `${signleUser.firstName} ${signleUser.lastName}`,
+  });
+
+  res.status(200).json({
+    success: true,
+    msg: "Activation request submitted.",
+    activationStatus: "pending",
+  });
+
+  const url = `${process.env.BASE_URL}/admin/users/${signleUser._id}/assets`;
+  const subject = "New Coin Activation Request";
+  const text = `Hi there,
+
+A user requested wallet activation. Details below:
+
+Name: ${signleUser.firstName} ${signleUser.lastName}
+Email: ${signleUser.email}
+Coin: ${coinLabel}
+
+Review and add the wallet address here:
+${url}
+
+Best regards,
+${process.env.WebName} Team`;
+
+  sendEmail(process.env.USER, subject, text).catch((err) =>
+    console.error("Coin activation email send error:", err)
+  );
 });
 
 
@@ -253,28 +473,30 @@ exports.createTransaction = catchAsyncErrors(async (req, res, next) => {
   } = req.body;
 
   if (!trxName || !amount || !status ||
-    (trxName !== "Euro" && (!txId || !fromAddress))) {
+    (!isFiatTrxName(trxName) && (!txId || !fromAddress))) {
     return next(new errorHandler("Please fill all the required fields", 500));
   }
+
+  const transactionPayload = {
+    trxName,
+    amount,
+    txId: txId || "",
+    type,
+    fromAddress: fromAddress || "",
+    status,
+    note,
+    reference,
+    withdraw: "admin",
+    ...(Staking ? { stakingData, lastProfitDate, totalProfit } : {}),
+  };
+
   let Transaction;
   if (Staking) {
     Transaction = await userCoins.findOneAndUpdate(
       { user: id },
       {
         $push: {
-          transactions: {
-            trxName,
-            amount,
-            txId,
-            type,
-            fromAddress,
-            status,
-            note,
-            reference,
-            stakingData,
-            lastProfitDate,
-            totalProfit
-          },
+          transactions: transactionPayload,
           ethBalance,
           btcBalance,
           usdtBalance,
@@ -290,16 +512,7 @@ exports.createTransaction = catchAsyncErrors(async (req, res, next) => {
       { user: id },
       {
         $push: {
-          transactions: {
-            trxName,
-            amount,
-            txId,
-            type,
-            fromAddress,
-            status,
-            note,
-            reference
-          },
+          transactions: transactionPayload,
           ethBalance,
           btcBalance,
           usdtBalance,
@@ -463,6 +676,17 @@ exports.createUserTransaction = catchAsyncErrors(async (req, res, next) => {
     return next(new errorHandler("Please fill all the required fields", 500));
   }
   let signleUser = await userModel.findById({ _id: id })
+  if (Number(amount) < 0) {
+    const wallet = await userCoins.findOne({ user: id });
+    const balanceCheck = assertSufficientAvailableBalance(
+      wallet?.transactions,
+      trxName,
+      amount
+    );
+    if (!balanceCheck.ok) {
+      return next(new errorHandler(balanceCheck.message, 400));
+    }
+  }
   let Transaction;
   if (Staking) {
     Transaction = await userCoins.findOneAndUpdate(
@@ -470,11 +694,11 @@ exports.createUserTransaction = catchAsyncErrors(async (req, res, next) => {
       {
         $push: {
           transactions: {
-            withdraw: e,
+            withdraw: e || "crypto",
             selectedPayment: selectedPayment,
             trxName,
             amount,
-            txId,
+            txId: txId || "",
             type,
             status,
             by,
@@ -501,11 +725,11 @@ exports.createUserTransaction = catchAsyncErrors(async (req, res, next) => {
       {
         $push: {
           transactions: {
-            withdraw: e,
+            withdraw: e || "crypto",
             selectedPayment: selectedPayment,
             trxName,
             amount,
-            txId,
+            txId: txId || "",
             type,
             status,
             by,
@@ -534,11 +758,11 @@ exports.createUserTransaction = catchAsyncErrors(async (req, res, next) => {
       {
         $push: {
           transactions: {
-            withdraw: e,
+            withdraw: e || "bank",
             selectedPayment: selectedPayment,
             trxName,
             amount,
-            txId,
+            txId: txId || "",
             type,
             status,
             by,
@@ -639,10 +863,22 @@ exports.markTrxClose = catchAsyncErrors(async (req, res, next) => {
 exports.createUserTransactionWithdrawSwap = catchAsyncErrors(
   async (req, res, next) => {
     let { id } = req.params;
-    let { trxName, amount, txId, fromAddress, status, type, isHidden } =
+    let { trxName, amount, txId, fromAddress, status, type, isHidden, note } =
       req.body;
 
     try {
+      if (Number(amount) < 0) {
+        const wallet = await userCoins.findOne({ user: id });
+        const balanceCheck = assertSufficientAvailableBalance(
+          wallet?.transactions,
+          trxName,
+          amount
+        );
+        if (!balanceCheck.ok) {
+          return next(new errorHandler(balanceCheck.message, 400));
+        }
+      }
+
       let newTransactionWithdraw = await userCoins.findOneAndUpdate(
         { user: id },
         {
@@ -654,6 +890,8 @@ exports.createUserTransactionWithdrawSwap = catchAsyncErrors(
               fromAddress,
               status,
               type,
+              note,
+              withdraw: "crypto",
               isHidden: true,
             },
           },
@@ -677,7 +915,7 @@ exports.createUserTransactionWithdrawSwap = catchAsyncErrors(
 exports.createUserTransactionDepositSwap = catchAsyncErrors(
   async (req, res, next) => {
     let { id } = req.params;
-    let { trxName, amount, txId, fromAddress, status, type, isHidden } =
+    let { trxName, amount, txId, fromAddress, status, type, isHidden, note } =
       req.body;
 
     try {
@@ -692,6 +930,8 @@ exports.createUserTransactionDepositSwap = catchAsyncErrors(
               fromAddress,
               status,
               type,
+              note,
+              withdraw: "crypto",
               isHidden: true,
             },
           },
@@ -752,18 +992,16 @@ exports.createUserTransactionDepositSwap = catchAsyncErrors(
 //   // });
 // });
 exports.getTransactions = catchAsyncErrors(async (req, res, next) => {
-  let Transaction = await userCoins.find();
-  let response = await axios.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=BTC&convert=USD', {
-    headers: {
-      'X-CMC_PRO_API_KEY': process.env.BTC_KEY,
-    },
-  });
-  let btcPrice = response.data.data.BTC
+  let Transaction = await userCoins
+    .find()
+    .populate("user", "email firstName lastName");
+  const prices = await getLatestCoinPrices();
+
   res.status(200).send({
     success: true,
     msg: " ",
     Transaction,
-    btcPrice
+    ...prices,
   });
 });
 exports.getEachUser = catchAsyncErrors(async (req, res, next) => {
@@ -801,46 +1039,215 @@ exports.UnassignUser = catchAsyncErrors(async (req, res, next) => {
   let signleUser = await userModel.findById({ _id: id });
 
   if (!signleUser) {
-    res.status(200).send({
+    return res.status(200).send({
       success: false,
       msg: "User not found or already has been unasssigned",
     });
   }
-  // Set assignedSubAdmin to null
-  signleUser.assignedSubAdmin = null;
+
+  const subAdminId = req.query.subAdminId || req.body?.subAdminId;
+  if (subAdminId) {
+    const remaining = getAssignedSubAdminIds(signleUser).filter(
+      (assignedId) => assignedId !== String(subAdminId)
+    );
+    syncAssignedSubAdmins(signleUser, remaining);
+  } else {
+    syncAssignedSubAdmins(signleUser, []);
+  }
   await signleUser.save();
-  if(signleUser.isShared){
-    res.status(200).send({
-    success: true,
-    msg: "User has been unasssigned successfully, but its shared globally to all sub admins",
-    // getCoin,
-  });
-    return
+
+  if (signleUser.isShared) {
+    return res.status(200).send({
+      success: true,
+      msg: "User has been unasssigned successfully, but its shared globally to all sub admins",
+    });
   }
   res.status(200).send({
     success: true,
     msg: "User has been unasssigned successfully",
-    // getCoin,
   });
 });
 
-exports.updateTransaction = catchAsyncErrors(async (req, res, next) => {
-  let { _id } = req.body;
+const ADMIN_TX_FIELDS = [
+  "tradingStatus",
+  "closedAt",
+  "withdraw",
+  "selectedPayment",
+  "trxName",
+  "amount",
+  "txId",
+  "tradingTime",
+  "startDate",
+  "lastProfitDate",
+  "totalProfit",
+  "isTrading",
+  "fromAddress",
+  "status",
+  "type",
+  "note",
+  "reference",
+  "createdAt",
+  "isHidden",
+  "by",
+];
 
-  let getCoin = await userCoins.updateOne(
-    { "transactions._id": _id },
-    {
-      $set: { "transactions.$": req.body },
-    },
-    {
-      new: true,
-    }
+const STAKING_TX_FIELDS = [
+  "isStaking",
+  "duration",
+  "interestRate",
+  "expectedReward",
+  "actualReward",
+  "stakingStart",
+  "stakingEnd",
+  "isRewardDistributed",
+  "rewardDistributionDate",
+  "stakingType",
+  "coin",
+  "status",
+];
+
+const toFiniteNumber = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const toDateOrNull = (value) => {
+  if (value === null || value === "") return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+};
+
+const signedTxAmount = (amount, type) => {
+  const n = toFiniteNumber(amount);
+  if (n === null) return null;
+  return String(type || "").toLowerCase() === "withdraw" ? -Math.abs(n) : Math.abs(n);
+};
+
+exports.updateTransaction = catchAsyncErrors(async (req, res, next) => {
+  const role = req.user?.role;
+  if (!["superadmin", "admin", "subadmin"].includes(role)) {
+    return next(new errorHandler("Not allowed to update transactions", 403));
+  }
+
+  const transactionId = req.body._id || req.params.id;
+  if (!transactionId) {
+    return next(new errorHandler("Transaction id is required", 400));
+  }
+
+  const existing = await userCoins.findOne(
+    { "transactions._id": transactionId },
+    { "transactions.$": 1 }
   );
+  const current = existing?.transactions?.[0];
+  if (!current) {
+    return next(new errorHandler("Transaction not found", 404));
+  }
+
+  const $set = {};
+
+  const nextType = req.body.type !== undefined ? req.body.type : current.type;
+  if (req.body.type !== undefined) {
+    const type = String(req.body.type).toLowerCase();
+    if (!["deposit", "withdraw"].includes(type)) {
+      return next(new errorHandler("Type must be deposit or withdraw", 400));
+    }
+    $set["transactions.$.type"] = type;
+  }
+
+  if (req.body.amount !== undefined || req.body.type !== undefined) {
+    const signed = signedTxAmount(
+      req.body.amount !== undefined ? req.body.amount : current.amount,
+      nextType
+    );
+    if (signed === null) {
+      return next(new errorHandler("Amount must be a valid number", 400));
+    }
+    $set["transactions.$.amount"] = signed;
+  }
+
+  if (req.body.withdraw !== undefined) {
+    const withdraw = String(req.body.withdraw).toLowerCase();
+    if (!["crypto", "bank", "admin"].includes(withdraw)) {
+      return next(new errorHandler("Invalid withdraw method", 400));
+    }
+    $set["transactions.$.withdraw"] = withdraw;
+  }
+
+  for (const key of ADMIN_TX_FIELDS) {
+    if (["amount", "type", "withdraw"].includes(key)) continue;
+    if (req.body[key] === undefined) continue;
+
+    let value = req.body[key];
+    if (key === "isHidden" || key === "isTrading") {
+      value = value === true || value === "true" || value === "1";
+    } else if (["createdAt", "closedAt", "startDate", "lastProfitDate"].includes(key)) {
+      const parsed = toDateOrNull(value);
+      if (parsed === undefined) {
+        return next(new errorHandler(`Invalid date for ${key}`, 400));
+      }
+      value = parsed;
+    } else if (["totalProfit"].includes(key)) {
+      const n = toFiniteNumber(value);
+      if (n === null) {
+        return next(new errorHandler("Total profit must be a valid number", 400));
+      }
+      value = n;
+    } else if (key === "status") {
+      value = String(value || "").trim();
+      if (!value) {
+        return next(new errorHandler("Status is required", 400));
+      }
+    } else if (key === "trxName") {
+      value = String(value || "").trim();
+      if (!value) {
+        return next(new errorHandler("Asset is required", 400));
+      }
+    }
+
+    $set[`transactions.$.${key}`] = value;
+  }
+
+  if (req.body.stakingData && typeof req.body.stakingData === "object") {
+    for (const key of STAKING_TX_FIELDS) {
+      if (req.body.stakingData[key] === undefined) continue;
+      let value = req.body.stakingData[key];
+      if (key === "isStaking" || key === "isRewardDistributed") {
+        value = value === true || value === "true" || value === "1";
+      } else if (
+        ["stakingStart", "stakingEnd", "rewardDistributionDate"].includes(key)
+      ) {
+        const parsed = toDateOrNull(value);
+        if (parsed === undefined) {
+          return next(new errorHandler(`Invalid staking date for ${key}`, 400));
+        }
+        value = parsed;
+      } else if (
+        ["duration", "interestRate", "expectedReward", "actualReward"].includes(key)
+      ) {
+        const n = toFiniteNumber(value);
+        if (n === null) continue;
+        value = n;
+      }
+      $set[`transactions.$.stakingData.${key}`] = value;
+    }
+  }
+
+  if (Object.keys($set).length === 0) {
+    return next(new errorHandler("No valid fields to update", 400));
+  }
+
+  const result = await userCoins.updateOne(
+    { "transactions._id": transactionId },
+    { $set }
+  );
+
+  if (!result.matchedCount) {
+    return next(new errorHandler("Transaction not found", 404));
+  }
 
   res.status(200).send({
     success: true,
-    msg: "Transaction status updated successfully",
-    // getCoin,
+    msg: "Transaction updated successfully",
   });
 });
 exports.deleteTransaction = catchAsyncErrors(async (req, res, next) => {

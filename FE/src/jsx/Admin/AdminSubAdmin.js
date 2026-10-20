@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import AdminShell from "./theme/AdminShell";
+import AdminSkeleton from "./theme/AdminSkeleton";
 import SideBar from "../layouts/AdminSidebar/Sidebar";
 import useSWR from 'swr'
 import Log from "../../assets/images/img/log.jpg";
@@ -18,6 +20,8 @@ import { useAuthUser } from "react-auth-kit";
 import "react-responsive-modal/styles.css";
 import { Modal } from "react-responsive-modal";
 import AdminHeader from "./adminHeader";
+import AdminSmtpConfigCardSection from "./components/AdminSmtpConfigCardSection";
+import { getAssignedSubAdminIds } from "./assets/subAdminAssignment";
 import {
   Grid,
   Card,
@@ -84,9 +88,10 @@ const AdminSubAdmin = () => {
 
           // First count dedicated users
           usersResponse.allUsers.forEach(user => {
-            if (user.assignedSubAdmin && !user.isShared) {
-              dedicatedCounts[user.assignedSubAdmin] = (dedicatedCounts[user.assignedSubAdmin] || 0) + 1;
-            }
+            if (user.isShared) return;
+            getAssignedSubAdminIds(user).forEach((subadminId) => {
+              dedicatedCounts[subadminId] = (dedicatedCounts[subadminId] || 0) + 1;
+            });
           });
 
           // Count shared users (same count for all subadmins)
@@ -214,7 +219,7 @@ const AdminSubAdmin = () => {
       if (signleUser.success) {
         if (signleUser.signleUser.adminPermissions?.isSubManagement === false && signleUser.signleUser.role === "admin") {
           Navigate("/admin/dashboard")
-        }setsignedAdmin(signleUser.signleUser?.adminPermissions?.isEditSubManagementPermissions)
+        } setsignedAdmin(signleUser.signleUser?.adminPermissions?.isEditSubManagementPermissions)
       } else {
         toast.dismiss();
         toast.error(signleUser.msg);
@@ -261,6 +266,14 @@ const AdminSubAdmin = () => {
     }
   };
 
+  const handleSmtpUpdated = (userId, smtpConfig) => {
+    const applyUpdate = (list) =>
+      list.map((user) => (user._id === userId ? { ...user, smtpConfig } : user));
+
+    setUsers(applyUpdate);
+    setunVerified(applyUpdate);
+  };
+
   // Dark Theme Styles
   const darkCardStyles = {
     background: 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)',
@@ -301,7 +314,7 @@ const AdminSubAdmin = () => {
   };
 
   return (
-    <div className="admin dark-theme dark-new-ui">
+    <AdminShell><div className="admin dark-theme dark-new-ui">
       <div className="bg-gray-900 min-h-screen">
         <SideBar state={Active} toggle={toggleBar} />
         <div className="bg-gray-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
@@ -309,20 +322,8 @@ const AdminSubAdmin = () => {
             <AdminHeader toggle={toggleBar} pageName="Sub Admin Management" />
 
             {isLoading ? (
-              <Box sx={{ width: '100%', p: 4, textAlign: 'center' }}>
-                <LinearProgress
-                  sx={{
-                    height: 8,
-                    borderRadius: 4,
-                    backgroundColor: 'grey.800',
-                    '& .MuiLinearProgress-bar': {
-                      backgroundColor: 'primary.main'
-                    }
-                  }}
-                />
-                <Typography variant="h6" sx={{ mt: 2, color: 'grey.300' }}>
-                  Loading Sub Admins...
-                </Typography>
+              <Box sx={{ width: '100%', p: 4 }}>
+                <AdminSkeleton variant="cards" rows={3} />
               </Box>
             ) : (
               <Box sx={{ p: 3 }}>
@@ -351,10 +352,10 @@ const AdminSubAdmin = () => {
                               fontWeight: 'bold',
                               boxShadow: 2
                             }}>
-                              <Typography variant="body2" fontWeight={600}>
+                              <Typography variant="body2" fontWeight={600} sx={{ color: '#fff !important' }}>
                                 {userCounts[user._id] || 0} Users managed
                               </Typography>
-                              <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                              <Typography variant="caption" sx={{ color: '#fff !important', opacity: 0.85 }}>
                                 {dedicatedCounts?.[user._id] || 0} dedicated • {sharedCounts?.[user._id] || 0} shared
                               </Typography>
                             </Box>
@@ -476,11 +477,14 @@ const AdminSubAdmin = () => {
                                   </Typography>
                                   <Grid container spacing={1}>
                                     {[
+                                      { key: 'viewClientDetails', label: 'View Client Details' },
                                       { key: 'editUserProfile', label: 'Edit Profiles' },
                                       { key: 'editUserWallet', label: 'Edit Wallets' },
                                       { key: 'editWalletAddress', label: 'Wallet Addresses' },
                                       { key: 'addTransaction', label: 'Manage Transactions' },
-                                      { key: 'accessCrm', label: 'Access CRM' }
+                                      { key: 'accessCrm', label: 'Access CRM' },
+                                      { key: 'accessWallet', label: 'Wallet Access' },
+                                      { key: 'changeTicketStatus', label: 'Change Ticket Status' }
                                     ].map((permission) => (
                                       <Grid item xs={12} sm={6} key={permission.key}>
                                         <FormControlLabel
@@ -514,6 +518,12 @@ const AdminSubAdmin = () => {
                                   </Grid>
                                 </Box> : ""
                               }
+
+                              <AdminSmtpConfigCardSection
+                                user={user}
+                                onUpdated={handleSmtpUpdated}
+                                accentColor="secondary.main"
+                              />
                             </Stack>
                           </CardContent>
                         </Card>
@@ -619,10 +629,13 @@ const AdminSubAdmin = () => {
                                 </Typography>
                                 <Grid container spacing={1}>
                                   {[
+                                    { key: 'viewClientDetails', label: 'View Client Details' },
                                     { key: 'editUserProfile', label: 'Edit Profiles' },
                                     { key: 'editUserWallet', label: 'Edit Wallets' },
                                     { key: 'editWalletAddress', label: 'Wallet Addresses' },
-                                    { key: 'addTransaction', label: 'Manage Transactions' }
+                                    { key: 'addTransaction', label: 'Manage Transactions' },
+                                    { key: 'accessWallet', label: 'Wallet Access' },
+                                    { key: 'changeTicketStatus', label: 'Change Ticket Status' }
                                   ].map((permission) => (
                                     <Grid item xs={12} sm={6} key={permission.key}>
                                       <FormControlLabel
@@ -710,6 +723,7 @@ const AdminSubAdmin = () => {
         </Box>
       </Modal>
     </div>
+    </AdminShell>
   );
 };
 

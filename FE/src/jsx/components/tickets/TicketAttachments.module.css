@@ -1,0 +1,327 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.attachBtn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.45rem !important;
+  margin: 0 !important;
+  padding: 0.58rem 1.05rem !important;
+  border: 1px solid rgba(96, 165, 250, 0.42) !important;
+  border-radius: 10px !important;
+  background: rgba(37, 99, 235, 0.14) !important;
+  background-image: none !important;
+  color: #e0f2fe !important;
+  font-family: inherit !important;
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0.01em !important;
+  text-transform: none !important;
+  text-decoration: none !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease !important;
+}
+
+.attachBtn:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.24) !important;
+  border-color: rgba(147, 197, 253, 0.55) !important;
+  color: #f8fafc !important;
+}
+
+.attachBtn:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28) !important;
+}
+
+.attachBtn:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  color: #94a3b8 !important;
+}
+
+.attachIcon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #93c5fd !important;
+  flex-shrink: 0 !important;
+}
+
+.attachIcon svg {
+  display: block !important;
+  stroke: currentColor !important;
+}
+
+.attachBtn:hover:not(:disabled) .attachIcon {
+  color: #bfdbfe !important;
+}
+
+.hint {
+  font-size: 0.74rem !important;
+  color: #94a3b8 !important;
+  line-height: 1.4 !important;
+}
+
+:global(html[data-admin-ui="on"]) .attachBtn {
+  background: var(--admin-accent-soft) !important;
+  border: 1px solid var(--admin-accent) !important;
+  color: var(--admin-accent) !important;
+}
+
+:global(html[data-admin-ui="on"]) .attachBtn:hover:not(:disabled) {
+  background: var(--admin-accent) !important;
+  color: #ffffff !important;
+}
+
+:global(html[data-admin-ui="on"]) .attachIcon {
+  color: inherit !important;
+}
+
+:global(html[data-admin-ui="on"]) .hint {
+  color: var(--admin-text-secondary) !important;
+}
+
+:global(html[data-admin-ui="on"]) .pendingCard,
+:global(html[data-admin-ui="on"]) .messageCard {
+  background: var(--admin-surface-2) !important;
+  border-color: var(--admin-border) !important;
+}
+
+:global(html[data-admin-ui="on"]) .pendingName,
+:global(html[data-admin-ui="on"]) .messageCaption,
+:global(html[data-admin-ui="on"]) .editAttachmentsLabel {
+  color: var(--admin-text-secondary) !important;
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.pendingGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 0.65rem;
+}
+
+.pendingCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pendingRemove {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border: none !important;
+  border-radius: 50% !important;
+  background: rgba(15, 23, 42, 0.88) !important;
+  background-image: none !important;
+  color: #f8fafc !important;
+  font-size: 0.95rem !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+
+.pendingRemove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pendingThumbWrap {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pendingThumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pendingPdf {
+  background: linear-gradient(145deg, rgba(239, 68, 68, 0.18), rgba(15, 23, 42, 0.5));
+}
+
+.pdfIcon {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #fca5a5;
+}
+
+.pendingName {
+  font-size: 0.68rem;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pendingMeta {
+  font-size: 0.62rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.messageGallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  max-width: 520px;
+}
+
+.messageCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 12px;
+  padding: 0.45rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.messageCard:hover {
+  transform: translateY(-2px);
+  border-color: rgba(91, 141, 239, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.messageCardButton {
+  cursor: pointer !important;
+  text-align: left !important;
+  width: 100% !important;
+  font: inherit !important;
+  color: inherit !important;
+  background-image: none !important;
+  padding: 0.45rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.messageCardButton:disabled {
+  opacity: 0.65;
+  cursor: wait;
+  transform: none;
+}
+
+.messageThumbWrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.messageThumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.messageThumbLoaded {
+  opacity: 1;
+}
+
+.messageSkeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.messageCaption {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.1rem;
+}
+
+.messagePdfCard .messageThumbWrap {
+  aspect-ratio: 1;
+}
+
+.editAttachmentsWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.editAttachmentsLabel {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 480px) {
+  .messageGallery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: none;
+  }
+
+  .pendingGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

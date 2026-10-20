@@ -1,0 +1,410 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.walletBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.15rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+  letter-spacing: 0.01em;
+  user-select: none;
+  position: relative;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.walletBtn svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.walletBtn:hover svg {
+  transform: scale(1.08);
+}
+
+.walletBtnInitial {
+  background: linear-gradient(135deg, #4f7df3 0%, #7c5cff 50%, #9333ea 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 16px rgba(124, 92, 255, 0.45);
+  font-weight: 600;
+}
+
+.walletBtnInitial:hover {
+  background: linear-gradient(135deg, #3d6ae8 0%, #6b46ff 50%, #7e22ce 100%);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+  box-shadow: 0 6px 22px rgba(124, 92, 255, 0.6);
+  transform: translateY(-1.5px);
+}
+
+.walletBtnInitial:active {
+  transform: translateY(0);
+}
+
+.walletBtnPending {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  box-shadow: 0 2px 12px rgba(245, 158, 11, 0.2);
+  cursor: not-allowed;
+  opacity: 0.95;
+  font-weight: 600;
+}
+
+.pendingDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #fbbf24;
+  display: inline-block;
+  animation: pulseDot 1.5s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0);
+  }
+}
+
+.walletBtnActive {
+  background: linear-gradient(135deg, #10b981 0%, #06b6d4 50%, #3b82f6 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 18px rgba(16, 185, 129, 0.45), 0 0 0 1px rgba(6, 182, 212, 0.25);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.walletBtnActive:hover {
+  background: linear-gradient(135deg, #059669 0%, #0891b2 50%, #2563eb 100%);
+  box-shadow: 0 6px 24px rgba(16, 185, 129, 0.6), 0 0 0 2px rgba(6, 182, 212, 0.35);
+  transform: translateY(-1.5px);
+  color: #ffffff;
+}
+
+.walletBtnActive:active {
+  transform: translateY(0);
+}
+
+.tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tab {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.tabActive {
+  background: linear-gradient(135deg, #4f7df3, #7c5cff);
+  color: #fff;
+}
+
+.toolbar {
+  width: 100%;
+}
+
+.searchInput {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1a2330;
+  color: #e2e8f0;
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.searchInput::placeholder {
+  color: #64748b;
+}
+
+.searchInput:focus {
+  border-color: rgba(91, 141, 239, 0.55);
+  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.15);
+}
+
+.listCard {
+  border-radius: 20px;
+  background: #1a2330;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+}
+
+.listHeader {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  padding: 0.85rem 1.15rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 700;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.listRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.list li:last-child.listRow {
+  border-bottom: none;
+}
+
+.listItem {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.95rem 1.15rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  transition: background 0.18s ease;
+}
+
+.listRow:hover .listItem {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rowAction {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding-right: 1.15rem;
+  flex-shrink: 0;
+}
+
+.activateRowBtn {
+  border: none;
+  border-radius: 10px;
+  padding: 0.5rem 0.85rem;
+  background: linear-gradient(135deg, #5b8def, #4f7fe0);
+  color: #fff;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.activateRowBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.activateRowBtn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.pendingRowBtn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fcd34d;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.withdrawRowBtn {
+  border: none;
+  border-radius: 10px;
+  padding: 0.5rem 0.85rem;
+  background: rgba(239, 68, 68, 0.14);
+  color: #fca5a5;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.withdrawRowBtn:hover {
+  background: rgba(239, 68, 68, 0.22);
+  transform: translateY(-1px);
+}
+
+.itemLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.coinIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid color-mix(in srgb, var(--coin-accent, #5b8def) 35%, transparent);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.coinIcon img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+.coinIcon span {
+  font-weight: 700;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+}
+
+.itemMeta {
+  min-width: 0;
+}
+
+.itemMeta strong {
+  display: block;
+  font-size: 0.95rem;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemMeta span {
+  display: block;
+  margin-top: 0.12rem;
+  font-size: 0.76rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.statusBadge {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: #94a3b8;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.listItemInactive {
+  opacity: 0.82;
+}
+
+.itemRight {
+  text-align: right;
+}
+
+.itemRight strong {
+  display: block;
+  font-size: 0.92rem;
+  color: #f1f5f9;
+  white-space: nowrap;
+}
+
+.itemRight span {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: #7eb6ff;
+  font-weight: 600;
+}
+
+.chevron {
+  color: #475569;
+  font-size: 1.35rem;
+  line-height: 1;
+  padding-left: 0.15rem;
+}
+
+.listEmpty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .listHeader {
+    display: none;
+  }
+
+  .listRow {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .rowAction {
+    padding: 0 1rem 0.85rem;
+  }
+
+  .listItem {
+    grid-template-columns: 1fr auto;
+    padding: 0.85rem 1rem;
+  }
+
+  .chevron {
+    display: none;
+  }
+}

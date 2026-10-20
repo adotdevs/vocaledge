@@ -6,8 +6,29 @@ const sendEmail = require('./utils/sendEmail');
 const cron = require('node-cron');
 var bodyParser = require("body-parser");
 const { errorMiddleware } = require("./middlewares/errorMiddleware");
+
+// Add request logging at the very beginning (before any middleware)
+app.use((req, res, next) => {
+    if (req.url.includes('/crm/uploadLeads') && req.method === 'POST') {
+        console.log('🚀 [SERVER.JS] Request received at server level:', {
+            method: req.method,
+            url: req.url,
+            contentType: req.headers['content-type'],
+            contentLength: req.headers['content-length'],
+            contentLengthMB: req.headers['content-length'] ? (parseInt(req.headers['content-length']) / (1024 * 1024)).toFixed(2) + 'MB' : 'unknown',
+            host: req.headers.host,
+            remoteAddress: req.socket.remoteAddress,
+            timestamp: new Date().toISOString()
+        });
+    }
+    next();
+});
+
 // Database connect
-app.use(bodyParser.urlencoded({ extended: true }));
+// NOTE: bodyParser is already configured in app.js with 50MB limit
+// REMOVED: app.use(bodyParser.urlencoded({ extended: true }));
+// This was causing issues because it had no limit (defaults to 100kb) and was overriding app.js settings
+// All body-parser configuration is now in app.js with proper 50MB limits
 const database = require("./config/database");
 database();
 
@@ -29,8 +50,7 @@ const { Server } = require('socket.io');
 
 app.get("/", async (req, res) => {
   res.send("working");
-});
-let PORT = process.env.PORT || 4000;
+}); 
 cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLIENT_NAME,
   api_key: process.env.CLOUDINARY_CLIENT_API,
@@ -50,8 +70,9 @@ setInterval(async () => {
 }, 60 * 1000); // Check every 1 minute
 
 // Start server
-let server = app.listen(process.env.PORT, () => {
-  console.log(`server is running at ${process.env.PORT}`);
+let PORT = process.env.SERVER_PORT || 4006;
+let server = app.listen(PORT, () => {
+  console.log(`server is running at ${PORT}`);
 });
 
 // ✅ Setup Socket.io for real-time email queue updates
@@ -63,20 +84,14 @@ const io = new Server(server, {
 });
 
 // Socket.io connection
-io.on('connection', (socket) => {
-  console.log('🔌 Client connected to socket:', socket.id);
-  
-  socket.on('disconnect', () => {
-    console.log('🔌 Client disconnected:', socket.id);
-  });
-});
+ 
 
 // Make io available globally for emitting events
 global.io = io;
 
 // Initialize VoIP agent
 const WebRTCVoiceAgent = require('./voip/webrtcVoiceAgent');
-const { updateCallStatusInternal } = require('./controllers/callController');
+const { updateCallStatusInternal, addToCallQueue, getQueueStatus, processCallQueue } = require('./controllers/callController');
 let voipAgent = null;
 try {
     voipAgent = new WebRTCVoiceAgent();
@@ -343,9 +358,18 @@ processEmailQueue().then(() => {
 
 // ✅ Cron job: Delete 'sent' emails older than 10 days (runs daily at midnight)
 // Scheduled calls cron job - check every minute
+// IMPORTANT: This cron job only adds scheduled calls to the queue
+// It does NOT directly initiate calls to prevent conflicts with active calls
 cron.schedule('* * * * *', async () => {
     try {
         if (!global.voipAgent) return;
+        
+        // ✅ CRITICAL: Check if queue is paused - don't add any calls if paused
+        const queueStatus = getQueueStatus();
+        if (queueStatus.isPaused) {
+            // Queue is paused - don't add any calls, just return silently
+            return;
+        }
         
         const getCallModel = require('./crmDB/models/callModel');
         const Call = await getCallModel();
@@ -357,80 +381,171 @@ cron.schedule('* * * * *', async () => {
             scheduledAt: { $lte: now }
         }).limit(10); // Process max 10 at a time
         
+        if (scheduledCalls.length === 0) return;
+        
+        console.log(`⏰ [CRON] Found ${scheduledCalls.length} scheduled calls ready to process`);
+        
         for (const call of scheduledCalls) {
             try {
-                // Update status to ringing
-                call.status = 'ringing';
-                call.startedAt = new Date();
-                await call.save();
+                // Skip if call is already being processed (ringing, in-progress) or completed/failed
+                if (call.status !== 'scheduled') {
+                    console.log(`⚠️ [CRON] Call ${call._id} is not in scheduled status (${call.status}), skipping...`);
+                    continue;
+                }
                 
-                // Emit Socket.io event
-                if (global.io) {
-                    global.io.emit('call:status:update', {
-                        callId: call._id,
-                        sessionId: call.sessionId,
-                        leadId: call.leadId,
-                        status: 'ringing'
+                // Check if call is already in queue or being processed
+                const alreadyProcessing = await Call.findOne({
+                    _id: call._id,
+                    status: { $in: ['ringing', 'in-progress'] }
+                });
+                
+                if (alreadyProcessing) {
+                    console.log(`⚠️ [CRON] Call ${call._id} is already being processed (${alreadyProcessing.status}), skipping...`);
+                    continue;
+                }
+                
+                // Check if there's already an active call
+                const activeCall = await Call.findOne({
+                    _id: { $ne: call._id },
+                    status: { $in: ['initiating', 'ringing', 'in-progress'] }
+                });
+                
+                const hasActiveCall = !!(await Call.findOne({
+                    _id: { $ne: call._id },
+                    status: { $in: ['initiating', 'ringing', 'in-progress'] }
+                }));
+                
+                // Use the imported function to add to queue (with deduplication)
+                const added = addToCallQueue({
+                    callId: call._id.toString(),
+                    leadId: call.leadId,
+                    phoneNumber: call.phoneNumber,
+                    delay: 0, // No delay for scheduled calls
+                    total: 1,
+                    completed: 0
+                });
+                
+                if (!added) {
+                    // Call is already in queue – avoid noisy duplicate logs
+                    continue;
+                }
+                
+                // Only log when we actually enqueue the call
+                if (hasActiveCall) {
+                    console.log(`⏳ [CRON] Active call exists, scheduled call ${call._id} queued and will wait in queue`);
+                } else {
+                    console.log(`📅 [CRON] Scheduled call ${call._id} added to queue`);
+                }
+                
+                // Get queue status to check if processing (but only if not paused)
+                const currentQueueStatus = getQueueStatus();
+                if (!currentQueueStatus.isProcessingQueue && !currentQueueStatus.isPaused) {
+                    processCallQueue().catch(err => {
+                        console.error('❌ [CRON] Error starting queue processing:', err);
                     });
                 }
                 
-                // Fetch lead information for personalized conversation
-                const getLeadModel = require('./crmDB/models/leadsModel');
-                const Lead = await getLeadModel();
-                const lead = await Lead.findById(call.leadId);
+            } catch (error) {
+                console.error(`❌ [CRON] Error processing scheduled call ${call._id}:`, error);
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ [CRON] Error in scheduled calls cron:', error);
+    }
+});
+
+// ✅ CRON job: Clean up stuck calls (runs every 5 minutes)
+// This fixes calls that are stuck in "in-progress" status but have actually completed
+cron.schedule('*/5 * * * *', async () => {
+    try {
+        if (!global.voipAgent) return;
+        
+        const getCallModel = require('./crmDB/models/callModel');
+        const Call = await getCallModel();
+        
+        // Find calls stuck in "in-progress" or "ringing" for more than 10 minutes
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const stuckCalls = await Call.find({
+            status: { $in: ['in-progress', 'ringing'] },
+            startedAt: { $lt: tenMinutesAgo }
+        }).limit(50); // Process max 50 at a time
+        
+        if (stuckCalls.length === 0) return;
+        
+        console.log(`🧹 [CLEANUP] Found ${stuckCalls.length} potentially stuck calls, checking Vapi status...`);
+        
+        for (const call of stuckCalls) {
+            try {
+                // Check if call has a Vapi call ID
+                const vapiCallId = call.sessionId || call.metadata?.vapiCallId;
                 
-                const leadInfo = lead ? {
-                    firstName: lead.firstName || null,
-                    lastName: lead.lastName || null,
-                    email: lead.email || null,
-                    phone: lead.phone || null,
-                    country: lead.country || null,
-                    brand: lead.Brand || null,
-                    address: lead.Address || null,
-                    status: lead.status || null
-                } : {};
-                
-                // Initiate call
-                const callSession = await global.voipAgent.makeCall(call.phoneNumber, 'shimmer', null, { 
-                    leadId: call.leadId,
-                    callId: call._id.toString(),
-                    sessionId: call.sessionId,
-                    leadInfo: leadInfo // Pass lead information for personalized conversation
-                });
-                
-                // Update call with VoIP session ID if different
-                if (callSession && callSession.id && callSession.id !== call.sessionId) {
-                    call.sessionId = callSession.id;
-                    await call.save();
-                }
-                
-                // Update to in-progress after a delay
-                setTimeout(async () => {
-                    const updatedCall = await Call.findById(call._id);
-                    if (updatedCall && updatedCall.status === 'ringing') {
-                        updatedCall.status = 'in-progress';
-                        await updatedCall.save();
+                if (vapiCallId && global.voipAgent && global.voipAgent.vapi) {
+                    try {
+                        // Check actual Vapi status
+                        const vapiStatus = await global.voipAgent.vapi.getCallStatus(vapiCallId);
+                        const actualStatus = vapiStatus.status || vapiStatus.state;
+                        
+                        // If Vapi says call ended but CRM still shows in-progress, fix it
+                        if ((actualStatus === 'ended' || actualStatus === 'failed' || actualStatus === 'cancelled') && 
+                            (call.status === 'in-progress' || call.status === 'ringing')) {
+                            
+                            console.log(`🔧 [CLEANUP] Fixing stuck call ${call._id}: Vapi status is ${actualStatus}, CRM status is ${call.status}`);
+                            
+                            // Finalize the call properly
+                            await global.voipAgent.finalizeVapiCall(vapiCallId, { crmSessionId: call.sessionId }, vapiStatus);
+                            
+                            console.log(`✅ [CLEANUP] Call ${call._id} status updated from ${call.status} to completed/failed`);
+                        }
+                    } catch (vapiError) {
+                        // If we can't check Vapi (404, etc.), mark as failed if stuck for more than 15 minutes
+                        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+                        if (call.startedAt && new Date(call.startedAt) < fifteenMinutesAgo) {
+                            console.log(`⚠️ [CLEANUP] Call ${call._id} stuck for >15 minutes and Vapi check failed, marking as failed`);
+                            call.status = 'failed';
+                            call.endedAt = new Date();
+                            call.error = 'Call stuck in progress - auto-marked as failed after 15 minutes';
+                            await call.save();
+                            
+                            if (global.io) {
+                                global.io.emit('call:status:update', {
+                                    callId: call._id,
+                                    sessionId: call.sessionId,
+                                    leadId: call.leadId,
+                                    status: 'failed',
+                                    error: call.error
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    // No Vapi ID - if stuck for more than 15 minutes, mark as failed
+                    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+                    if (call.startedAt && new Date(call.startedAt) < fifteenMinutesAgo) {
+                        console.log(`⚠️ [CLEANUP] Call ${call._id} stuck for >15 minutes without Vapi ID, marking as failed`);
+                        call.status = 'failed';
+                        call.endedAt = new Date();
+                        call.error = 'Call stuck in progress - auto-marked as failed after 15 minutes';
+                        await call.save();
                         
                         if (global.io) {
                             global.io.emit('call:status:update', {
                                 callId: call._id,
                                 sessionId: call.sessionId,
                                 leadId: call.leadId,
-                                status: 'in-progress'
+                                status: 'failed',
+                                error: call.error
                             });
                         }
                     }
-                }, 2000);
-                
+                }
             } catch (error) {
-                console.error(`Error executing scheduled call ${call._id}:`, error);
-                call.status = 'failed';
-                call.endedAt = new Date();
-                await call.save();
+                console.error(`❌ [CLEANUP] Error processing stuck call ${call._id}:`, error.message);
             }
         }
+        
     } catch (error) {
-        console.error('Error in scheduled calls cron:', error);
+        console.error('❌ [CLEANUP] Error in stuck calls cleanup cron:', error);
     }
 });
 
@@ -459,3 +574,9 @@ cron.schedule('0 0 * * *', async () => {
 });
 
 console.log('✅ Cron job scheduled: Old sent emails cleanup (daily at midnight)\n');
+
+const { processDueReminders } = require('./controllers/reminderController');
+cron.schedule('* * * * *', async () => {
+  await processDueReminders();
+});
+console.log('✅ Cron job scheduled: CRM reminder notifications (every minute)\n');

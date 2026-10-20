@@ -4,31 +4,10 @@
  * 
  * @returns {string} Backend URL for Socket.io
  */
+import { getBackendUrl } from "../config/appConfig";
+
 export const getSocketBackendUrl = () => {
-  const hostname = window.location.hostname;
-  const isProduction = window.location.protocol === "https:" && !hostname.includes("localhost");
-
-  // First, try to use REACT_APP_API_URL if set
-  if (process.env.REACT_APP_API_URL) {
-    try {
-      const url = new URL(process.env.REACT_APP_API_URL);
-      return `${url.protocol}//${url.host}`;
-    } catch (e) {
-      // Invalid URL, continue to next options
-    }
-  }
-
-  // Use domain-specific API URLs in production
-  if (isProduction) { 
-
-
-    if (hostname.includes("vocaledge.io")) {
-      return 'https://api.vocaledge.io';
-    }
-  }
-
-  // Development fallback
-  return 'http://localhost:5000';
+  return getBackendUrl();
 };
 
 /**

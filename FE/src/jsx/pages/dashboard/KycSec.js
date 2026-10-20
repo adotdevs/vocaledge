@@ -12,6 +12,46 @@ import {
     ImagePreview,
     VideoPreview,
 } from "@files-ui/react";
+
+const KYC_FILE_ACCEPT = "image/jpeg,image/png,image/gif,image/webp,application/pdf,.pdf,image/*";
+const ALLOWED_KYC_MIME_TYPES = new Set([
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+]);
+
+const isPdfFile = (file) =>
+    file?.type === "application/pdf" || file?.name?.toLowerCase().endsWith(".pdf");
+
+const isAllowedKycFile = (file) =>
+    ALLOWED_KYC_MIME_TYPES.has(file?.type) || file?.name?.toLowerCase().endsWith(".pdf");
+
+const KycFilePreview = ({ file, previewUrl, imageClassName }) => {
+    if (!file || !previewUrl) {
+        return null;
+    }
+
+    if (isPdfFile(file)) {
+        return (
+            <div className="text-center mt-3 px-2">
+                <p className="text-white mb-2 text-truncate">{file.name}</p>
+                <embed
+                    src={previewUrl}
+                    type="application/pdf"
+                    width="100%"
+                    height="180px"
+                    className="rounded border border-secondary"
+                />
+            </div>
+        );
+    }
+
+    return <img className={imageClassName} src={previewUrl} alt="" />;
+};
+
 const Documents = ({ isLoading, setisLoading }) => {
 
     let SignOut = useSignOut();
@@ -42,12 +82,21 @@ const Documents = ({ isLoading, setisLoading }) => {
     let changeBanner1 = (e) => {
         const file = e.target.files[0];
         if (file) {
+            if (!isAllowedKycFile(file)) {
+                setNewSlider1("");
+                setSlide1("");
+                e.target.value = "";
+                toast.error("Please upload an image (JPG, PNG, GIF, WEBP) or PDF file.");
+                return;
+            }
+
             const fileSize = file.size;
 
-            const maxSize = 10 * 1024 * 1024; // 3MB max size
+            const maxSize = 10 * 1024 * 1024; // 10MB max size
             if (fileSize > maxSize) {
                 setNewSlider1("");
                 setSlide1(""); // Clear the input field
+                e.target.value = "";
                 toast.error("File size exceeds 10MB limit. Please choose a smaller file.");
                 return;
             }
@@ -64,6 +113,14 @@ const Documents = ({ isLoading, setisLoading }) => {
     let changeBanner2 = (e) => {
         const file = e.target.files[0];
         if (file) {
+            if (!isAllowedKycFile(file)) {
+                setNewSlider2("");
+                setSlide2("");
+                e.target.value = "";
+                toast.error("Please upload an image (JPG, PNG, GIF, WEBP) or PDF file.");
+                return;
+            }
+
             const fileSize = file.size;
 
             const maxSize = 10 * 1024 * 1024;
@@ -71,6 +128,7 @@ const Documents = ({ isLoading, setisLoading }) => {
                 toast.error("File size exceeds 10MB limit. Please choose a smaller file.");
                 setNewSlider2("");
                 setSlide2(""); // Clear the input field
+                e.target.value = "";
                 return;
             }
 
@@ -271,7 +329,7 @@ const Documents = ({ isLoading, setisLoading }) => {
                                                         Upload ID
                                                     </p>
                                                     <p className="font-alt text-xs  ">
-                                                        Please upload a clear image of a valid government-issued identification document (e.g., passport, national ID, or driver's license).
+                                                        Please upload a clear image or PDF of a valid government-issued identification document (e.g., passport, national ID, or driver's license).
                                                     </p>
 
                                                 </div>
@@ -283,10 +341,10 @@ const Documents = ({ isLoading, setisLoading }) => {
                                                         </g>
                                                     </svg>
                                                 </div>
-                                                <img className="logo-to-show" src={slide1} alt="" />
+                                                <KycFilePreview file={newSlider1} previewUrl={slide1} imageClassName="logo-to-show" />
                                                 <Form.Control
                                                     type="file"
-                                                    accept="image/*"
+                                                    accept={KYC_FILE_ACCEPT}
                                                     onChange={changeBanner1}
                                                     className="position-absolute top-0 start-0 w-100 h-100 opacity-0"
                                                 />
@@ -306,7 +364,7 @@ const Documents = ({ isLoading, setisLoading }) => {
                                                         Upload Utility Bill
                                                     </p>
                                                     <p className="font-alt text-xs  ">
-                                                        Please upload a clear image of a recent utility bill (e.g., electricity, water, or gas bill) in your name.
+                                                        Please upload a clear image or PDF of a recent utility bill (e.g., electricity, water, or gas bill) in your name.
                                                     </p>
 
                                                 </div>
@@ -318,10 +376,10 @@ const Documents = ({ isLoading, setisLoading }) => {
                                                         </g>
                                                     </svg>
                                                 </div>
-                                                <img className="logo-to-show2" src={slide2} alt="" />
+                                                <KycFilePreview file={newSlider2} previewUrl={slide2} imageClassName="logo-to-show2" />
                                                 <Form.Control
                                                     type="file"
-                                                    accept="image/*"
+                                                    accept={KYC_FILE_ACCEPT}
                                                     onChange={changeBanner2}
                                                     className="position-absolute top-0 start-0 w-100 h-100 opacity-0"
                                                 />

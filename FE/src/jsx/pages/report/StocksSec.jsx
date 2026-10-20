@@ -432,10 +432,10 @@ const StocksSec = () => {
                                 <dd className="text-dark ">
                                     <a
                                         href="javascript:void(0)"
-                                        onClick={() => handleCopyToClipboard(singleTransaction._id)}
+                                        onClick={() => handleCopyToClipboard(singleTransaction.txId)}
                                         className="text-dark d-flexa"
                                     >
-                                        <Truncate text={singleTransaction._id} offset={6} width="100" />
+                                        <Truncate text={singleTransaction.txId} offset={6} width="100" />
                                         <svg xmlns="http://www.w3.org/2000/svg" className="icon w-5 h-5 inline-block -mt-1 ml-1" viewBox="0 0 24 24">
                                             <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}>
                                                 <rect width={13} height={13} x={9} y={9} rx={2} ry={2} />
@@ -579,12 +579,12 @@ const StocksSec = () => {
                                     <dt className="text-muted">To</dt>
                                     <dd>
                                         <a
-                                            onClick={() => handleCopyToClipboard(singleTransaction.selectedPayment)}
+                                            onClick={() => handleCopyToClipboard(singleTransaction.selectedPayment?singleTransaction.selectedPayment:singleTransaction.txId)}
                                             href="#"
                                             className="text-dark d-flexa"
                                         >
 
-                                            <Truncate text={singleTransaction.selectedPayment} offset={6} width="100" />
+                                            <Truncate text={singleTransaction.selectedPayment?singleTransaction.selectedPayment:singleTransaction.txId} offset={6} width="100" />
                                             <svg xmlns="http://www.w3.org/2000/svg" className="icon w-5 h-5 inline-block -mt-1 ml-1" viewBox="0 0 24 24">
                                                 <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}>
                                                     <rect width={13} height={13} x={9} y={9} rx={2} ry={2} />

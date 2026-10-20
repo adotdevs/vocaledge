@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import AdminSkeleton from "../theme/AdminSkeleton";
 import SideBar from "../../layouts/AdminSidebar/Sidebar";
 import UserSideBar from "./UserSideBar";
 import Log from "../../../assets/images/img/log.jpg";
@@ -15,7 +16,9 @@ import { toast } from "react-toastify";
 
 import { FileCard, FullScreen, ImagePreview } from "@files-ui/react";
 import AdminHeader from "../adminHeader";
-const UserDocs = () => {
+import su from "./SingleUserLayout.module.css";
+import MemberShell from "./hub/MemberShell";
+const UserDocs = ({ embedded = false }) => {
   const [isLoading, setisLoading] = useState(false);
   const [allFiles, setallFiles] = useState([]);
   let { id } = useParams();
@@ -176,14 +179,14 @@ const UserDocs = () => {
     // console.log(btcBalance);
   }, []);
   return (
-    <div className="admin">
+    <MemberShell embedded={embedded}><div className={embedded ? undefined : "admin"}>
       <div>
-        <div className="bg-muted-100 dark:bg-muted-900 pb-20">
-          <SideBar state={Active} toggle={toggleBar} />
-          <div className="bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
-            <div className="mx-auto w-full max-w-7xl">
+        <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 pb-20"}>
+          {!embedded && <SideBar state={Active} toggle={toggleBar} />}
+          <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]"}>
+            <div className={embedded ? undefined : "mx-auto w-full max-w-7xl"}>
 
-              <AdminHeader toggle={toggleBar} pageName=" User Documents" />
+              {!embedded && <AdminHeader toggle={toggleBar} pageName=" User Documents" />}
               <div
                 className="nuxt-loading-indicator"
                 style={{
@@ -204,20 +207,15 @@ const UserDocs = () => {
                 }}
               />
               <seokit />
-              <div className="min-h-screen overflow-hidden">
-                <div className="grid gap-8 sm:grid-cols-12">
-                  <UserSideBar userid={id} />
-                  <div className="col-span-12 sm:col-span-8">
-                    <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 rounded-md">
-                      <div className="flex items-center justify-between p-4">
+              <div className={embedded ? undefined : "min-h-screen overflow-hidden"}>
+                <div className={embedded ? undefined : su.frame}>
+                  {!embedded && <UserSideBar userid={id} />}
+                  <div className={embedded ? undefined : su.main}>
+                    <div className={`${su.panel} border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 rounded-md`}>
+                      <div className={su.panelHead}>
                         <div>
-                          <p
-                            className="font-heading text-sm font-medium leading-normal leading-normal uppercase tracking-wider"
-                            tag="h2"
-                          >
-                            {" "}
-                            Manage Documents{" "}
-                          </p>
+                          <p className={su.kicker}>Files</p>
+                          <h2 className={su.title}>Manage Documents</h2>
                         </div>
                       </div>
                       <div>
@@ -281,7 +279,7 @@ const UserDocs = () => {
                         </div>
                       </div>
                       {isLoading ? (
-                        <div className="  p-5">Loading Assets...</div>
+                        <AdminSkeleton variant="list" rows={5} />
                       ) : (
                         <div className="p-4">
                           <h1 className="font-heading mb-3 font-bold text-2xl font- leading-normal leading-normal text-muted-800 hidden dark:text-white md:block">
@@ -344,6 +342,7 @@ const UserDocs = () => {
         <ImagePreview src={imgSrc} />
       </FullScreen>
     </div>
+    </MemberShell>
   );
 };
 

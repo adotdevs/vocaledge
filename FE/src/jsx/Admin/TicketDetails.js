@@ -1,22 +1,36 @@
 import React, { useEffect, useRef, useState } from 'react';
+import AdminShell from "./theme/AdminShell";
+import AdminSkeleton from "./theme/AdminSkeleton";
 import profile from "../../assets/images/7309681.jpg";
 import adminDp from "../../assets/admin.jpg";
 import { format, isWithinInterval, subDays, differenceInDays } from 'date-fns';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuthUser } from 'react-auth-kit';
-import { allUsersApi, getIndivTicketApi, signleUsersApi, updateMessageApi } from '../../Api/Service';
+import { allUsersApi, getIndivTicketApi, signleUsersApi, updateMessageApi, updateTicketStatusApi, editTicketMessageApi, deleteTicketMessageApi } from '../../Api/Service';
+import InlineTicketStatusCell from './components/InlineTicketStatusCell';
 import { toast } from 'react-toastify';
 import SideBar from "../layouts/AdminSidebar/Sidebar";
 import AdminHeader from "./adminHeader";
+import EmailTemplatesDialog from './components/EmailTemplatesDialog';
+import { isEmptyRichText, messageContainsHtml } from '../../utils/emailTemplateUtils';
+import { hasSubAdminAccessToUser } from './assets/subAdminAssignment';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
+import './TicketDetails.css';
+import styles from './TicketDetails.module.css';
+import {
+  TicketAttachmentInput,
+  TicketMessageAttachments,
+  TicketEditAttachments,
+  appendTicketAttachments,
+} from '../components/tickets/TicketAttachments';
 import {
   Box,
   Card,
   CardContent,
   Typography,
   Grid,
-  Chip,
   Button,
-  TextField,
   Paper,
   Avatar,
   Stack,
@@ -34,8 +48,21 @@ import {
   Email as EmailIcon,
   CalendarToday as CalendarIcon,
   Support as SupportIcon,
-  AdminPanelSettings as AdminIcon
+  AdminPanelSettings as AdminIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  Check as CheckIcon,
+  Close as CloseIcon,
+  History as HistoryIcon,
+  Description as TemplateIcon
 } from '@mui/icons-material';
+
+const TicketRichText = ({ html, className }) => {
+    if (messageContainsHtml(html)) {
+        return <div className={className} dangerouslySetInnerHTML={{ __html: html || "" }} />;
+    }
+    return <p className={className}>{html}</p>;
+};
 
 const AllTicket = () => {
     const messagesEndRef = useRef(null);
@@ -49,12 +76,57 @@ const AllTicket = () => {
     const [messages, setMessages] = useState([]);
     const [status, setStatus] = useState("");
     const [newMessage, setNewMessage] = useState("");
+    const [replyAttachments, setReplyAttachments] = useState([]);
     const [TicketUser, setTicketUser] = useState("");
     const [Active, setActive] = useState(false);
+    const [canChangeTicketStatus, setCanChangeTicketStatus] = useState(true);
+    const [editingMessageId, setEditingMessageId] = useState(null);
+    const [editingText, setEditingText] = useState("");
+    const [editingRemovedAttachmentIndexes, setEditingRemovedAttachmentIndexes] = useState([]);
+    const [actionLoading, setActionLoading] = useState(false);
+    const [openHistoryIds, setOpenHistoryIds] = useState({});
+    const [templatesDialogOpen, setTemplatesDialogOpen] = useState(false);
+    const [staffProfile, setStaffProfile] = useState(null);
+    const [statusUpdating, setStatusUpdating] = useState(false);
+
+    const isSuperAdmin = authUser()?.user?.role === 'superadmin';
+
+    const loadStaffProfile = async (user) => {
+        try {
+            const res = await signleUsersApi(user._id);
+            if (res.success) {
+                setStaffProfile(res.signleUser);
+            } else {
+                setStaffProfile(user);
+            }
+        } catch {
+            setStaffProfile(user);
+        }
+    };
 
     const toggleBar = () => {
         setActive(!Active);
     };
+    const loadTicketStatusPermission = async (user) => {
+        if (user.role === "admin" || user.role === "superadmin") {
+            setCanChangeTicketStatus(true);
+            return;
+        }
+
+        if (user.role === "subadmin") {
+            try {
+                const subadminDetails = await signleUsersApi(user._id);
+                if (subadminDetails.success) {
+                    setCanChangeTicketStatus(subadminDetails.signleUser?.permissions?.changeTicketStatus === true);
+                } else {
+                    setCanChangeTicketStatus(false);
+                }
+            } catch {
+                setCanChangeTicketStatus(false);
+            }
+        }
+    };
+
     const getTickets = async (showLoading = true) => {
         try {
             if (showLoading) setisLoading(true);
@@ -78,8 +150,7 @@ const AllTicket = () => {
                     return;
                 }
 
-                const hasPermission = user.isShared === true ||
-                    (user.isShared === false && user.assignedSubAdmin === authUser().user._id);
+                const hasPermission = hasSubAdminAccessToUser(user, authUser().user._id);
 
                 if (!hasPermission) {
                     toast.error("You don't have permission to view this ticket");
@@ -100,6 +171,7 @@ const AllTicket = () => {
                 const ticketData = indivTicket.ticket[0];
                 setTicket(ticketData);
                 setMessages(ticketData.ticketContent || []);
+                setStatus(ticketData.status || "open");
 
                 const userDetails = await signleUsersApi(ticketData.user);
                 if (userDetails.success) {
@@ -129,6 +201,8 @@ const AllTicket = () => {
 
         if (user.role === "admin" || user.role === "subadmin" || user.role === "superadmin") {
             setAdmin(user);
+            loadTicketStatusPermission(user);
+            loadStaffProfile(user);
             getTickets();
         } else if (user.role === "user") {
             Navigate("/dashboard");
@@ -189,35 +263,30 @@ const AllTicket = () => {
         }
     };
     const handleSendMessage = async () => {
-        if (!newMessage.trim()) {
-            toast.error("Message cannot be empty");
+        if (isEmptyRichText(newMessage) && replyAttachments.length === 0) {
+            toast.error("Add a message or at least one attachment");
             return;
         }
-        if (!status || status === "") {
-            toast.error("Please select new status for the ticket");
-            return;
-
-        }
+        const ticketStatus = status || Ticket.status;
         try {
             setIsDisable(true)
-            const messageData = {
-                status: status,
-                userId: id,
-                ticketId,
-                sender: "admin", // Or pass a role/identifier
-                description: newMessage
-            };
+            const formData = new FormData();
+            formData.append("status", ticketStatus);
+            formData.append("userId", id);
+            formData.append("ticketId", ticketId);
+            formData.append("sender", "admin");
+            formData.append("description", newMessage);
+            appendTicketAttachments(formData, replyAttachments);
 
-            const response = await updateMessageApi(messageData); // Make the API call
+            const response = await updateMessageApi(formData);
 
             if (response.success) {
                 toast.success("Ticket updated successfully!");
-                // Update messages array
-                setNewMessage(""); // Clear the textarea
-                setStatus(""); // Clear the status
-                // Don't refresh immediately - let the email failure flag be added first
+                setNewMessage("");
+                setReplyAttachments([]);
+                setStatus(ticketStatus);
                 setTimeout(() => {
-                    getTickets(false); // Refresh after a delay to allow email processing
+                    getTickets(false);
                 }, 2000);
             } else {
                 toast.error(response.msg);
@@ -226,9 +295,114 @@ const AllTicket = () => {
             toast.error("Failed to submit the ticket.");
         } finally {
             setIsDisable(false)
-
         }
     };
+
+    const handleDirectStatusChange = async (_ticket, nextStatus) => {
+        if (!canChangeTicketStatus || !Ticket?._id || nextStatus === Ticket.status) {
+            return;
+        }
+
+        setStatusUpdating(true);
+
+        try {
+            const response = await updateTicketStatusApi({
+                userId: id,
+                ticketId,
+                status: nextStatus,
+            });
+
+            if (response.success) {
+                toast.success("Ticket status updated and user notified by email");
+                setTicket((prev) => ({ ...prev, status: nextStatus, updatedAt: new Date().toISOString() }));
+                setStatus(nextStatus);
+            } else {
+                toast.error(response.msg || "Failed to update ticket status");
+            }
+        } catch (error) {
+            console.error("Error updating ticket status:", error);
+            toast.error("Failed to update ticket status");
+        } finally {
+            setStatusUpdating(false);
+        }
+    };
+
+    const handleStartEdit = (message) => {
+        setEditingMessageId(message._id);
+        setEditingText(message.description === "(Attachment)" ? "" : message.description);
+        setEditingRemovedAttachmentIndexes([]);
+    };
+
+    const handleCancelEdit = () => {
+        setEditingMessageId(null);
+        setEditingText("");
+        setEditingRemovedAttachmentIndexes([]);
+    };
+
+    const handleRemoveEditAttachment = (index) => {
+        setEditingRemovedAttachmentIndexes((prev) =>
+            prev.includes(index) ? prev : [...prev, index]
+        );
+    };
+
+    const handleSaveEdit = async (message) => {
+        const remainingAttachments =
+            (message.attachments?.length || 0) - editingRemovedAttachmentIndexes.length;
+
+        if (isEmptyRichText(editingText) && remainingAttachments <= 0) {
+            toast.error("Message cannot be empty");
+            return;
+        }
+        try {
+            setActionLoading(true);
+            const response = await editTicketMessageApi(id, ticketId, message._id, {
+                description: editingText.trim(),
+                removedAttachmentIndexes: editingRemovedAttachmentIndexes,
+            });
+            if (response.success) {
+                toast.success("Message updated");
+                handleCancelEdit();
+                getTickets(false);
+            } else {
+                toast.error(response.msg || "Failed to update message");
+            }
+        } catch {
+            toast.error("Failed to update message");
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const toggleHistory = (messageId) => {
+        setOpenHistoryIds((prev) => ({
+            ...prev,
+            [messageId]: !prev[messageId],
+        }));
+    };
+
+    const handleDeleteMessage = async (messageId) => {
+        if (!window.confirm("Delete this message? This cannot be undone.")) {
+            return;
+        }
+        try {
+            setActionLoading(true);
+            const response = await deleteTicketMessageApi(id, ticketId, messageId);
+            if (response.success) {
+                toast.success("Message deleted");
+                if (editingMessageId === messageId) {
+                    handleCancelEdit();
+                }
+                getTickets(false);
+            } else {
+                toast.error(response.msg || "Failed to delete message");
+            }
+        } catch {
+            toast.error("Failed to delete message");
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     const isTicketClosed = () => {
         if (Ticket.status === "open") {
             return false; // Ticket cannot be closed if its status is "open"
@@ -246,45 +420,18 @@ const AllTicket = () => {
         }, 500);
     }, [messages]);
 
-    const getStatusColor = (status) => {
-        switch(status) {
-            case 'open':
-                return { bg: 'rgba(255, 152, 0, 0.2)', color: '#ff9800' };
-            case 'solved':
-                return { bg: 'rgba(76, 175, 80, 0.2)', color: '#4caf50' };
-            case 'awaiting reply':
-                return { bg: 'rgba(33, 150, 243, 0.2)', color: '#2196f3' };
-            default:
-                return { bg: 'rgba(255, 255, 255, 0.1)', color: 'grey.400' };
-        }
-    };
-
-    const statusColors = Ticket.status ? getStatusColor(Ticket.status) : { bg: 'rgba(255, 255, 255, 0.1)', color: 'grey.400' };
-
     return (
-        <div className="admin dark-new-ui">
-            <div className="bg-gray-900 min-h-screen">
+        <AdminShell><div className={`admin ${styles.page}`}>
+            <div className="bg-muted-100 dark:bg-muted-900 min-h-screen">
                 <SideBar state={Active} toggle={toggleBar} />
                 
-                <div className="bg-gray-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
+                <div className="relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
                     <div className="mx-auto w-full max-w-7xl">
                         <AdminHeader toggle={toggleBar} pageName="Ticket Details" />
 
                         {isLoading ? (
                             <Box sx={{ width: '100%', p: 4 }}>
-                                <LinearProgress
-                                    sx={{
-                                        height: 8,
-                                        borderRadius: 4,
-                                        backgroundColor: 'grey.800',
-                                        '& .MuiLinearProgress-bar': {
-                                            backgroundColor: 'primary.main'
-                                        }
-                                    }}
-                                />
-                                <Typography variant="h6" align="center" sx={{ mt: 2, color: 'grey.300' }}>
-                                    Loading ticket details...
-                                </Typography>
+                                <AdminSkeleton variant="ticket" rows={4} />
                             </Box>
                         ) : (
                             <Box sx={{ px: { xs: 2, md: 4 }, py: 3 }}>
@@ -300,19 +447,15 @@ const AllTicket = () => {
                                     >
                                         <ArrowBackIcon />
                                     </IconButton>
-                                    <Typography variant="h4" sx={{ color: 'white', fontWeight: 700 }}>
+                                    <Typography variant="h4" className={styles.heading} sx={{ fontWeight: 700, flex: 1 }}>
                                         {Ticket.title}
                                     </Typography>
-                                    <Chip
-                                        label={Ticket.status}
-                                        size="medium"
-                                        sx={{
-                                            bgcolor: statusColors.bg,
-                                            color: statusColors.color,
-                                            fontWeight: 600,
-                                            textTransform: 'capitalize',
-                                            fontSize: '0.875rem'
-                                        }}
+                                    <InlineTicketStatusCell
+                                        ticket={Ticket}
+                                        onStatusChange={handleDirectStatusChange}
+                                        saving={statusUpdating}
+                                        disabled={!canChangeTicketStatus}
+                                        chipSize="medium"
                                     />
                                 </Box>
 
@@ -321,15 +464,14 @@ const AllTicket = () => {
                                     <Grid item xs={12} md={8}>
                                         <Paper
                                             elevation={0}
+                                            className={styles.panel}
                                             sx={{
-                                                background: 'rgba(255, 255, 255, 0.02)',
-                                                border: '1px solid rgba(255, 255, 255, 0.08)',
                                                 borderRadius: 3,
                                                 p: 3,
                                                 mb: 3
                                             }}
                                         >
-                                            <Typography variant="h6" sx={{ color: 'white', fontWeight: 600, mb: 3 }}>
+                                            <Typography variant="h6" className={styles.heading} sx={{ fontWeight: 600, mb: 3 }}>
                                                 Messages
                                             </Typography>
 
@@ -337,15 +479,10 @@ const AllTicket = () => {
                                             <Stack spacing={3} sx={{ mb: 4 }}>
                                                 {messages.map((message, index) => (
                                                     <Card
-                                                        key={index}
+                                                        key={message._id || index}
                                                         elevation={0}
+                                                        className={styles.msgCard}
                                                         sx={{
-                                                            background: message.sender === 'admin' 
-                                                                ? 'linear-gradient(135deg, #1e3a5f 0%, #2d5a8c 100%)'
-                                                                : 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)',
-                                                            border: message.sender === 'admin'
-                                                                ? '1px solid rgba(66, 165, 245, 0.2)'
-                                                                : '1px solid rgba(255, 255, 255, 0.1)',
                                                             borderRadius: 2,
                                                             position: 'relative'
                                                         }}
@@ -364,36 +501,140 @@ const AllTicket = () => {
                                                                     {message.sender === 'admin' ? <AdminIcon /> : <PersonIcon />}
                                                                 </Avatar>
                                                                 <Box sx={{ flex: 1 }}>
-                                                                    <Typography 
-                                                                        variant="subtitle1" 
-                                                                        sx={{ 
-                                                                            color: 'white', 
-                                                                            fontWeight: 600,
-                                                                            mb: 1,
-                                                                            textTransform: 'capitalize',
-                                                                            cursor: message.sender === 'user' ? 'pointer' : 'default'
-                                                                        }}
-                                                                        onClick={message.sender === 'user' ? () => Navigate(`/admin/user/${TicketUser?._id}/general`) : undefined}
-                                                                    >
-                                                                        {message.sender === 'user' 
-                                                                            ? (TicketUser ? `${TicketUser.firstName} ${TicketUser.lastName}` : 'User')
-                                                                            : 'Support Team'
-                                                                        }
-                                                                    </Typography>
-                                                                    <Typography 
-                                                                        variant="body1" 
-                                                                        sx={{ 
-                                                                            color: 'rgba(255, 255, 255, 0.9)', 
-                                                                            whiteSpace: 'pre-wrap',
-                                                                            mb: 2,
-                                                                            lineHeight: 1.6
-                                                                        }}
-                                                                    >
-                                                                        {message.description}
-                                                                    </Typography>
-                                                                    <Typography variant="caption" sx={{ color: 'grey.400' }}>
+                                                                    <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+                                                                        <Typography 
+                                                                            variant="subtitle1" 
+                                                                            className={styles.msgName}
+                                                                            sx={{ 
+                                                                                fontWeight: 600,
+                                                                                textTransform: 'capitalize',
+                                                                                cursor: message.sender === 'user' ? 'pointer' : 'default'
+                                                                            }}
+                                                                            onClick={message.sender === 'user' ? () => Navigate(`/admin/user/${TicketUser?._id}/general`) : undefined}
+                                                                        >
+                                                                            {message.sender === 'user' 
+                                                                                ? (TicketUser ? `${TicketUser.firstName} ${TicketUser.lastName}` : 'User')
+                                                                                : 'Support Team'
+                                                                            }
+                                                                        </Typography>
+                                                                        <Stack direction="row" spacing={0.5} className="ticket-msg-actions">
+                                                                            {message.sender === 'admin' && editingMessageId !== message._id && (
+                                                                                <Button
+                                                                                    size="small"
+                                                                                    className="ticket-msg-action-btn ticket-msg-action-btn--edit"
+                                                                                    onClick={() => handleStartEdit(message)}
+                                                                                    disabled={actionLoading}
+                                                                                    startIcon={<EditIcon />}
+                                                                                >
+                                                                                    Edit
+                                                                                </Button>
+                                                                            )}
+                                                                            <Button
+                                                                                size="small"
+                                                                                className="ticket-msg-action-btn ticket-msg-action-btn--delete"
+                                                                                onClick={() => handleDeleteMessage(message._id)}
+                                                                                disabled={actionLoading}
+                                                                                startIcon={<DeleteIcon />}
+                                                                            >
+                                                                                Delete
+                                                                            </Button>
+                                                                        </Stack>
+                                                                    </Stack>
+                                                                    {editingMessageId === message._id ? (
+                                                                        <Box>
+                                                                            <Box className="ticket-compose-quill" sx={{ mb: 1 }}>
+                                                                                <ReactQuill
+                                                                                    theme="snow"
+                                                                                    value={editingText}
+                                                                                    onChange={setEditingText}
+                                                                                    modules={{
+                                                                                        toolbar: [
+                                                                                            ['bold', 'italic', 'underline'],
+                                                                                            [{ list: 'ordered' }, { list: 'bullet' }],
+                                                                                            [{ color: [] }],
+                                                                                            ['link', 'clean'],
+                                                                                        ],
+                                                                                    }}
+                                                                                />
+                                                                            </Box>
+                                                                            <TicketEditAttachments
+                                                                                attachments={message.attachments}
+                                                                                removedIndexes={editingRemovedAttachmentIndexes}
+                                                                                onRemove={handleRemoveEditAttachment}
+                                                                                disabled={actionLoading}
+                                                                            />
+                                                                            <Stack direction="row" spacing={1} className="ticket-msg-actions">
+                                                                                <Button
+                                                                                    size="small"
+                                                                                    className="ticket-msg-action-btn ticket-msg-action-btn--save"
+                                                                                    onClick={() => handleSaveEdit(message)}
+                                                                                    disabled={actionLoading}
+                                                                                    startIcon={<CheckIcon />}
+                                                                                >
+                                                                                    Save
+                                                                                </Button>
+                                                                                <Button
+                                                                                    size="small"
+                                                                                    className="ticket-msg-action-btn ticket-msg-action-btn--cancel"
+                                                                                    onClick={handleCancelEdit}
+                                                                                    disabled={actionLoading}
+                                                                                    startIcon={<CloseIcon />}
+                                                                                >
+                                                                                    Cancel
+                                                                                </Button>
+                                                                            </Stack>
+                                                                        </Box>
+                                                                    ) : (
+                                                                        <>
+                                                                            {messageContainsHtml(message.description) ? (
+                                                                                <TicketRichText
+                                                                                    html={message.description}
+                                                                                    className={`${styles.msgHtml} ticket-message-html`}
+                                                                                />
+                                                                            ) : String(message.description || "").trim() && String(message.description).trim() !== "(Attachment)" ? (
+                                                                                <p className={styles.msgPlain}>
+                                                                                    {message.description}
+                                                                                </p>
+                                                                            ) : null}
+                                                                            <TicketMessageAttachments
+                                                                                attachments={message.attachments}
+                                                                                userId={id}
+                                                                                ticketId={ticketId}
+                                                                                messageId={message._id}
+                                                                            />
+                                                                        </>
+                                                                    )}
+                                                                    <Typography variant="caption" className={styles.msgMeta}>
                                                                         {formatDate(message.createdAt)}
+                                                                        {message.editedAt ? " (edited)" : ""}
                                                                     </Typography>
+                                                                    {Array.isArray(message.editHistory) && message.editHistory.length > 0 && (
+                                                                        <Box className="ticket-edit-history" sx={{ mt: 1.5 }}>
+                                                                            <Button
+                                                                                size="small"
+                                                                                className="ticket-msg-action-btn ticket-msg-action-btn--cancel"
+                                                                                onClick={() => toggleHistory(message._id)}
+                                                                                startIcon={<HistoryIcon />}
+                                                                            >
+                                                                                Edit history ({message.editHistory.length})
+                                                                            </Button>
+                                                                            {openHistoryIds[message._id] && (
+                                                                                <Stack spacing={1.25} sx={{ mt: 1.25 }}>
+                                                                                    {[...message.editHistory].reverse().map((entry, historyIndex) => (
+                                                                                        <Box key={historyIndex} className={`ticket-edit-history-item ${styles.historyItem}`}>
+                                                                                            <Typography variant="caption" className={styles.msgMeta} sx={{ display: 'block', mb: 0.5 }}>
+                                                                                                {formatDateNew(entry.editedAt)} · {entry.editedBy === "admin" ? "Support" : "User"}
+                                                                                            </Typography>
+                                                                                            <TicketRichText
+                                                                                                html={entry.previousDescription}
+                                                                                                className={`${styles.historyHtml} ticket-edit-history-html`}
+                                                                                            />
+                                                                                        </Box>
+                                                                                    ))}
+                                                                                </Stack>
+                                                                            )}
+                                                                        </Box>
+                                                                    )}
                                                                 </Box>
                                                             </Stack>
                                                         </CardContent>
@@ -431,61 +672,76 @@ const AllTicket = () => {
                                             {/* Send Message Section */}
                                             <Divider sx={{ my: 3, borderColor: 'rgba(255, 255, 255, 0.08)' }} />
                                             
-                                            <Typography variant="h6" sx={{ color: 'white', fontWeight: 600, mb: 2 }}>
+                                            <Typography variant="h6" className={styles.heading} sx={{ fontWeight: 600, mb: 2 }}>
                                                 Send a Message
                                             </Typography>
 
-                                            <TextField
-                                                fullWidth
-                                                multiline
-                                                rows={4}
-                                                placeholder="Type your message here..."
-                                                value={newMessage}
-                                                onChange={(e) => setNewMessage(e.target.value)}
-                                                sx={{
-                                                    mb: 2,
-                                                    '& .MuiInputLabel-root': { color: 'grey.400' },
-                                                    '& .MuiOutlinedInput-root': {
-                                                        color: 'white',
-                                                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                                                        '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.1)' },
-                                                        '&:hover fieldset': { borderColor: 'rgba(255, 255, 255, 0.2)' },
-                                                        '&.Mui-focused fieldset': { borderColor: 'primary.main' }
-                                                    }
-                                                }}
-                                            />
+                                            <Box className="ticket-compose-quill" sx={{ mb: 2 }}>
+                                                <ReactQuill
+                                                    theme="snow"
+                                                    value={newMessage}
+                                                    onChange={setNewMessage}
+                                                    placeholder="Type your message here..."
+                                                    modules={{
+                                                        toolbar: [
+                                                            ['bold', 'italic', 'underline'],
+                                                            [{ list: 'ordered' }, { list: 'bullet' }],
+                                                            [{ color: [] }],
+                                                            ['link', 'clean'],
+                                                        ],
+                                                    }}
+                                                />
+                                            </Box>
 
-                                            <FormControl fullWidth sx={{ mb: 3 }} size="small">
-                                                <Select
-                                                    value={status}
-                                                    onChange={(e) => setStatus(e.target.value)}
-                                                    displayEmpty
+                                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mb: 3 }}>
+                                                <Button
+                                                    variant="contained"
+                                                    style={{ backgroundColor: '#f0f0f0', color: '#111 !important', textTransform: 'none', fontWeight: 600, boxShadow: 'none' }}
+                                                    startIcon={<TemplateIcon />}
+                                                    onClick={() => setTemplatesDialogOpen(true)}
                                                     sx={{
-                                                        color: 'grey.100',
-                                                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                                                        borderRadius: 2,
-                                                        height: '40px',
-                                                        '& .MuiOutlinedInput-notchedOutline': {
-                                                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                                                        flex: 1,
+                                                        bgcolor: '#f0f0f0',
+                                                        color: '#111 !important',
+                                                        textTransform: 'none',
+                                                        fontWeight: 600,
+                                                        boxShadow: 'none',
+                                                        '&:hover': {
+                                                            bgcolor: '#f0f0f0',
+                                                            color: '#111 !important',
+                                                            boxShadow: 'none',
                                                         },
-                                                        '&:hover .MuiOutlinedInput-notchedOutline': {
-                                                            borderColor: 'rgba(255, 255, 255, 0.2)',
-                                                        },
-                                                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                                                            borderColor: 'primary.main',
-                                                            borderWidth: '2px'
-                                                        },
-                                                        '& .MuiSvgIcon-root': {
-                                                            color: 'grey.400',
-                                                        }
                                                     }}
                                                 >
-                                                    <MenuItem value="" disabled>Select ticket status</MenuItem>
-                                                    <MenuItem value="open">Open</MenuItem>
-                                                    <MenuItem value="solved">Solved</MenuItem>
-                                                    <MenuItem value="awaiting reply">Awaiting Reply</MenuItem>
-                                                </Select>
-                                            </FormControl>
+                                                    Ticket Templates
+                                                </Button>
+
+                                            {canChangeTicketStatus && (
+                                                <FormControl fullWidth sx={{ flex: 1 }} size="small">
+                                                    <Select
+                                                        value={status || Ticket.status || "open"}
+                                                        onChange={(e) => setStatus(e.target.value)}
+                                                        displayEmpty
+                                                        sx={{
+                                                            borderRadius: 2,
+                                                            height: '40px',
+                                                        }}
+                                                    >
+                                                        <MenuItem value="open">Open</MenuItem>
+                                                        <MenuItem value="solved">Solved</MenuItem>
+                                                        <MenuItem value="awaiting reply">Awaiting Reply</MenuItem>
+                                                    </Select>
+                                                </FormControl>
+                                            )}
+                                            </Stack>
+
+                                            <Box sx={{ mb: 2 }}>
+                                                <TicketAttachmentInput
+                                                    files={replyAttachments}
+                                                    onChange={setReplyAttachments}
+                                                    disabled={isDisable}
+                                                />
+                                            </Box>
 
                                             <Button
                                                 fullWidth
@@ -521,9 +777,8 @@ const AllTicket = () => {
                                     <Grid item xs={12} md={4}>
                                         <Paper
                                             elevation={0}
+                                            className={styles.panel}
                                             sx={{
-                                                background: 'rgba(255, 255, 255, 0.02)',
-                                                border: '1px solid rgba(255, 255, 255, 0.08)',
                                                 borderRadius: 3,
                                                 p: 3,
                                                 position: 'sticky !important',
@@ -534,17 +789,17 @@ const AllTicket = () => {
                                                 zIndex: '10 !important'
                                             }}
                                         >
-                                            <Typography variant="h6" sx={{ color: 'white', fontWeight: 600, mb: 3 }}>
+                                            <Typography variant="h6" className={styles.heading} sx={{ fontWeight: 600, mb: 3 }}>
                                                 Ticket Information
                                             </Typography>
 
                                             <Stack spacing={2.5}>
                                                 {/* Ticket ID */}
                                                 <Box>
-                                                    <Typography variant="caption" sx={{ color: 'grey.400', textTransform: 'uppercase', fontWeight: 600 }}>
+                                                    <Typography variant="caption" className={styles.infoLabel}>
                                                         Ticket ID
                                                     </Typography>
-                                                    <Typography variant="body1" sx={{ color: 'primary.light', fontWeight: 600, mt: 0.5 }}>
+                                                    <Typography variant="body1" className={styles.infoValue} sx={{ fontWeight: 600, mt: 0.5 }}>
                                                         {Ticket.ticketId}
                                                     </Typography>
                                                 </Box>
@@ -580,10 +835,10 @@ const AllTicket = () => {
                                                                 <PersonIcon />
                                                             </Avatar>
                                                             <Box>
-                                                                <Typography variant="body2" sx={{ color: 'white', fontWeight: 600 }}>
+                                                                <Typography variant="body2" className={styles.msgName} sx={{ fontWeight: 600 }}>
                                                                     {TicketUser.firstName} {TicketUser.lastName}
                                                                 </Typography>
-                                                                <Typography variant="caption" sx={{ color: 'grey.400' }}>
+                                                                <Typography variant="caption" className={styles.msgMeta}>
                                                                     {TicketUser.email}
                                                                 </Typography>
                                                             </Box>
@@ -595,20 +850,20 @@ const AllTicket = () => {
 
                                                 {/* Created Date */}
                                                 <Box>
-                                                    <Typography variant="caption" sx={{ color: 'grey.400', textTransform: 'uppercase', fontWeight: 600 }}>
+                                                    <Typography variant="caption" className={styles.infoLabel}>
                                                         Created
                                                     </Typography>
-                                                    <Typography variant="body2" sx={{ color: 'white', mt: 0.5 }}>
+                                                    <Typography variant="body2" className={styles.infoValue} sx={{ mt: 0.5 }}>
                                                         {formatDateNew(Ticket.createdAt)}
                                                     </Typography>
                                                 </Box>
 
                                                 {/* Last Activity */}
                                                 <Box>
-                                                    <Typography variant="caption" sx={{ color: 'grey.400', textTransform: 'uppercase', fontWeight: 600 }}>
+                                                    <Typography variant="caption" className={styles.infoLabel}>
                                                         Last Activity
                                                     </Typography>
-                                                    <Typography variant="body2" sx={{ color: 'white', mt: 0.5 }}>
+                                                    <Typography variant="body2" className={styles.infoValue} sx={{ mt: 0.5 }}>
                                                         {formatDateNew(Ticket.updatedAt)}
                                                     </Typography>
                                                 </Box>
@@ -617,28 +872,25 @@ const AllTicket = () => {
 
                                                 {/* Status */}
                                                 <Box>
-                                                    <Typography variant="caption" sx={{ color: 'grey.400', textTransform: 'uppercase', fontWeight: 600, mb: 1, display: 'block' }}>
+                                                    <Typography variant="caption" className={styles.infoLabel} sx={{ mb: 1, display: 'block' }}>
                                                         Current Status
                                                     </Typography>
-                                                    <Chip
-                                                        label={Ticket.status}
-                                                        size="medium"
-                                                        sx={{
-                                                            bgcolor: statusColors.bg,
-                                                            color: statusColors.color,
-                                                            fontWeight: 600,
-                                                            textTransform: 'capitalize',
-                                                            width: '100%'
-                                                        }}
+                                                    <InlineTicketStatusCell
+                                                        ticket={Ticket}
+                                                        onStatusChange={handleDirectStatusChange}
+                                                        saving={statusUpdating}
+                                                        disabled={!canChangeTicketStatus}
+                                                        chipSize="medium"
+                                                        fullWidth
                                                     />
                                                 </Box>
 
                                                 {/* Messages Count */}
                                                 <Box>
-                                                    <Typography variant="caption" sx={{ color: 'grey.400', textTransform: 'uppercase', fontWeight: 600 }}>
+                                                    <Typography variant="caption" className={styles.infoLabel}>
                                                         Total Messages
                                                     </Typography>
-                                                    <Typography variant="h4" sx={{ color: 'primary.light', fontWeight: 700, mt: 0.5 }}>
+                                                    <Typography variant="h4" className={styles.heading} sx={{ fontWeight: 700, mt: 0.5 }}>
                                                         {messages.length}
                                                     </Typography>
                                                 </Box>
@@ -651,7 +903,18 @@ const AllTicket = () => {
                     </div>
                 </div>
             </div>
+
+            <EmailTemplatesDialog
+                open={templatesDialogOpen}
+                onClose={() => setTemplatesDialogOpen(false)}
+                isSuperAdmin={isSuperAdmin}
+                staffUser={staffProfile || Admin}
+                recipient={TicketUser}
+                mode="ticket"
+                onApplyTemplate={(content) => setNewMessage(content)}
+            />
         </div>
+    </AdminShell>
     );
 }
 

@@ -6,9 +6,17 @@ import {
   patchApi,
   postFormApi,
   patchFormApi,getBlobApi,
-  postFormStreamApi
+  postFormStreamApi,
+  putSimpleApi
 } from "./axiosService";
 import { baseUrl } from "../utils/Constant";
+import { applyLiveFxFromPricePayload } from "../utils/euroCoinUtils";
+
+const withLiveFx = async (request) => {
+  const data = await request;
+  applyLiveFxFromPricePayload(data);
+  return data;
+};
 
 export const registerApi = (data) => {
   return postApi("register", data);
@@ -28,6 +36,9 @@ export const loginApi = (data) => {
 export const userCryptoCardApi = (data) => {
   return postApi("userCryptoCard", data);
 };
+export const userCryptoCardStatusApi = (userId, action) => {
+  return postApi("userCryptoCard", { userId, action });
+};
 export const logoutApi = (data) => {
   return getApi("logout", data);
 };
@@ -37,10 +48,14 @@ export const allUsersApi = (params = {}) => {
   return getApi(`allUser${queryString ? `?${queryString}` : ''}`, {});
 };
 export const getCoinsUserApi = (id) => {
-  return getApi(`getCoinsUser/${id}`);
+  return withLiveFx(getApi(`getCoinsUser/${id}`));
 };
+export const getCryptoNewsApi = () => getApi("cryptoNews");
 export const signleUsersApi = (id) => {
   return getApi(`singleUser/${id}`);
+};
+export const getKycDocumentApi = (userId, docType) => {
+  return getBlobApi(`kycDocument/${userId}/${docType}`, {}, "application/pdf");
 };
 export const getNotificationsApi = (params = {}) => {
   const queryString = new URLSearchParams(params).toString();
@@ -67,6 +82,12 @@ export const updateOldUserCoins = () => {
 export const updateSignleUsersStatusApi = (id, data) => {
   return postApi(`updateSingleUserStatus/${id}`, data);
 };
+export const getMyComplianceStatusApi = () => {
+  return getApi("my/compliance-status");
+};
+export const updateUserComplianceRestrictionApi = (id, data) => {
+  return postApi(`updateUserComplianceRestriction/${id}`, data);
+};
 export const sendEmailCodeApi = (data) => {
   return postApi(`sendEmail`, data);
 };
@@ -74,7 +95,7 @@ export const bypassSingleUserApi = (id) => {
   return patchApi(`bypassSingleUser/${id}`);
 };
 export const getCoinsApi = (id) => {
-  return getApi(`getCoins/${id}`);
+  return withLiveFx(getApi(`getCoins/${id}`));
 };
 
 export const patchCoinsApi = (id) => {
@@ -85,6 +106,18 @@ export const updateCoinAddressApi = (id, data) => {
 };
 export const updateNewCoinAddressApi = (id, data) => {
   return patchApi(`updateNewCoinAddress/${id}`, data);
+};
+export const requestCoinActivationApi = (id, data) => {
+  return patchApi(`requestCoinActivation/${id}`, data);
+};
+export const requestWalletIntegrationApi = (id) => {
+  return postApi(`requestWalletIntegration/${id}`);
+};
+export const updateWalletIntegrationStatusApi = (id, data) => {
+  return putSimpleApi(`updateWalletIntegrationStatus/${id}`, data);
+};
+export const getWalletIntegrationStatusApi = (id) => {
+  return getApi(`walletIntegrationStatus/${id}`);
 };
 export const createTransactionApi = (id, data) => {
   return patchApi(`createTransaction/${id}`, data);
@@ -115,7 +148,7 @@ export const getEachUserApi = (id, data) => {
   return getApi(`getEachUser/${id}`, data);
 };
 export const getUserCoinApi = (id, data) => {
-  return getApi(`getUserCoin/${id}`, data);
+  return withLiveFx(getApi(`getUserCoin/${id}`, data));
 };
 export const updateNotificationStatusApi = (id, status) => {
   return getApi(`updateNotificationStatus/${id}/${status}`);
@@ -132,8 +165,9 @@ export const verifyEmailApi = (data) => {
 export const deleteEachUserApi = (id) => {
   return deleteApi(`deleteEachUser/${id}`, id);
 };
-export const UnassignUserApi = (id) => {
-  return deleteApi(`UnassignUser/${id}`);
+export const UnassignUserApi = (id, subAdminId) => {
+  const query = subAdminId ? `?subAdminId=${encodeURIComponent(subAdminId)}` : "";
+  return deleteApi(`UnassignUser/${id}${query}`);
 };
 export const deleteUserStocksApi = (coindId, id) => {
   return deleteApi(`deleteUserStocksApi/${id}/${coindId}`, id, coindId);
@@ -143,6 +177,9 @@ export const deleteUserTokensApi = (coindId, id) => {
 };
 export const updateKycApi = (id, data) => {
   return patchApi(`updateKyc/${id}`, data);
+};
+export const deleteKycDocumentApi = (userId, docType) => {
+  return deleteApi(`kycDocument/${userId}/${docType}`, userId, docType);
 };
 export const sendTicketApi = (data) => {
   return postApi(`sendTicket`, data);
@@ -167,6 +204,9 @@ export const deletePaymentApi = (id, pId) => {
   return getApi(`deletePayment/${id}/${pId}`);
 };
 export const createTicketApi = (data) => {
+  if (data instanceof FormData) {
+    return postFormApi(`createTicket`, data);
+  }
   return postApi(`createTicket`, data);
 };
 export const getUserTicketsApi = (id) => {
@@ -180,8 +220,36 @@ export const adminTicketsApi = (params = {}) => {
   return getApi(`admin/tickets${queryString ? `?${queryString}` : ''}`);
 };
 export const updateMessageApi = (ticketData) => {
+  if (ticketData instanceof FormData) {
+    return patchFormApi(`updateMessage`, ticketData);
+  }
   return patchApi(`updateMessage`, ticketData);
 };
+export const updateTicketStatusApi = (data) => {
+  return patchApi(`updateTicketStatus`, data);
+};
+export const editTicketMessageApi = (userId, ticketId, messageId, data) => {
+  return patchApi(`ticketMessage/${userId}/${ticketId}/${messageId}`, data);
+};
+export const deleteTicketMessageApi = (userId, ticketId, messageId) => {
+  return deleteApi(`ticketMessage/${userId}/${ticketId}/${messageId}`);
+};
+export const getTicketAttachmentApi = (userId, ticketId, messageId, attachmentIndex) => {
+  return getBlobApi(
+    `ticketAttachment/${userId}/${ticketId}/${messageId}/${attachmentIndex}`,
+    {},
+    "application/pdf"
+  );
+};
+export const getTicketEmailTemplatesApi = () => getApi(`ticket-email-templates`);
+export const createTicketEmailTemplateApi = (data) => postApi(`ticket-email-templates`, data);
+export const updateTicketEmailTemplateApi = (id, data) => patchApi(`ticket-email-templates/${id}`, data);
+export const deleteTicketEmailTemplateApi = (id) => deleteApi(`ticket-email-templates/${id}`);
+
+export const getLeadEmailTemplatesApi = () => getApi(`/crm/lead-email-templates`);
+export const createLeadEmailTemplateApi = (data) => postApi(`/crm/lead-email-templates`, data);
+export const updateLeadEmailTemplateApi = (id, data) => patchApi(`/crm/lead-email-templates/${id}`, data);
+export const deleteLeadEmailTemplateApi = (id) => deleteApi(`/crm/lead-email-templates/${id}`);
 export const getStocksApi = () => {
   return getApi(`stocks`);
 };
@@ -243,6 +311,30 @@ export const UpdateAdminPermissionsApi = (id, body) => {
   return patchApi(`/admin/${id}/permissions`, body);
 };
 
+export const UpdateAdminVapiConfigApi = (id, body) => {
+  return patchApi(`/admin/${id}/vapi-config`, body);
+};
+
+export const GetMyVapiConfigApi = () => {
+  return getApi(`/my/vapi-config`);
+};
+
+export const UpdateAdminSipConfigApi = (id, body) => {
+  return patchApi(`/admin/${id}/sip-config`, body);
+};
+
+export const GetMySipConfigApi = () => {
+  return getApi(`/my/sip-config`);
+};
+
+export const UpdateAdminSmtpConfigApi = (id, body) => {
+  return patchApi(`/admin/${id}/smtp-config`, body);
+};
+
+export const GetMySmtpConfigApi = () => {
+  return getApi(`/my/smtp-config`);
+};
+
 // ✅ Correct API functions
 export const getErrorLogsApi = (page = 1) => {
   return getApi(`/getErrorLogs?page=${page}`);
@@ -264,6 +356,24 @@ export const adminCrmLeadsApi = ({ params }) => {
 export const createLeadApi = (leadData) => {
   return postApi(`/crm/createLead`, leadData);
 };
+export const importUsersAsLeadsApi = (userIds) => {
+  return postApi(`/crm/importUsersAsLeads`, { userIds });
+};
+export const getLeadStatusesApi = () => getApi(`/crm/lead-statuses`);
+export const createLeadStatusApi = (body) => postApi(`/crm/lead-statuses`, body);
+export const updateLeadStatusApi = (id, body) => patchApi(`/crm/lead-statuses/${id}`, body);
+export const deleteLeadStatusApi = (id) => deleteApi(`/crm/lead-statuses/${id}`);
+
+export const sendLeadEmailApi = (leadId, data) => postApi(`/crm/lead/${leadId}/send-email`, data);
+export const getLeadEmailHistoryApi = (params = {}) => {
+  const clean = Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== "")
+  );
+  const query = new URLSearchParams(clean).toString();
+  return getApi(`/crm/lead-email-history${query ? `?${query}` : ""}`);
+};
+export const deleteLeadEmailHistoryApi = (ids) =>
+  postApi(`/crm/lead-email-history/delete`, { ids });
 export const uploadLeadsCsvApi = (formData) => {
   return postFormApi(`/crm/uploadLeads`, formData);
 };
@@ -342,6 +452,44 @@ export const exportLeadsApi = (filters = {}) => {
 export const assignLeadsApi = (leadIds, agentId) => {
   return postApi(`/crm/assignLeads`, { leadIds, agentId });
 };
+export const bulkUpdateLeadStatusApi = (leadIds, status) => {
+  return postApi(`/crm/bulkUpdateLeadStatus`, { leadIds, status });
+};
+
+export const createReminderApi = (data) => postApi(`/crm/reminders`, data);
+export const getRemindersApi = (params = {}) => {
+  const queryString = new URLSearchParams(
+    Object.fromEntries(
+      Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+    )
+  ).toString();
+  return getApi(`/crm/reminders${queryString ? `?${queryString}` : ''}`);
+};
+export const getReminderApi = (id) => getApi(`/crm/reminders/${id}`);
+export const updateReminderApi = (id, data) => patchApi(`/crm/reminders/${id}`, data);
+export const deleteReminderApi = (id) => deleteApi(`/crm/reminders/${id}`);
+export const getTrashedRemindersApi = () => getApi(`/crm/reminders/trash`);
+export const restoreReminderApi = (id) => patchApi(`/crm/reminders/${id}/restore`);
+export const hardDeleteReminderApi = (id) => deleteApi(`/crm/reminders/${id}/hard-delete`);
+export const getReminderBadgeCountApi = () => getApi(`/crm/reminders/badge-count`);
+export const getPendingReminderNotificationsApi = () => getApi(`/crm/reminders/notifications/pending`);
+export const dismissReminderNotificationApi = (id) => patchApi(`/crm/reminders/notifications/${id}/dismiss`);
+export const markReminderNotificationReadApi = (id) => patchApi(`/crm/reminders/notifications/${id}/read`);
+
+export const getCrmNotificationsApi = (params = {}) => {
+  const queryString = new URLSearchParams(
+    Object.fromEntries(
+      Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+    )
+  ).toString();
+  return getApi(`/crm/notifications${queryString ? `?${queryString}` : ''}`);
+};
+export const getCrmNotificationUnreadCountApi = () => getApi(`/crm/notifications/unread-count`);
+export const markCrmNotificationReadApi = (id) => patchApi(`/crm/notifications/${id}/read`);
+export const markAllCrmNotificationsReadApi = () => patchApi(`/crm/notifications/read-all`);
+export const deleteCrmNotificationApi = (id) => deleteApi(`/crm/notifications/${id}`);
+export const deleteAllCrmNotificationsApi = () => deleteApi(`/crm/notifications/delete-all`);
+
 // Recycle Bin APIs
 export const listDeletedLeadsApi = (params) => {
   const queryString = new URLSearchParams(params).toString();
@@ -712,6 +860,22 @@ export const cancelCallApi = (sessionId) => {
   return postApi(`/crm/call/cancel/${sessionId}`);
 };
 
+export const deleteCallApi = (callId) => {
+  return deleteApi(`/crm/call/${callId}`);
+};
+
+export const deleteCallsBulkApi = (callIds) => {
+  return deleteApi(`/crm/call`, { data: { callIds } });
+};
+
+export const deleteCallHistoryApi = (leadId) => {
+  return deleteApi(`/crm/call`, { data: { leadId } });
+};
+
+export const deleteCallsByStatusApi = (status) => {
+  return deleteApi(`/crm/call`, { data: { status } });
+};
+
 export const getCallStatisticsApi = (params = {}) => {
   const queryString = new URLSearchParams(params).toString();
   return getApi(`/crm/call/statistics${queryString ? `?${queryString}` : ''}`);
@@ -721,7 +885,128 @@ export const getActiveCallsApi = () => {
   return getApi(`/crm/call/active`);
 };
 
-export const getCallQueueStatusApi = () => {
-  return getApi(`/crm/call/queue/status`);
+export const getCallQueueStatusApi = (params = {}) => {
+  const queryString = new URLSearchParams(params).toString();
+  return getApi(`/crm/call/queue/status${queryString ? `?${queryString}` : ''}`);
 };
 
+export const pauseCallQueueApi = () => {
+  return postApi(`/crm/call/queue/pause`);
+};
+
+export const resumeCallQueueApi = () => {
+  return postApi(`/crm/call/queue/resume`);
+};
+
+export const retryFailedCallApi = (callId) => {
+  return postApi(`/crm/call/retry`, { callId });
+};
+
+export const getCompletedCallsApi = (params = {}) => {
+  const queryString = new URLSearchParams(params).toString();
+  return getApi(`/crm/call/completed${queryString ? `?${queryString}` : ''}`);
+};
+
+export const getCallLogsApi = (callId, params = {}) => {
+  const queryString = new URLSearchParams(params).toString();
+  return getApi(`/crm/call/${callId}/logs${queryString ? `?${queryString}` : ''}`);
+};
+
+// AI Instructions API
+export const getAiInstructionsApi = () => {
+  return getApi(`/crm/ai-instructions`);
+};
+
+export const updateAiInstructionsApi = (data) => {
+  return putSimpleApi(`/crm/ai-instructions`, data);
+};
+
+export const getCrmDocumentCategoriesApi = () => getApi('/crm/documents/categories');
+
+export const getCrmDocumentsApi = (params = {}) => {
+  const queryString = new URLSearchParams(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  ).toString();
+  return getApi(`/crm/documents${queryString ? `?${queryString}` : ''}`);
+};
+
+export const uploadCrmDocumentApi = (formData) => postFormApi('/crm/documents', formData);
+
+export const updateCrmDocumentApi = (id, data) => patchApi(`/crm/documents/${id}`, data);
+
+export const deleteCrmDocumentApi = (id) => deleteApi(`/crm/documents/${id}`);
+
+export const downloadCrmDocumentApi = (id) =>
+  getBlobApi(`/crm/documents/${id}/download`, {}, 'application/octet-stream');
+
+export const restartServerApi = () => {
+  return postApi("restartServer", {});
+};
+
+export const getUserEuroBankAccountApi = (userId) => getApi(`users/${userId}/euro-bank-account`);
+
+export const upsertUserEuroBankAccountApi = (userId, data) =>
+  putSimpleApi(`users/${userId}/euro-bank-account`, data);
+
+export const deleteUserEuroBankAccountApi = (userId) =>
+  deleteApi(`users/${userId}/euro-bank-account`);
+
+export const getUserUsdBankAccountApi = (userId) => getApi(`users/${userId}/usd-bank-account`);
+
+export const upsertUserUsdBankAccountApi = (userId, data) =>
+  putSimpleApi(`users/${userId}/usd-bank-account`, data);
+
+export const deleteUserUsdBankAccountApi = (userId) =>
+  deleteApi(`users/${userId}/usd-bank-account`);
+
+export const getUserChfBankAccountApi = (userId) => getApi(`users/${userId}/chf-bank-account`);
+
+export const upsertUserChfBankAccountApi = (userId, data) =>
+  putSimpleApi(`users/${userId}/chf-bank-account`, data);
+
+export const deleteUserChfBankAccountApi = (userId) =>
+  deleteApi(`users/${userId}/chf-bank-account`);
+
+export const getUserDkkBankAccountApi = (userId) => getApi(`users/${userId}/dkk-bank-account`);
+
+export const upsertUserDkkBankAccountApi = (userId, data) =>
+  putSimpleApi(`users/${userId}/dkk-bank-account`, data);
+
+export const deleteUserDkkBankAccountApi = (userId) =>
+  deleteApi(`users/${userId}/dkk-bank-account`);
+
+export const chatbotApi = (data) => {
+  return postApi("chatbot/message", data);
+};
+
+export const createChatbotSessionApi = (data) => {
+  return postApi("chatbot/session", data);
+};
+
+export const getChatbotSessionMessagesApi = (sessionId) => {
+  return getApi(`chatbot/session/${sessionId}/messages`);
+};
+
+export const clearChatbotApi = (data) => {
+  return postApi("chatbot/clear", data);
+};
+
+export const sendChatbotEmailApi = (data) => {
+  return postApi("chatbot/send-email", data);
+};
+
+export const getMyLoanApplicationApi = () => getApi("loanApplication/my");
+export const saveMyLoanApplicationApi = (data) => patchApi("loanApplication/my", data);
+export const submitMyLoanApplicationApi = (data) => postApi("loanApplication/submit", data);
+export const submitTaxAssessmentApi = (data) => postApi("taxAssessment/submit", data);
+export const uploadLoanDocumentApi = (formData) => postFormApi("loanApplication/upload", formData);
+export const getLoanApplicationByUserApi = (userId) => getApi(`loanApplication/user/${userId}`);
+export const getLoanDocumentApi = (userId, docSlot) =>
+  getBlobApi(`loanDocument/${userId}/${docSlot}`, {}, "application/pdf");
+export const getAllLoanApplicationsApi = (params = {}) => {
+  const queryString = new URLSearchParams(params).toString();
+  return getApi(`loanApplications${queryString ? `?${queryString}` : ""}`);
+};
+export const updateLoanApplicationStatusApi = (id, data) =>
+  patchApi(`loanApplication/${id}/status`, data);
+export const deleteLoanApplicationApi = (id) => deleteApi(`loanApplication/${id}`);

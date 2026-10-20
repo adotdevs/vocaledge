@@ -31,6 +31,7 @@ import {
 import { getFailedEmailsApi, resendFailedEmailsApi, deleteFailedEmailsApi } from '../../../Api/Service';
 import { toast } from 'react-toastify';
 import Sidebar from './Sidebar';
+import CrmAppBarActions from './components/CrmAppBarActions';
 import { useNavigate } from 'react-router-dom';
 import { useAuthUser } from 'react-auth-kit';
 
@@ -162,7 +163,7 @@ const FailedEmails = () => {
     };
 
     return (
-        <Box sx={{ display: 'flex', height: '100vh', bgcolor: 'grey.50' }}>
+        <Box sx={{ display: 'flex', height: '100vh', bgcolor: 'background.default' }}>
             <Sidebar />
             <Box sx={{ flex: 1, p: 3, overflow: 'auto' }}>
                 <Card elevation={3}>
@@ -180,7 +181,9 @@ const FailedEmails = () => {
                                     </Typography>
                                 </Box>
                             </Box>
-                            <Badge badgeContent={pagination.total} color="error" max={999}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <CrmAppBarActions />
+                                <Badge badgeContent={pagination.total} color="error" max={999}>
                                 <Button
                                     variant="outlined"
                                     startIcon={<RefreshIcon />}
@@ -189,7 +192,8 @@ const FailedEmails = () => {
                                 >
                                     Refresh
                                 </Button>
-                            </Badge>
+                                </Badge>
+                            </Box>
                         </Box>
 
                         {/* Info Alert */}

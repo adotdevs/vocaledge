@@ -3,14 +3,18 @@ import SideBar from "../../layouts/AdminSidebar/Sidebar";
 import UserSideBar from "./UserSideBar";
 import Log from "../../../assets/images/img/log.jpg";
 import New from "../../../assets/images/new3.gif";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { patchCoinsApi, signleUsersApi, updateSignleUsersApi } from "../../../Api/Service";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { patchCoinsApi, signleUsersApi, updateSignleUsersApi, updateWalletIntegrationStatusApi } from "../../../Api/Service";
+import { normalizeWalletUrl } from "../../../utils/walletAccess";
 import { toast } from "react-toastify";
 import { useAuthUser } from "react-auth-kit";
 import ReactQuill from "react-quill";
 import './style.css'
 import AdminHeader from "../adminHeader";
-const General = () => {
+import su from "./SingleUserLayout.module.css";
+import MemberShell from "./hub/MemberShell";
+import { clearHubCache } from "./hub/hubCache";
+const General = ({ embedded = false }) => {
   //
 
   let authUser = useAuthUser();
@@ -42,6 +46,14 @@ const General = () => {
     setnewDescription(content);
   };
   let { id } = useParams();
+  const [searchParams] = useSearchParams();
+
+  const [canViewClientDetails, setCanViewClientDetails] = useState(true);
+  const [canEditClientProfile, setCanEditClientProfile] = useState(true);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [permissionsLoaded, setPermissionsLoaded] = useState(false);
+  const isSubAdminViewer = authUser()?.user?.role === "subadmin";
+  const fieldsReadOnly = isSubAdminViewer && (!isEditMode || !canEditClientProfile);
 
   const [Active, setActive] = useState(false);
   let toggleBar = () => {
@@ -77,8 +89,10 @@ const General = () => {
       const signleUser = await signleUsersApi(id);
 
       if (signleUser.success) {
-
-        checkPermissions(signleUser.signleUser)
+        const allowed = await checkPermissions(signleUser.signleUser);
+        if (!allowed) {
+          return;
+        }
         setUserData(signleUser.signleUser); setCurrency(signleUser.signleUser.currency)
         setnewDescription(signleUser.signleUser.note);
       } else {
@@ -95,28 +109,55 @@ const General = () => {
     try {
       const currentUser = authUser().user;
 
-      // For role-based checks, use authUser data first
       if (currentUser.role === "admin") {
-        // Only fetch fresh data for admin permission checks
         const signleUser = await signleUsersApi(currentUser._id);
-      if (signleUser.success) {
+        if (signleUser.success) {
           if (targetUser.role !== "user" && signleUser.signleUser.adminPermissions?.isSubManagement === false) {
             Navigate("/admin/dashboard");
-            return;
+            return false;
           }
         }
-      } else if (currentUser.role === "subadmin") {
-        // For subadmin, we need fresh permissions data
-        const signleUser = await signleUsersApi(currentUser._id);
-        if (signleUser.success && signleUser.signleUser.permissions.editUserProfile === false) {
-          Navigate(`/admin/users/${id}/assets`);
-          return;
-        }
+        setCanViewClientDetails(true);
+        setCanEditClientProfile(true);
+        setIsEditMode(true);
+        return true;
       }
-      // Superadmin has all permissions, no need to check
+
+      if (currentUser.role === "subadmin") {
+        const signleUser = await signleUsersApi(currentUser._id);
+        if (signleUser.success) {
+          const permissions = signleUser.signleUser.permissions || {};
+          const canView = permissions.viewClientDetails === true;
+          const canEdit = permissions.editUserProfile === true;
+
+          setCanViewClientDetails(canView);
+          setCanEditClientProfile(canEdit);
+
+          if (!canView) {
+            toast.error("You do not have permission to view client personal details");
+            Navigate(`/admin/users/${id}?tab=assets`);
+            return false;
+          }
+
+          setIsEditMode(searchParams.get("edit") === "1" && canEdit);
+          return true;
+        }
+
+        toast.error("Unable to verify permissions");
+        Navigate("/admin/dashboard");
+        return false;
+      }
+
+      setCanViewClientDetails(true);
+      setCanEditClientProfile(true);
+      setIsEditMode(true);
+      return true;
     } catch (error) {
       toast.dismiss();
       toast.error(error);
+      return false;
+    } finally {
+      setPermissionsLoaded(true);
     }
   };
   const updateSignleUser = async (e) => {
@@ -188,28 +229,63 @@ const General = () => {
       setisDisable(false);
     }
   };
+
+  const [approvingWallet, setApprovingWallet] = useState(false);
+  const [walletLinkGen, setWalletLinkGen] = useState(userData?.walletIntegration?.walletLink || "");
+  const [savingWalletLinkGen, setSavingWalletLinkGen] = useState(false);
+
   useEffect(() => {
-    if (id === authUser().user._id) {
-      Navigate("/admin/dashboard");
-      return
+    setWalletLinkGen(userData?.walletIntegration?.walletLink || "");
+  }, [userData?.walletIntegration?.walletLink]);
+
+  const handleWalletStatusChange = async (targetStatus) => {
+    try {
+      setApprovingWallet(true);
+      const sanitized = normalizeWalletUrl(walletLinkGen, "");
+      const res = await updateWalletIntegrationStatusApi(id, { status: targetStatus, walletLink: sanitized });
+      if (res?.success) {
+        const msg = targetStatus === "none" ? "Wallet integration approval revoked!" : `Wallet integration ${targetStatus} successfully!`;
+        toast.success(msg);
+        setWalletLinkGen(sanitized);
+        setUserData((prev) => ({
+          ...prev,
+          walletIntegration: {
+            ...(prev?.walletIntegration || {}),
+            status: targetStatus,
+            walletLink: sanitized,
+            approvedAt: targetStatus === "approved" ? new Date() : null,
+          },
+        }));
+        clearHubCache(id);
+      } else {
+        toast.error(res?.msg || "Failed to update wallet integration");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.msg || err?.message || "Failed to update wallet integration");
+    } finally {
+      setApprovingWallet(false);
     }
+  };
+
+  useEffect(() => {
     if (authUser().user.role === "user") {
       Navigate("/dashboard");
       return;
     }
     getSignleUser();
-    patchCoins()
+    patchCoins();
   }, []);
   return (
+    <MemberShell embedded={embedded}>
     <>
       <div className="">
-        <div className="bg-muted-100 dark:bg-muted-900 pb-20">
+        <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 pb-20"}>
 
-          <SideBar state={Active} toggle={toggleBar} />
-          <div className="bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
-            <div className="mx-auto w-full max-w-7xl">
+          {!embedded && <SideBar state={Active} toggle={toggleBar} />}
+          <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]"}>
+            <div className={embedded ? undefined : "mx-auto w-full max-w-7xl"}>
 
-              <AdminHeader toggle={toggleBar} pageName="Member  Management" />
+              {!embedded && <AdminHeader toggle={toggleBar} pageName="Member  Management" />}
               <div
                 className="nuxt-loading-indicator"
                 style={{
@@ -230,35 +306,38 @@ const General = () => {
                 }}
               />
               <seokit />
-              <div className="admin">
-                <div className="min-h-screen overflow-hidden">
-                  <div className="grid gap-8 sm:grid-cols-12">
-                    {userData.role === "admin" || userData.role === "subadmin" ? "" : <UserSideBar userid={id} />}
+              <div className={embedded ? undefined : "admin"}>
+                <div className={embedded ? undefined : "min-h-screen overflow-hidden"}>
+                  <div className={embedded ? undefined : su.frame}>
+                    {!embedded && userData.role !== "admin" && userData.role !== "subadmin" ? <UserSideBar userid={id} /> : null}
 
-                    <div className="col-span-12 sm:col-span-8">
+                    <div className={su.main}>
                       <form method="POST" action className="w-full ">
-                        <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 rounded-md">
-                          <div className="flex items-center justify-between p-4">
+                        <div className={su.panel}>
+                          <div className={su.panelHead}>
                             <div>
-                              <p
-                                className="font-heading text-sm font-medium leading-normal leading-normal uppercase tracking-wider"
-                                tag="h2"
-                              >
-                                {" "}
-                                Settings{" "}
-                              </p>
-                              <p className="font-sans text-xs font-normal leading-normal leading-normal text-muted-400">
-                                {" "}
-                                Edit user settings{" "}
-                              </p>
+                              <p className={su.kicker}>Settings</p>
+                              <h2 className={su.title}>
+                                {fieldsReadOnly ? "View assigned client personal details" : "Edit member profile"}
+                              </h2>
                             </div>
                             <div className="flex items-center gap-2">
+                              {isSubAdminViewer && canViewClientDetails && canEditClientProfile && !isEditMode && (
+                                <button
+                                  type="button"
+                                  onClick={() => setIsEditMode(true)}
+                                  className="is-button rounded is-button-default px-4"
+                                >
+                                  Edit Details
+                                </button>
+                              )}
+                              {(!isSubAdminViewer || (isEditMode && canEditClientProfile)) && (
                               <button
                                 disabled={isDisable}
                                 onClick={updateSignleUser}
                                 data-v-71bb21a6
                                 type="submit"
-                                className="is-button rounded bg-primary-500 dark:bg-primary-500 hover:enabled:bg-primary-400 dark:hover:enabled:bg-primary-400 text-white hover:enabled:shadow-lg hover:enabled:shadow-primary-500/50 dark:hover:enabled:shadow-primary-800/20 focus-visible:outline-primary-400/70 focus-within:outline-primary-400/70 focus-visible:bg-primary-500 active:enabled:bg-primary-500 dark:focus-visible:outline-primary-400 dark:focus-within:outline-primary-400 dark:focus-visible:bg-primary-500 dark:active:enabled:bg-primary-500 w-24"
+                                className={`is-button rounded bg-primary-500 dark:bg-primary-500 hover:enabled:bg-primary-400 dark:hover:enabled:bg-primary-400 text-white hover:enabled:shadow-lg hover:enabled:shadow-primary-500/50 dark:hover:enabled:shadow-primary-800/20 focus-visible:outline-primary-400/70 focus-within:outline-primary-400/70 focus-visible:bg-primary-500 active:enabled:bg-primary-500 dark:focus-visible:outline-primary-400 dark:focus-within:outline-primary-400 dark:focus-visible:bg-primary-500 dark:active:enabled:bg-primary-500 w-24 ${su.saveBtn}`}
                               >
                                 {isDisable ? (
                                   <div>
@@ -268,12 +347,170 @@ const General = () => {
                                   "Save"
                                 )}
                               </button>
+                              )}
                             </div>
                           </div>
                           <div className="p-4">
 
+                            <div className={su.box} style={{ border: "1px solid rgba(99, 102, 241, 0.35)", background: "rgba(99, 102, 241, 0.05)", borderRadius: "12px", padding: "1.25rem", marginBottom: "1.5rem" }}>
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h3 className={su.boxTitle} style={{ marginBottom: 0, fontSize: "1rem", fontWeight: "700" }}>
+                                      Wallet Integration Request
+                                    </h3>
+                                    <span
+                                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                                        userData?.walletIntegration?.status === "approved"
+                                          ? "bg-emerald-500/15 text-emerald-500 border border-emerald-500/30"
+                                          : userData?.walletIntegration?.status === "pending"
+                                          ? "bg-amber-500/15 text-amber-500 border border-amber-500/30 animate-pulse"
+                                          : "bg-muted-500/15 text-muted-400 border border-muted-500/30"
+                                      }`}
+                                    >
+                                      {userData?.walletIntegration?.status === "approved"
+                                        ? "Approved"
+                                        : userData?.walletIntegration?.status === "pending"
+                                        ? "Pending Approval"
+                                        : "Not Requested"}
+                                    </span>
+                                  </div>
+                                  <p className="font-sans text-xs text-muted-400">
+                                    {userData?.walletIntegration?.status === "pending"
+                                      ? "This client has requested wallet integration. Approve to activate the 'Integrate Wallet' button on their dashboard."
+                                      : userData?.walletIntegration?.status === "approved"
+                                      ? "Wallet integration is approved and active for this client."
+                                      : "No active wallet integration request from this client. You can grant access directly below."}
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {userData?.walletIntegration?.status === "pending" ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        disabled={approvingWallet}
+                                        onClick={() => handleWalletStatusChange("approved")}
+                                        className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                        </svg>
+                                        <span>{approvingWallet ? "Approving..." : "Approve Wallet Integration"}</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={approvingWallet}
+                                        onClick={() => handleWalletStatusChange("rejected")}
+                                        className="px-3 py-2 text-sm font-medium rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 transition-all cursor-pointer"
+                                      >
+                                        Reject
+                                      </button>
+                                    </>
+                                  ) : userData?.walletIntegration?.status === "approved" ? (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-emerald-500 font-semibold flex items-center gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                        </svg>
+                                        Integration Active
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={approvingWallet}
+                                        onClick={() => handleWalletStatusChange("none")}
+                                        className="px-3 py-1.5 text-xs font-medium rounded-lg text-muted-400 hover:text-rose-400 border border-muted-700 hover:border-rose-500/40 transition-all cursor-pointer"
+                                      >
+                                        Revoke Approval
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={approvingWallet}
+                                      onClick={() => handleWalletStatusChange("approved")}
+                                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-primary-600 hover:bg-primary-500 text-white shadow-sm transition-all cursor-pointer"
+                                    >
+                                      {approvingWallet ? "Granting..." : "Grant Wallet Integration"}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Wallet Link Input */}
+                              <div className="mt-4 pt-4 border-t border-muted-200 dark:border-muted-700">
+                                <label className="block text-xs font-semibold text-muted-500 dark:text-muted-400 mb-2">
+                                  Wallet Integration Link
+                                </label>
+                                <p className="text-xs text-muted-400 dark:text-muted-500 mb-2">
+                                  Set the URL that opens when the user clicks "Integrate Wallet". Leave empty to use default.
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={walletLinkGen}
+                                    onChange={(e) => setWalletLinkGen(e.target.value)}
+                                    placeholder="https://example.com/wallet-page"
+                                    className="flex-1 px-3 py-2 text-sm rounded-lg border border-muted-300 dark:border-muted-600 bg-white dark:bg-muted-900 text-muted-800 dark:text-muted-100 placeholder:text-muted-400 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all"
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={savingWalletLinkGen}
+                                    onClick={async () => {
+                                      try {
+                                        setSavingWalletLinkGen(true);
+                                        const currentStatus = userData?.walletIntegration?.status || "none";
+                                        const sanitized = normalizeWalletUrl(walletLinkGen, "");
+                                        const res = await updateWalletIntegrationStatusApi(id, { status: currentStatus, walletLink: sanitized });
+                                        if (res?.success) {
+                                          toast.success("Wallet link updated!");
+                                          setWalletLinkGen(sanitized);
+                                          setUserData((prev) => ({
+                                            ...prev,
+                                            walletIntegration: {
+                                              ...(prev?.walletIntegration || {}),
+                                              walletLink: sanitized,
+                                            },
+                                          }));
+                                        } else {
+                                          toast.error(res?.msg || "Failed to save link");
+                                        }
+                                      } catch (err) {
+                                        toast.error("Failed to save wallet link");
+                                      } finally {
+                                        setSavingWalletLinkGen(false);
+                                      }
+                                    }}
+                                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-primary-600 hover:bg-primary-500 text-white shadow-sm transition-all whitespace-nowrap cursor-pointer"
+                                  >
+                                    {savingWalletLinkGen ? "Saving..." : "Save Link"}
+                                  </button>
+                                </div>
+                                {walletLinkGen && (
+                                  <p className="text-xs text-muted-400 mt-1.5 flex items-center gap-1.5">
+                                    <span>Current:</span>
+                                    <a
+                                      href={normalizeWalletUrl(walletLinkGen)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-primary-400 hover:underline inline-flex items-center gap-1"
+                                      title="Open external website in new tab"
+                                    >
+                                      <span>{walletLinkGen}</span>
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                        <polyline points="15 3 21 3 21 9" />
+                                        <line x1="10" y1="14" x2="21" y2="3" />
+                                      </svg>
+                                    </a>
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
                             {userData.role === "admin" || userData.role === "subadmin" ? "" :
-                              <div className="col-span-12">
+                              <div className={su.box}>
+                                <h3 className={su.boxTitle}>Trading</h3>
                                 <div className="relative">
                                   {/**/}
                                   <label style={{ display: 'flex ', alignItems: 'center' }}>Ai Trading % </label>
@@ -299,17 +536,12 @@ const General = () => {
                               </div>
                             }
 
-                            <div className=" space-y-12 py-8">
+                            <div className={su.box}>
                               {/**/}
                               {/**/}
                               <fieldset className="relative">
                                 <div className="mb-6">
-                                  <p
-                                    className="font-heading text-base font-medium leading-none"
-                                    tag="h3"
-                                  >
-                                    User Information
-                                  </p>
+                                  <h3 className={su.boxTitle}>Identity</h3>
                                   <p className="font-sans text-xs font-normal leading-normal leading-normal text-muted-400">
                                     Basic user information
                                   </p>
@@ -323,6 +555,8 @@ const General = () => {
                                           id="ninja-input-11"
                                           type="text"
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.email}
                                           name="email"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -363,6 +597,8 @@ const General = () => {
                                           id="ninja-input-11"
                                           type="text"
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.password}
                                           name="password"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -403,6 +639,8 @@ const General = () => {
                                           id="ninja-input-12"
                                           type="text"
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.firstName}
                                           name="firstName"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -443,6 +681,8 @@ const General = () => {
                                           id="ninja-input-13"
                                           type="text"
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.lastName}
                                           name="lastName"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -500,6 +740,8 @@ const General = () => {
                                             e.preventDefault()
                                           }
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.phone}
                                           name="phone"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -540,6 +782,8 @@ const General = () => {
                                           id="ninja-input-15"
                                           type="text"
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.address}
                                           name="address"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -580,6 +824,8 @@ const General = () => {
                                           id="ninja-input-16"
                                           type="text"
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.city}
                                           name="city"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -620,6 +866,8 @@ const General = () => {
                                           id="ninja-input-17"
                                           type="text"
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.country}
                                           name="country"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -678,6 +926,8 @@ const General = () => {
                                             e.preventDefault()
                                           }
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.postalCode}
                                           name="postalCode"
                                           className="nui-focus border-muted-300 text-muted-600 placeholder:text-muted-300 dark:border-muted-700 dark:bg-muted-900/75 dark:text-muted-200 dark:placeholder:text-muted-500 dark:focus:border-muted-700 peer w-full border bg-white font-sans transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-75 px-2 h-10 py-2 text-sm leading-5 pe-4 ps-9 rounded"
@@ -712,20 +962,17 @@ const General = () => {
                                   </div>
                                   {userData.role === "admin" || userData.role === "subadmin" ? "" :
 
-                                    <div className="col-span-12">
+                                    <div className={`col-span-12 ${su.box}`} style={{ marginLeft: 0, marginRight: 0 }}>
                                       <div className="relative">
                                         <div className="group/nui-input relative">
                                           {/* Label */}
-                                          <div className="text-sm text-gray-500 py-1 font-medium">
-                                            User Currency:
-                                          </div>
+                                          <h3 className={su.boxTitle}>User currency</h3>
 
                                           {/* Radio Options */}
-                                          <div className="flex items-center space-x-4 mt-2">
+                                          <div className={su.currencyRow}>
                                             <label
                                               htmlFor="eur"
-                                              className={`flex items-center space-x-2 cursor-pointer p-2 rounded-md ${currency === "EUR" ? "bg-blue-100" : "hover:bg-gray-100"
-                                                }`}
+                                              className={`${su.currencyChip} ${currency === "EUR" ? su.currencyChipOn : ""}`}
                                             >
                                               <input
                                                 type="radio"
@@ -734,6 +981,7 @@ const General = () => {
                                                 value="EUR"
                                                 checked={currency === "EUR"}
                                                 onChange={handleCurrencyChange}
+                                                disabled={fieldsReadOnly}
                                                 className=" me-2"
                                               />
                                               <div className="text-blue-600 font-medium">EUR</div>
@@ -741,8 +989,7 @@ const General = () => {
 
                                             <label
                                               htmlFor="usd"
-                                              className={`flex items-center space-x-2 cursor-pointer p-2 rounded-md ${currency === "USD" ? "bg-blue-100" : "hover:bg-gray-100"
-                                                }`}
+                                              className={`${su.currencyChip} ${currency === "USD" ? su.currencyChipOn : ""}`}
                                             >
                                               <input
                                                 type="radio"
@@ -751,6 +998,7 @@ const General = () => {
                                                 value="USD"
                                                 checked={currency === "USD"}
                                                 onChange={handleCurrencyChange}
+                                                disabled={fieldsReadOnly}
                                                 className=" me-2"
                                               />
                                               <div className="text-blue-600 font-medium">USD</div>
@@ -760,7 +1008,7 @@ const General = () => {
                                       </div>
                                       {/* Display Selected Value */}
                                       {currency && (
-                                        <div className="mt-4 text-sm text-gray-600">
+                                        <div className={su.currencyHint}>
                                           Selected Currency: <span className="font-semibold">{currency}</span>
                                         </div>
                                       )}
@@ -776,6 +1024,8 @@ const General = () => {
                                           type="range"
                                           id="progress-slider"
                                           onChange={handleInput}
+                                          readOnly={fieldsReadOnly}
+                                          disabled={fieldsReadOnly}
                                           value={userData.progress}
                                           name="progress"
                                           min="0"
@@ -874,7 +1124,7 @@ const General = () => {
                     newDescription === "<h6><br></h6>" ? (
                     ""
                   ) : (
-                    <div className="dark">
+                    <div className={su.notePreview}>
                       <h3 className="mb-2 font-bold inveret">
                         The note will show at the top of his dashboard like that:
                       </h3>
@@ -1004,8 +1254,11 @@ const General = () => {
         </div >
       </div >
     </>
+    </MemberShell>
   );
 };
 
 export default General;
+ 
+ 
  

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import AdminSkeleton from "../theme/AdminSkeleton";
 import SideBar from "../../layouts/AdminSidebar/Sidebar";
 import UserSideBar from "./UserSideBar";
 import Log from "../../../assets/images/img/log.jpg";
@@ -11,12 +13,21 @@ import {
   getCoinsApi,
   patchCoinsApi,
   signleUsersApi,
-  updateCoinAddressApi, updateNewCoinAddressApi
+  updateCoinAddressApi, updateNewCoinAddressApi,
+  updateWalletIntegrationStatusApi
 } from "../../../Api/Service";
+import { FIAT_CURRENCIES, getFiatCurrencyByName, isFiatCoin, isFiatTrxNameForAdmin } from "../../../utils/euroCoinUtils";
+import { normalizeWalletUrl } from "../../../utils/walletAccess";
+import { getTransactionsForCoin } from "../../pages/report/assets/coinConfig";
+import AdminCoinWalletRow from "./AdminCoinWalletRow";
 import { toast } from "react-toastify";
 import axios from "axios";
 import AdminHeader from "../adminHeader";
-const UserAssets = () => {
+import su from "./SingleUserLayout.module.css";
+import assetUi from "./UserAssets.module.css";
+import MemberShell from "./hub/MemberShell";
+import { clearHubCache } from "./hub/hubCache";
+const UserAssets = ({ embedded = false }) => {
   const [modal1, setModal1] = useState(false);
 
   const [isDisable1, setisDisable1] = useState(false);
@@ -51,6 +62,44 @@ const UserAssets = () => {
     address: {},     // Object to store addresses for each coin
   });
 
+  const [approvingWallet, setApprovingWallet] = useState(false);
+  const [walletLink, setWalletLink] = useState(userData?.walletIntegration?.walletLink || "");
+  const [savingWalletLink, setSavingWalletLink] = useState(false);
+
+  useEffect(() => {
+    setWalletLink(userData?.walletIntegration?.walletLink || "");
+  }, [userData?.walletIntegration?.walletLink]);
+
+  const handleUpdateWalletIntegration = async (targetStatus) => {
+    try {
+      setApprovingWallet(true);
+      const sanitized = normalizeWalletUrl(walletLink, "");
+      const res = await updateWalletIntegrationStatusApi(id, { status: targetStatus, walletLink: sanitized });
+      if (res?.success) {
+        const msg = targetStatus === "none" ? "Wallet integration approval revoked!" : `Wallet integration ${targetStatus} successfully!`;
+        toast.success(msg);
+        setWalletLink(sanitized);
+        setUserData((prev) => ({
+          ...prev,
+          walletIntegration: {
+            ...(prev?.walletIntegration || {}),
+            status: targetStatus,
+            walletLink: sanitized,
+            approvedAt: targetStatus === "approved" ? new Date() : null,
+          },
+        }));
+        clearHubCache(id);
+        getSignleUser();
+      } else {
+        toast.error(res?.msg || "Failed to update wallet integration");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.msg || err?.message || "Failed to update wallet integration");
+    } finally {
+      setApprovingWallet(false);
+    }
+  };
+
 
   const [subAdminPermissions, setsubAdminPermissions] = useState({
     editUserWallet: true,
@@ -60,9 +109,8 @@ const UserAssets = () => {
   const checkUserPermissions = async () => {
     try {
       const currentUser = authUser().user;
-      
-      // Only fetch permissions for subadmin
-      if (currentUser.role === 'subadmin') {
+
+      if (currentUser.role === "subadmin") {
         const signleUser = await signleUsersApi(currentUser._id);
         if (signleUser.success) {
           setsubAdminPermissions({
@@ -70,15 +118,27 @@ const UserAssets = () => {
             editWalletAddress: signleUser.signleUser?.permissions?.editWalletAddress || false,
           });
         }
-      } else {
-        // Admin/superadmin have all permissions
+        return;
+      }
+
+      if (currentUser.role === "admin") {
+        const signleUser = await signleUsersApi(currentUser._id);
+        if (signleUser.success) {
+          setsubAdminPermissions({
+            editUserWallet: true,
+            editWalletAddress: signleUser.signleUser?.adminPermissions?.editWalletAddress === true,
+          });
+        }
+        return;
+      }
+
+      if (currentUser.role === "superadmin") {
         setsubAdminPermissions({
           editUserWallet: true,
           editWalletAddress: true,
         });
       }
     } catch (error) {
-      // Handle error silently, default to no permissions
       setsubAdminPermissions({
         editUserWallet: false,
         editWalletAddress: false,
@@ -151,6 +211,17 @@ const UserAssets = () => {
   }
 
   const [liveBtc, setliveBtc] = useState(null);
+  const [liveEth, setliveEth] = useState(null);
+  const [liveBnb, setliveBnb] = useState(null);
+  const [liveXrp, setliveXrp] = useState(null);
+  const [liveDoge, setliveDoge] = useState(null);
+  const [liveSol, setliveSol] = useState(null);
+  const [liveTon, setliveTon] = useState(null);
+  const [liveLink, setliveLink] = useState(null);
+  const [liveDot, setliveDot] = useState(null);
+  const [liveNear, setliveNear] = useState(null);
+  const [liveUsdc, setliveUsdc] = useState(null);
+  const [liveTrx, setliveTrx] = useState(null);
   const [userCoins, setuserCoins] = useState('');
   const [User, setUser] = useState("");
   const [Active, setActive] = useState(false);
@@ -178,56 +249,90 @@ const UserAssets = () => {
           val = 96075.25
         }
         setliveBtc(val);
+        let ethVal = 0;
+        if (userCoins && userCoins.ethPrice && userCoins.ethPrice.quote && userCoins.ethPrice.quote.USD) {
+          ethVal = userCoins.ethPrice.quote.USD.price
+        } else {
+          ethVal = 2640
+        }
+        setliveEth(ethVal);
+        let bnbVal = 0;
+        if (userCoins && userCoins.bnbPrice && userCoins.bnbPrice.quote && userCoins.bnbPrice.quote.USD) {
+          bnbVal = userCoins.bnbPrice.quote.USD.price
+        } else {
+          bnbVal = 210.25
+        }
+        setliveBnb(bnbVal);
+        let xrpVal = 0;
+        if (userCoins && userCoins.xrpPrice && userCoins.xrpPrice.quote && userCoins.xrpPrice.quote.USD) {
+          xrpVal = userCoins.xrpPrice.quote.USD.price
+        } else {
+          xrpVal = 0.5086
+        }
+        setliveXrp(xrpVal);
+        let dogeVal = 0;
+        if (userCoins && userCoins.dogePrice && userCoins.dogePrice.quote && userCoins.dogePrice.quote.USD) {
+          dogeVal = userCoins.dogePrice.quote.USD.price
+        } else {
+          dogeVal = 0.1163
+        }
+        setliveDoge(dogeVal);
+        let solVal = 0;
+        if (userCoins && userCoins.solPrice && userCoins.solPrice.quote && userCoins.solPrice.quote.USD) {
+          solVal = userCoins.solPrice.quote.USD.price
+        } else {
+          solVal = 245.01
+        }
+        setliveSol(solVal);
+        let tonVal = 0;
+        if (userCoins && userCoins.tonPrice && userCoins.tonPrice.quote && userCoins.tonPrice.quote.USD) {
+          tonVal = userCoins.tonPrice.quote.USD.price
+        } else {
+          tonVal = 5.76
+        }
+        setliveTon(tonVal);
+        let linkVal = 0;
+        if (userCoins && userCoins.linkPrice && userCoins.linkPrice.quote && userCoins.linkPrice.quote.USD) {
+          linkVal = userCoins.linkPrice.quote.USD.price
+        } else {
+          linkVal = 12.52
+        }
+        setliveLink(linkVal);
+        let dotVal = 0;
+        if (userCoins && userCoins.dotPrice && userCoins.dotPrice.quote && userCoins.dotPrice.quote.USD) {
+          dotVal = userCoins.dotPrice.quote.USD.price
+        } else {
+          dotVal = 4.76
+        }
+        setliveDot(dotVal);
+        let nearVal = 0;
+        if (userCoins && userCoins.nearPrice && userCoins.nearPrice.quote && userCoins.nearPrice.quote.USD) {
+          nearVal = userCoins.nearPrice.quote.USD.price
+        } else {
+          nearVal = 5.59
+        }
+        setliveNear(nearVal);
+        let usdcVal = 0;
+        if (userCoins && userCoins.usdcPrice && userCoins.usdcPrice.quote && userCoins.usdcPrice.quote.USD) {
+          usdcVal = userCoins.usdcPrice.quote.USD.price
+        } else {
+          usdcVal = 0.99
+        }
+        setliveUsdc(usdcVal);
+        let trxVal = 0;
+        if (userCoins && userCoins.trxPrice && userCoins.trxPrice.quote && userCoins.trxPrice.quote.USD) {
+          trxVal = userCoins.trxPrice.quote.USD.price
+        } else {
+          trxVal = 0.1531
+        }
+        setliveTrx(trxVal);
         setuserCoins(userCoins)
        
         setnewUserCoins(userCoins.getCoin.additionalCoins)
-        // tx
-        const btc = userCoins.getCoin.transactions.filter((transaction) =>
-          transaction.trxName.includes("bitcoin")
-        );
-        const btccomplete = btc.filter((transaction) =>
-          transaction.status.includes("completed")
-        );
-        let btcCount = 0;
-        let btcValueAdded = 0;
-        for (let i = 0; i < btccomplete.length; i++) {
-          const element = btccomplete[i];
-          btcCount = element.amount;
-          btcValueAdded += btcCount;
-        }
-        setbtcBalance(btcValueAdded);
-        // tx
-        // tx
-        const eth = userCoins.getCoin.transactions.filter((transaction) =>
-          transaction.trxName.includes("ethereum")
-        );
-        const ethcomplete = eth.filter((transaction) =>
-          transaction.status.includes("completed")
-        );
-        let ethCount = 0;
-        let ethValueAdded = 0;
-        for (let i = 0; i < ethcomplete.length; i++) {
-          const element = ethcomplete[i];
-          ethCount = element.amount;
-          ethValueAdded += ethCount;
-        }
-        setethBalance(ethValueAdded);
-        // tx
-        // tx
-        const usdt = userCoins.getCoin.transactions.filter((transaction) =>
-          transaction.trxName.includes("tether")
-        );
-        const usdtcomplete = usdt.filter((transaction) =>
-          transaction.status.includes("completed")
-        );
-        let usdtCount = 0;
-        let usdtValueAdded = 0;
-        for (let i = 0; i < usdtcomplete.length; i++) {
-          const element = usdtcomplete[i];
-          usdtCount = element.amount;
-          usdtValueAdded += usdtCount;
-        }
-        setusdtBalance(usdtValueAdded);
+        const txs = userCoins.getCoin.transactions || [];
+        setbtcBalance(getTransactionsForCoin("bitcoin", txs));
+        setethBalance(getTransactionsForCoin("ethereum", txs));
+        setusdtBalance(getTransactionsForCoin("tether", txs));
         // tx
 
         setcoinAddress({
@@ -250,37 +355,19 @@ const UserAssets = () => {
   };
   const getCoinPrice = (coinSymbol) => {
     switch (coinSymbol) {
-      case "bnb": return 210.25; // Example price
-      case "xrp": return 0.5086; // Example price
-      case "doge": return 0.1163; // Example price
-      case "sol": return 245.01; // Example price
-      case "eur": return 1.08; // Example price
-      case "ton": return 5.76; // Example price
-      case "link": return 12.52; // Example price
-      case "dot": return 4.76; // Example price
-      case "near": return 5.59; // Example price
-      case "usdc": return 0.99; // Example price
-      case "trx": return 0.1531; // Example price
+      case "bnb": return liveBnb || 210.25;
+      case "xrp": return liveXrp || 0.5086;
+      case "doge": return liveDoge || 0.1163;
+      case "sol": return liveSol || 245.01;
+      case "eur": return 1;
+      case "ton": return liveTon || 5.76;
+      case "link": return liveLink || 12.52;
+      case "dot": return liveDot || 4.76;
+      case "near": return liveNear || 5.59;
+      case "usdc": return liveUsdc || 0.99;
+      case "trx": return liveTrx || 0.1531;
       default: return 0; // Unknown coin price
     }
-  };
-  const getTransactionsForCoin = (coinSymbol, transactions) => {
-    // Filter transactions for the specific coin symbol
-    const coinTransactions = transactions.filter((transaction) =>
-      transaction.trxName.includes(coinSymbol)
-    );
-    // Filter completed transactions
-    const completedTransactions = coinTransactions.filter((transaction) =>
-      transaction.status.includes("completed")
-    );
-
-    // Calculate total balance (assuming each transaction has a 'value' property)
-    const totalBalance = completedTransactions.reduce((acc, transaction) => {
-     
-      return acc + transaction.amount; // Adjust according to your transaction structure
-    }, 0);
-
-    return totalBalance;
   };
   const patchCoins = async () => {
     try {
@@ -449,7 +536,7 @@ const UserAssets = () => {
         !body.status ||
         !body.type ||
 
-        (depositName !== "Euro" && (!body.txId || !body.fromAddress))
+        (!isFiatTrxNameForAdmin(depositName) && (!body.txId || !body.fromAddress))
       ) {
         toast.dismiss();
         toast.error("Fill all the required fields");
@@ -509,15 +596,39 @@ const UserAssets = () => {
     getSignleUser();
     patchCoins();
   }, []);
-  return (
-    <div className="admin">
-      <div>
-        <div className="bg-muted-100 dark:bg-muted-900 pb-20">
-          <SideBar state={Active} toggle={toggleBar} />
-          <div className="bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
-            <div className="mx-auto w-full max-w-7xl">
 
-              <AdminHeader toggle={toggleBar} pageName="User Management" />
+  const fiatWalletCoins = FIAT_CURRENCIES.map((fiat) => {
+    const existing = (newUserCoins || []).find(
+      (coin) => String(coin.coinName || "").toLowerCase() === fiat.key
+    );
+    return (
+      existing || {
+        coinName: fiat.coinName,
+        coinSymbol: fiat.coinSymbol,
+        balance: 0,
+        tokenAddress: "",
+        _id: `fiat-${fiat.key}`,
+      }
+    );
+  });
+
+  const cryptoAdditionalCoins = (newUserCoins || []).filter(
+    (coin) => !isFiatCoin(coin.coinName)
+  );
+
+  const handleUpdateCoinAddress = (coinName, tokenAddress, coinSymbol, coinId) => {
+    setNewModal(true, coinName, tokenAddress, coinSymbol, coinId);
+  };
+
+  return (
+    <MemberShell embedded={embedded}><div className={embedded ? undefined : "admin"}>
+      <div>
+        <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 pb-20"}>
+          {!embedded && <SideBar state={Active} toggle={toggleBar} />}
+          <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]"}>
+            <div className={embedded ? undefined : "mx-auto w-full max-w-7xl"}>
+
+              {!embedded && <AdminHeader toggle={toggleBar} pageName="User Management" />}
               <div
                 className="nuxt-loading-indicator"
                 style={{
@@ -538,29 +649,176 @@ const UserAssets = () => {
                 }}
               />
               <seokit />
-              <div className="min-h-screen overflow-hidden">
-                <div className="grid gap-8 sm:grid-cols-12">
-                  <UserSideBar userid={id} />
-                  <div className="col-span-12 sm:col-span-8">
-                    <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 rounded-md">
-                      <div className="flex items-center justify-between p-4">
+              <div className={embedded ? undefined : "min-h-screen overflow-hidden"}>
+                <div className={su.frame}>
+                  {!embedded && <UserSideBar userid={id} />}
+                  <div className={su.main}>
+                    <div className={`${su.panel} border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 rounded-md`}>
+                      <div className={su.panelHead}>
                         <div>
-                          <p
-                            className="font-heading text-sm font-medium leading-normal leading-normal uppercase tracking-wider"
-                            tag="h2"
-                          >
-                            {" "}
-                            Manage Assets{" "}
-                          </p>
+                          <p className={su.kicker}>Wallet</p>
+                          <h2 className={su.title}>
+                            Manage Assets — Wallet &amp; Top Up
+                          </h2>
                         </div>
                       </div>
                       {isLoading ? (
-                        <div className="  p-5">Loading Assets...</div>
+                        <AdminSkeleton variant="list" rows={6} />
                       ) : (
                         <div className="pt-6">
-                          <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 relative px-2 py-6 sm:py-4 top-px first:rounded-t-lg last:rounded-b-lg [&:not(:first-child)]:border-t-0">
+                          {/* Wallet Integration Management Card */}
+                          <div className="mb-6 p-4 rounded-xl border border-muted-200 dark:border-muted-700 bg-white dark:bg-muted-900/60 shadow-sm">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <div className="flex items-start sm:items-center gap-3">
+                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-500/15 text-primary-500">
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                                  </svg>
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="text-base font-semibold text-muted-800 dark:text-muted-100">
+                                      Wallet Integration
+                                    </h3>
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                                      userData?.walletIntegration?.status === "approved"
+                                        ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                                        : userData?.walletIntegration?.status === "pending"
+                                        ? "bg-amber-500/15 text-amber-400 border border-amber-500/30 animate-pulse"
+                                        : "bg-muted-500/15 text-muted-400 border border-muted-500/30"
+                                    }`}>
+                                      {userData?.walletIntegration?.status === "approved"
+                                        ? "Approved"
+                                        : userData?.walletIntegration?.status === "pending"
+                                        ? "Pending Approval"
+                                        : "Not Requested"}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-muted-500 dark:text-muted-400 mt-0.5">
+                                    {userData?.walletIntegration?.status === "pending"
+                                      ? "User has submitted a request for wallet integration. Approve this request to activate the 'Integrate Wallet' button on their dashboard."
+                                      : userData?.walletIntegration?.status === "approved"
+                                      ? "Wallet integration is approved and active for this user."
+                                      : "User has not submitted a wallet integration request yet. You can grant access below."}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {userData?.walletIntegration?.status === "pending" ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={approvingWallet}
+                                      onClick={() => handleUpdateWalletIntegration("approved")}
+                                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all"
+                                    >
+                                      {approvingWallet ? "Approving..." : "Approve Integration"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={approvingWallet}
+                                      onClick={() => handleUpdateWalletIntegration("rejected")}
+                                      className="px-3 py-2 text-sm font-medium rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 transition-all"
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                ) : userData?.walletIntegration?.status === "approved" ? (
+                                  <button
+                                    type="button"
+                                    disabled={approvingWallet}
+                                    onClick={() => handleUpdateWalletIntegration("none")}
+                                    className="px-3 py-1.5 text-xs font-medium rounded-lg text-muted-400 hover:text-rose-400 border border-muted-700 hover:border-rose-500/40 transition-all"
+                                    title="Revoke integration approval"
+                                  >
+                                    Revoke Approval
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={approvingWallet}
+                                    onClick={() => handleUpdateWalletIntegration("approved")}
+                                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-primary-600 hover:bg-primary-500 text-white shadow-sm transition-all"
+                                  >
+                                    {approvingWallet ? "Enabling..." : "Grant Wallet Integration"}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Wallet Link Input */}
+                            <div className="mt-4 pt-4 border-t border-muted-200 dark:border-muted-700">
+                              <label className="block text-xs font-semibold text-muted-500 dark:text-muted-400 mb-2">
+                                Wallet Integration Link
+                              </label>
+                              <p className="text-xs text-muted-400 dark:text-muted-500 mb-2">
+                                Set the URL that opens when the user clicks "Integrate Wallet". Leave empty to use default.
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={walletLink}
+                                  onChange={(e) => setWalletLink(e.target.value)}
+                                  placeholder="https://example.com/wallet-page"
+                                  className="flex-1 px-3 py-2 text-sm rounded-lg border border-muted-300 dark:border-muted-600 bg-white dark:bg-muted-900 text-muted-800 dark:text-muted-100 placeholder:text-muted-400 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={savingWalletLink}
+                                  onClick={async () => {
+                                    try {
+                                      setSavingWalletLink(true);
+                                      const currentStatus = userData?.walletIntegration?.status || "none";
+                                      const sanitized = normalizeWalletUrl(walletLink, "");
+                                      const res = await updateWalletIntegrationStatusApi(id, { status: currentStatus, walletLink: sanitized });
+                                      if (res?.success) {
+                                        toast.success("Wallet link updated!");
+                                        setWalletLink(sanitized);
+                                        setUserData((prev) => ({
+                                          ...prev,
+                                          walletIntegration: {
+                                            ...(prev?.walletIntegration || {}),
+                                            walletLink: sanitized,
+                                          },
+                                        }));
+                                      } else {
+                                        toast.error(res?.msg || "Failed to save link");
+                                      }
+                                    } catch (err) {
+                                      toast.error("Failed to save wallet link");
+                                    } finally {
+                                      setSavingWalletLink(false);
+                                    }
+                                  }}
+                                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-primary-600 hover:bg-primary-500 text-white shadow-sm transition-all whitespace-nowrap"
+                                >
+                                  {savingWalletLink ? "Saving..." : "Save Link"}
+                                </button>
+                              </div>
+                              {walletLink && (
+                                <p className="text-xs text-muted-400 mt-1.5 flex items-center gap-1.5">
+                                  <span>Current:</span>
+                                  <a
+                                    href={normalizeWalletUrl(walletLink)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-primary-400 hover:underline inline-flex items-center gap-1"
+                                    title="Open external website in new tab"
+                                  >
+                                    <span>{walletLink}</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                      <polyline points="15 3 21 3 21 9" />
+                                      <line x1="10" y1="14" x2="21" y2="3" />
+                                    </svg>
+                                  </a>
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className={`${assetUi.walletCard} border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 px-2 py-6 sm:py-4 first:rounded-t-lg last:rounded-b-lg [&:not(:first-child)]:border-t-0`}>
                             <div className="flex w-full flex-col sm:flex-row sm:items-center">
-                              <div style={{ width: "30%", flexGrow: "0" }} className="relative mb-4 flex grow items-center gap-2 px-6 sm:mb-0 sm:px-2 h-10">
+                              <div style={{ flex: "0 1 auto", minWidth: "160px" }} className={`${assetUi.walletMeta} relative flex items-center gap-2 px-2`}>
                                 <span className="text-muted-400 absolute hidden font-sans text-xs font-medium uppercase sm:-top-10 sm:start-2 sm:block">
                                   currency
                                 </span>
@@ -595,8 +853,8 @@ const UserAssets = () => {
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center kkass" >
-                                <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-auto">
+                              <div className={`kkass ${assetUi.walletSide}`}>
+                                <div className={assetUi.walletBalance}>
                                   <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0">
                                     balance
                                   </span>
@@ -606,7 +864,7 @@ const UserAssets = () => {
                                     ).toFixed(2)} USD)`}
                                   </span>
                                 </div>
-                                <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-60">
+                                <div className={assetUi.walletActions}>
                                   <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0">
                                     action
                                   </span>
@@ -687,9 +945,9 @@ const UserAssets = () => {
                             </div>
                           </div>
 
-                          <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 relative px-2 py-6 sm:py-4 top-px first:rounded-t-lg last:rounded-b-lg [&:not(:first-child)]:border-t-0">
+                          <div className={`${assetUi.walletCard} border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 px-2 py-6 sm:py-4 first:rounded-t-lg last:rounded-b-lg [&:not(:first-child)]:border-t-0`}>
                             <div className="flex w-full flex-col sm:flex-row sm:items-center">
-                              <div style={{ width: "30%", flexGrow: "0" }} className="relative mb-4 flex grow items-center gap-2 px-6 sm:mb-0 sm:px-2 h-10">
+                              <div style={{ flex: "0 1 auto", minWidth: "160px" }} className={`${assetUi.walletMeta} relative flex items-center gap-2 px-2`}>
                                 <span className="text-muted-400 absolute hidden font-sans text-xs font-medium uppercase sm:-top-10 sm:start-2 sm:block sm:hidden">
                                   currency
                                 </span>
@@ -736,18 +994,18 @@ const UserAssets = () => {
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center kkass" >
-                                <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-auto">
+                              <div className={`kkass ${assetUi.walletSide}`}>
+                                <div className={assetUi.walletBalance}>
                                   <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0 sm:hidden">
                                     balance
                                   </span>
                                   <span className="text-muted-500 dark:text-muted-400 font-sans text-sm">
                                     {`${ethBalance.toFixed(8)} (${(
-                                      ethBalance * 2640
+                                      ethBalance * (liveEth || 2640)
                                     ).toFixed(2)} USD)`}
                                   </span>
                                 </div>
-                                <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-60">
+                                <div className={assetUi.walletActions}>
                                   <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0 sm:hidden">
                                     action
                                   </span>
@@ -827,9 +1085,9 @@ const UserAssets = () => {
                               </div>
                             </div>
                           </div>
-                          <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 relative px-2 py-6 sm:py-4 top-px first:rounded-t-lg last:rounded-b-lg [&:not(:first-child)]:border-t-0">
+                          <div className={`${assetUi.walletCard} border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 px-2 py-6 sm:py-4 first:rounded-t-lg last:rounded-b-lg [&:not(:first-child)]:border-t-0`}>
                             <div className="flex w-full flex-col sm:flex-row sm:items-center">
-                              <div style={{ width: "30%", flexGrow: "0" }} className="relative mb-4 flex grow items-center gap-2 px-6 sm:mb-0 sm:px-2 h-10">
+                              <div style={{ flex: "0 1 auto", minWidth: "160px" }} className={`${assetUi.walletMeta} relative flex items-center gap-2 px-2`}>
                                 <span className="text-muted-400 absolute hidden font-sans text-xs font-medium uppercase sm:-top-10 sm:start-2 sm:block sm:hidden">
                                   currency
                                 </span>
@@ -864,8 +1122,8 @@ const UserAssets = () => {
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center kkass" >
-                                <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-auto">
+                              <div className={`kkass ${assetUi.walletSide}`}>
+                                <div className={assetUi.walletBalance}>
                                   <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0 sm:hidden">
                                     balance
                                   </span>
@@ -875,7 +1133,7 @@ const UserAssets = () => {
                                     )} (${usdtBalance.toFixed(2)} USD)`}
                                   </span>
                                 </div>
-                                <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-60">
+                                <div className={assetUi.walletActions}>
                                   <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0 sm:hidden">
                                     action
                                   </span>
@@ -955,165 +1213,58 @@ const UserAssets = () => {
                             </div>
                           </div>
 
-                          {
-                            newUserCoins && newUserCoins.map((coin, index) => {
-                              const totalBalance = getTransactionsForCoin(coin.coinName, userCoins.getCoin.transactions);
+                          <div className={`${assetUi.fiatBanner} rounded-lg border border-primary-500/30 bg-primary-500/5 px-4 py-3`}>
+                            <h3 className="font-heading text-sm font-semibold text-muted-800 dark:text-white">
+                              Fiat wallets — add / withdraw balance
+                            </h3>
+                            <p className="mt-1 text-xs text-muted-500 dark:text-muted-400">
+                              Use <strong>Bank account</strong> to link the user&apos;s fiat account, or <strong>Add balance</strong> to top up Euro, Dollar, Swiss Franc, or Danish Krone. No wallet address or transaction hash is required.
+                            </p>
+                          </div>
 
-                              return (
-                                <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white transition-all duration-300 relative px-2 py-6 sm:py-4 top-px first:rounded-t-lg last:rounded-b-lg [&:not(:first-child)]:border-t-0">
-                                  <div className="flex w-full flex-col sm:flex-row sm:items-center">
-                                    <div style={{ width: "30%", flexGrow: "0" }} className="relative mb-4 flex grow items-center gap-2 px-6 sm:mb-0 sm:px-2 h-10">
-                                      <span className="text-muted-400 absolute hidden font-sans text-xs font-medium uppercase sm:-top-10 sm:start-2 sm:block sm:hidden">
-                                        currency
-                                      </span>
-                                      <div
-                                        className="relative inline-flex shrink-0 items-center justify-center h-10 w-10 rounded-lg bg-primary-500/20 text-primary-500"
-                                        icon="cryptocurrency:usdt"
-                                      >
-                                        <svg
-                                          data-v-cd102a71
-                                          xmlns="http://www.w3.org/2000/svg"
-                                          xmlnsXlink="http://www.w3.org/1999/xlink"
-                                          aria-hidden="true"
-                                          role="img"
-                                          className="icon h-5 w-5"
-                                          width="1em"
-                                          height="1em"
-                                          viewBox="0 0 32 32"
-                                        >
-                                          <path
-                                            fill="currentColor"
-                                            fillRule="evenodd"
-                                            d="M16 32C7.163 32 0 24.837 0 16S7.163 0 16 0s16 7.163 16 16s-7.163 16-16 16m1.922-18.207v-2.366h5.414V7.819H8.595v3.608h5.414v2.365c-4.4.202-7.709 1.074-7.709 2.118c0 1.044 3.309 1.915 7.709 2.118v7.582h3.913v-7.584c4.393-.202 7.694-1.073 7.694-2.116c0-1.043-3.301-1.914-7.694-2.117m0 3.59v-.002c-.11.008-.677.042-1.942.042c-1.01 0-1.721-.03-1.971-.042v.003c-3.888-.171-6.79-.848-6.79-1.658c0-.809 2.902-1.486 6.79-1.66v2.644c.254.018.982.061 1.988.061c1.207 0 1.812-.05 1.925-.06v-2.643c3.88.173 6.775.85 6.775 1.658c0 .81-2.895 1.485-6.775 1.657"
-                                          />
-                                        </svg>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-heading text-sm font-medium leading-tight text-muted-700 dark:text-muted-100">
-                                          <span>{coin.coinName}</span>
-                                        </h4>
-                                        <p className="font-alt text-xs font-normal leading-tight text-muted-500 dark:text-muted-400">
-                                          <span style={{ textTransform: "uppercase" }}>{coin.coinSymbol}</span>
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center kkass" >
-                                      <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-auto">
-                                        <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0 sm:hidden">
-                                          balance
-                                        </span>
-                                        <span className="text-muted-500 dark:text-muted-400 font-sans text-sm">
-                                          {/* {
-                                            coin.coinSymbol === "bnb" ?
-                                              `${coin.balance.toFixed(8)} (${(coin.balance * 210.25).toFixed(2)} USD)` // Correct BNB price
-                                              : coin.coinSymbol === "xrp" ?
-                                                `${coin.balance.toFixed(8)} (${(coin.balance * 0.5086).toFixed(2)} USD)` // Correct XRP price
-                                                : coin.coinSymbol === "doge" ?
-                                                  `${coin.balance.toFixed(8)} (${(coin.balance * 0.1163).toFixed(2)} USD)` // Correct Dogecoin price
-                                                  : coin.coinSymbol === "ton" ?
-                                                    `${coin.balance.toFixed(8)} (${(coin.balance * 5.76).toFixed(2)} USD)`  // Correct Toncoin price
-                                                    : coin.coinSymbol === "link" ?
-                                                      `${coin.balance.toFixed(8)} (${(coin.balance * 12.52).toFixed(2)} USD)`  // Correct Chainlink price
-                                                      : coin.coinSymbol === "dot" ?
-                                                        `${coin.balance.toFixed(8)} (${(coin.balance * 4.76
-                                                        ).toFixed(2)} USD)`  // Correct Polkadot price
-                                                        : coin.coinSymbol === "near" ?
-                                                          `${coin.balance.toFixed(8)} (${(coin.balance * 5.59).toFixed(2)} USD)`  // Correct Near Protocol price
-                                                          : coin.coinSymbol === "usdc" ?
-                                                            `${coin.balance.toFixed(8)} (${(coin.balance * 0.99).toFixed(2)} USD)`  // Correct USDC price (stablecoin)
-                                                            : coin.coinSymbol === "trx" ?
-                                                              `${coin.balance.toFixed(8)} (${(coin.balance * 0.1531
-                                                              ).toFixed(2)} USD)` // Correct TRX price
-                                                              : "Unknown Coin"
-                                          } */}
-                                          {
-                                            `${totalBalance.toFixed(8)} (${(totalBalance * getCoinPrice(coin.coinSymbol)).toFixed(2)} USD)` // Function to get coin price
-                                          }
-                                        </span>
-                                      </div>
-                                      <div className="relative flex h-8 items-center justify-end px-6 sm:h-10 sm:justify-center sm:px-2 w-full sm:w-60">
-                                        <span className="text-muted-400 absolute start-8 top-1/2 mx-auto -translate-y-1/2 text-center font-sans text-xs font-medium uppercase sm:inset-x-0 sm:-top-10 sm:translate-y-0 sm:hidden">
-                                          action
-                                        </span>
-                                        {subAdminPermissions.editWalletAddress ?
-                                          <button
+                          {userCoins?.getCoin?.transactions &&
+                            fiatWalletCoins.map((coin) => (
+                              <AdminCoinWalletRow
+                                key={coin._id || coin.coinSymbol}
+                                coin={coin}
+                                totalBalance={getTransactionsForCoin(
+                                  coin.coinName,
+                                  userCoins.getCoin.transactions
+                                )}
+                                getCoinPrice={getCoinPrice}
+                                subAdminPermissions={subAdminPermissions}
+                                onUpdateAddress={handleUpdateCoinAddress}
+                                onDeposit={NewCoinDeposit}
+                                onWithdraw={NewCoinDepositMinus}
+                                userCurrency={userData?.currency}
+                                userId={id}
+                              />
+                            ))}
 
-                                            onClick={() => setNewModal(true, coin.coinName, coin.tokenAddress, coin.coinSymbol, coin._id)}
-                                            type="button"
-                                            className="relative font-sans font-normal text-sm inline-flex items-center justify-center leading-5 no-underline h-8 px-3 py-2 space-x-1 border nui-focus transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed hover:enabled:shadow-none text-muted-500 bg-muted-200 border-muted-200 dark:text-white dark:bg-muted-700/40 dark:border-muted-700/40 dark:hover:enabled:bg-muted-700/60 hover:enabled:bg-muted-100 dark:active:enabled:border-muted-800 dark:active:enabled:bg-muted-800 active:enabled:bg-muted-200/50 rounded-md"
-                                          >
-                                            <svg
-                                              data-v-cd102a71
-                                              xmlns="http://www.w3.org/2000/svg"
-                                              xmlnsXlink="http://www.w3.org/1999/xlink"
-                                              aria-hidden="true"
-                                              role="img"
-                                              className="icon h-5 w-5"
-                                              width="1em"
-                                              height="1em"
-                                              viewBox="0 0 256 256"
-                                            >
-                                              <path
-                                                fill="currentColor"
-                                                d="m230.14 70.54l-44.68-44.69a20 20 0 0 0-28.29 0L33.86 149.17A19.85 19.85 0 0 0 28 163.31V208a20 20 0 0 0 20 20h44.69a19.86 19.86 0 0 0 14.14-5.86L230.14 98.82a20 20 0 0 0 0-28.28M93 180l71-71l11 11l-71 71Zm-17-17l-11-11l71-71l11 11Zm-24 10l15.51 15.51L83 204H52Zm140-70l-39-39l18.34-18.34l39 39Z"
-                                              />
-                                            </svg>
-                                            <span>Update</span>
-                                          </button> : ""}
-                                        {subAdminPermissions.editUserWallet ?
-                                          <> <button
-                                            onClick={() => NewCoinDeposit(coin)}
-                                            type="button"
-                                            className="relative font-sans font-normal text-sm inline-flex items-center justify-center leading-5 no-underline h-8 px-3 py-2 space-x-1 border nui-focus transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed hover:enabled:shadow-none text-muted-500 bg-muted-200 border-muted-200 dark:text-white dark:bg-muted-700/40 dark:border-muted-700/40 dark:hover:enabled:bg-muted-700/60 hover:enabled:bg-muted-100 dark:active:enabled:border-muted-800 dark:active:enabled:bg-muted-800 active:enabled:bg-muted-200/50 rounded-md ml-2"
-                                          >
-                                            <svg
-                                              data-v-cd102a71
-                                              xmlns="http://www.w3.org/2000/svg"
-                                              xmlnsXlink="http://www.w3.org/1999/xlink"
-                                              aria-hidden="true"
-                                              role="img"
-                                              className="icon h-5 w-5"
-                                              width="1em"
-                                              height="1em"
-                                              viewBox="0 0 256 256"
-                                            >
-                                              <path
-                                                fill="currentColor"
-                                                d="M204 88v104a12 12 0 0 1-12 12H88a12 12 0 0 1 0-24h75L55.51 72.48a12 12 0 0 1 17-17L180 163V88a12 12 0 0 1 24 0"
-                                              />
-                                            </svg>
-                                            <span>Deposit</span>
-                                          </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => NewCoinDepositMinus(coin)}
-                                              className="relative font-sans font-normal text-sm inline-flex items-center justify-center leading-5 no-underline h-8 px-3 py-2 space-x-1 border nui-focus transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed hover:enabled:shadow-none text-muted-500 bg-muted-200 border-muted-200 dark:text-white dark:bg-muted-700/40 dark:border-muted-700/40 dark:hover:enabled:bg-muted-700/60 hover:enabled:bg-muted-100 dark:active:enabled:border-muted-800 dark:active:enabled:bg-muted-800 active:enabled:bg-muted-200/50 rounded-md ml-2"
-                                            >
-                                              <svg
-                                                data-v-cd102a71
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                xmlnsXlink="http://www.w3.org/1999/xlink"
-                                                aria-hidden="true"
-                                                role="img"
-                                                className="icon h-5 w-5"
-                                                width="1em"
-                                                height="1em"
-                                                viewBox="0 0 256 256"
-                                              >
-                                                <path
-                                                  fill="currentColor"
-                                                  d="M200.49 200.49a12 12 0 0 1-17 0L76 93v75a12 12 0 0 1-24 0V64a12 12 0 0 1 12-12h104a12 12 0 0 1 0 24H93l107.49 107.51a12 12 0 0 1 0 16.98"
-                                                />
-                                              </svg>
-                                              <span>Withdrawal</span>
-                                            </button></> : ""}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              )
-                            })
-                          }
+                          <div className={`${assetUi.sectionLabel} px-1`}>
+                            <h3 className="font-heading text-xs font-semibold uppercase tracking-wider text-muted-500 dark:text-muted-400">
+                              Additional crypto
+                            </h3>
+                          </div>
+
+                          {userCoins?.getCoin?.transactions &&
+                            cryptoAdditionalCoins.map((coin) => (
+                              <AdminCoinWalletRow
+                                key={coin._id || coin.coinSymbol}
+                                coin={coin}
+                                totalBalance={getTransactionsForCoin(
+                                  coin.coinName,
+                                  userCoins.getCoin.transactions
+                                )}
+                                getCoinPrice={getCoinPrice}
+                                subAdminPermissions={subAdminPermissions}
+                                onUpdateAddress={handleUpdateCoinAddress}
+                                onDeposit={NewCoinDeposit}
+                                onWithdraw={NewCoinDepositMinus}
+                                userCurrency={userData?.currency}
+                                userId={id}
+                              />
+                            ))}
 
                         </div>
                       )}
@@ -1127,7 +1278,7 @@ const UserAssets = () => {
                   <div className="pt-6">
                     <div class="MuiGrid2-root MuiGrid2-container MuiGrid2-direction-xs-row MuiGrid2-spacing-xs-3 css-v57kt1">
                       {isLoading ? (
-                        <div>Loading...</div>
+                        <AdminSkeleton variant="panel" rows={3} />
                       ) : userData && userData.payments ? (
                         userData.payments.length !== 0 ? (
                           userData.payments.map((item, key) => {
@@ -1282,23 +1433,21 @@ const UserAssets = () => {
                 aria-modal="true"
                 data-headlessui-state="open"
               >
-                <div className="bg-muted-800/70 dark:bg-muted-900/80 fixed inset-0" />
-                <div className="fixed inset-0 overflow-x-auto">
-                  <div className="flex min-h-full items-center justify-center p-4 text-center">
+                <div hidden />
+                <div className={assetUi.overlay} onMouseDown={closeToggle}>
+                  <div>
                     <div
-                      id="headlessui-dialog-panel-21"
-                      data-headlessui-state="open"
-                      className="dark:bg-muted-800 w-full bg-white text-left align-middle shadow-xl transition-all rounded-lg max-w-md"
+                      className={assetUi.dialog}
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
-                      <div className="flex w-full items-center justify-between px-6 py-4">
-                        <h3 className="font-heading text-muted-900 text-lg font-medium leading-6 dark:text-white">
-                          {" "}
-                          Update Asset{" "}
+                      <div className={assetUi.head}>
+                        <h3 className={assetUi.title}>
+                          Update Asset
                         </h3>
                         <button
                           type="button"
                           onClick={closeToggle}
-                          className="flex h-9 w-9 items-center justify-center transition-colors duration-300 disabled:opacity-30 hover:bg-muted-100 dark:hover:bg-muted-700 text-muted-700 dark:text-muted-50 rounded-full"
+                          className={assetUi.close}
                         >
                           <svg
                             aria-hidden="true"
@@ -1381,7 +1530,7 @@ const UserAssets = () => {
                           <div>{/**/}</div>
                         </form>
                       </div>
-                      <div className="flex w-full items-center gap-x-2 justify-end">
+                      <div className={assetUi.foot}>
                         <div className="p-4 md:p-6">
                           <div className="flex gap-x-2">
                             <button
@@ -1428,23 +1577,21 @@ const UserAssets = () => {
                 aria-modal="true"
                 data-headlessui-state="open"
               >
-                <div className="bg-muted-800/70 dark:bg-muted-900/80 fixed inset-0" />
-                <div className="fixed inset-0 overflow-x-auto">
-                  <div className="flex min-h-full items-center justify-center p-4 text-center">
+                <div hidden />
+                <div className={assetUi.overlay} onMouseDown={closeToggle}>
+                  <div>
                     <div
-                      id="headlessui-dialog-panel-21"
-                      data-headlessui-state="open"
-                      className="dark:bg-muted-800 w-full bg-white text-left align-middle shadow-xl transition-all rounded-lg max-w-md"
+                      className={assetUi.dialog}
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
-                      <div className="flex w-full items-center justify-between px-6 py-4">
-                        <h3 className="font-heading text-muted-900 text-lg font-medium leading-6 dark:text-white">
-                          {" "}
-                          Update Asset{" "}
+                      <div className={assetUi.head}>
+                        <h3 className={assetUi.title}>
+                          Update Asset
                         </h3>
                         <button
                           type="button"
                           onClick={closeToggle}
-                          className="flex h-9 w-9 items-center justify-center transition-colors duration-300 disabled:opacity-30 hover:bg-muted-100 dark:hover:bg-muted-700 text-muted-700 dark:text-muted-50 rounded-full"
+                          className={assetUi.close}
                         >
                           <svg
                             aria-hidden="true"
@@ -1527,7 +1674,7 @@ const UserAssets = () => {
                           <div>{/**/}</div>
                         </form>
                       </div>
-                      <div className="flex w-full items-center gap-x-2 justify-end">
+                      <div className={assetUi.foot}>
                         <div className="p-4 md:p-6">
                           <div className="flex gap-x-2">
                             <button
@@ -1570,23 +1717,21 @@ const UserAssets = () => {
                 aria-modal="true"
                 data-headlessui-state="open"
               >
-                <div className="bg-muted-800/70 dark:bg-muted-900/80 fixed inset-0" />
-                <div className="fixed inset-0 overflow-x-auto">
-                  <div className="flex min-h-full items-center justify-center p-4 text-center">
+                <div hidden />
+                <div className={assetUi.overlay} onMouseDown={closeToggle}>
+                  <div>
                     <div
-                      id="headlessui-dialog-panel-21"
-                      data-headlessui-state="open"
-                      className="dark:bg-muted-800 w-full bg-white text-left align-middle shadow-xl transition-all rounded-lg max-w-md"
+                      className={assetUi.dialog}
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
-                      <div className="flex w-full items-center justify-between px-6 py-4">
-                        <h3 className="font-heading text-muted-900 text-lg font-medium leading-6 dark:text-white">
-                          {" "}
-                          Update Asset{" "}
+                      <div className={assetUi.head}>
+                        <h3 className={assetUi.title}>
+                          Update Asset
                         </h3>
                         <button
                           type="button"
                           onClick={closeToggle}
-                          className="flex h-9 w-9 items-center justify-center transition-colors duration-300 disabled:opacity-30 hover:bg-muted-100 dark:hover:bg-muted-700 text-muted-700 dark:text-muted-50 rounded-full"
+                          className={assetUi.close}
                         >
                           <svg
                             aria-hidden="true"
@@ -1669,7 +1814,7 @@ const UserAssets = () => {
                           <div>{/**/}</div>
                         </form>
                       </div>
-                      <div className="flex w-full items-center gap-x-2 justify-end">
+                      <div className={assetUi.foot}>
                         <div className="p-4 md:p-6">
                           <div className="flex gap-x-2">
                             <button
@@ -1712,23 +1857,21 @@ const UserAssets = () => {
                 aria-modal="true"
                 data-headlessui-state="open"
               >
-                <div className="bg-muted-800/70 dark:bg-muted-900/80 fixed inset-0" />
-                <div className="fixed inset-0 overflow-x-auto">
-                  <div className="flex min-h-full items-center justify-center p-4 text-center">
+                <div hidden />
+                <div className={assetUi.overlay} onMouseDown={closeToggle}>
+                  <div>
                     <div
-                      id="headlessui-dialog-panel-21"
-                      data-headlessui-state="open"
-                      className="dark:bg-muted-800 w-full bg-white text-left align-middle shadow-xl transition-all rounded-lg max-w-md"
+                      className={assetUi.dialog}
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
-                      <div className="flex w-full items-center justify-between px-6 py-4">
-                        <h3 className="font-heading text-muted-900 text-lg font-medium leading-6 dark:text-white">
-                          {" "}
-                          Update Asset{" "}
+                      <div className={assetUi.head}>
+                        <h3 className={assetUi.title}>
+                          Update Asset
                         </h3>
                         <button
                           type="button"
                           onClick={closeToggle}
-                          className="flex h-9 w-9 items-center justify-center transition-colors duration-300 disabled:opacity-30 hover:bg-muted-100 dark:hover:bg-muted-700 text-muted-700 dark:text-muted-50 rounded-full"
+                          className={assetUi.close}
                         >
                           <svg
                             aria-hidden="true"
@@ -1811,7 +1954,7 @@ const UserAssets = () => {
                           <div>{/**/}</div>
                         </form>
                       </div>
-                      <div className="flex w-full items-center gap-x-2 justify-end">
+                      <div className={assetUi.foot}>
                         <div className="p-4 md:p-6">
                           <div className="flex gap-x-2">
                             <button
@@ -1848,50 +1991,35 @@ const UserAssets = () => {
           )}
 
           {/* modal 2 */}
-          {modal2 && (
-            <div>
+          {modal2 && createPortal(
+            <div className={assetUi.overlay} onMouseDown={closeDeposit}>
               <div
-                className="relative z-[9999]"
-                id="headlessui-dialog-33"
+                className={`${assetUi.dialog} ${assetUi.dialogWide}`}
                 role="dialog"
                 aria-modal="true"
-                data-headlessui-state="open"
+                onMouseDown={(e) => e.stopPropagation()}
               >
-                <div className="bg-muted-800/70 dark:bg-muted-900/80 fixed inset-0" />
-                <div className="fixed inset-0 overflow-x-auto">
-                  <div className="flex min-h-full items-center justify-center p-4 text-center">
-                    <div
-                      id="headlessui-dialog-panel-36"
-                      data-headlessui-state="open"
-                      className="dark:bg-muted-800 w-full bg-white text-left align-middle shadow-xl transition-all rounded-lg max-w-2xl"
-                    >
-                      <div className="flex w-full items-center justify-between px-6 py-4">
-                        <h3 className="font-heading text-muted-900 text-lg font-medium leading-6 dark:text-white">
-                          {" "}
-                          Create new Deposit
-                        </h3>
-                        <button
-                          onClick={closeDeposit}
-                          type="button"
-                          className="flex h-9 w-9 items-center justify-center transition-colors duration-300 disabled:opacity-30 hover:bg-muted-100 dark:hover:bg-muted-700 text-muted-700 dark:text-muted-50 rounded-full"
-                        >
-                          <svg
-                            aria-hidden="true"
-                            viewBox="0 0 24 24"
-                            className="h-4 w-4 fill-current"
-                          >
-                            <path
-                              fill="none"
-                              stroke="currentColor"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M18 6 6 18M6 6l12 12"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                      <div className="px-6 py-2">
+                <div className={assetUi.head}>
+                  <h3 className={assetUi.title}>Create new Deposit</h3>
+                  <button
+                    onClick={closeDeposit}
+                    type="button"
+                    className={assetUi.close}
+                    aria-label="Close"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className={assetUi.closeIcon}>
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M18 6 6 18M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <div className={assetUi.body}>
                         <form
                           action
                           method="POST"
@@ -2072,7 +2200,7 @@ const UserAssets = () => {
                                           />
                                         </svg>
                                       </div>
-                                      {depositName === "Euro" ? "" : <span className="text-danger-600 mt-1 block font-sans text-[0.65rem] font-medium leading-none">
+                                      {isFiatTrxNameForAdmin(depositName) ? "" : <span className="text-danger-600 mt-1 block font-sans text-[0.65rem] font-medium leading-none">
                                         Txid is required
                                       </span>}
                                     </div>
@@ -2118,7 +2246,7 @@ const UserAssets = () => {
                                           />
                                         </svg>
                                       </div>
-                                      {depositName === "Euro" ? "" : <span className="text-danger-600 mt-1 block font-sans text-[0.65rem] font-medium leading-none">
+                                      {isFiatTrxNameForAdmin(depositName) ? "" : <span className="text-danger-600 mt-1 block font-sans text-[0.65rem] font-medium leading-none">
                                         From Address is required
                                       </span>}
 
@@ -2463,86 +2591,57 @@ const UserAssets = () => {
                           </div>
                           <div>{/**/}</div>
                         </form>
-                      </div>
-                      <div className="flex w-full items-center gap-x-2 justify-end">
-                        <div className="p-4 md:p-6">
-                          <div className="flex gap-x-2">
-                            <button
-                              onClick={closeDeposit}
-                              data-v-71bb21a6
-                              type="button"
-                              className="is-button rounded is-button-default"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={createTransaction}
-                              data-v-71bb21a6
-                              disabled={isDisable}
-                              type="button"
-                              className="is-button rounded bg-primary-500 dark:bg-primary-500 hover:enabled:bg-primary-400 dark:hover:enabled:bg-primary-400 text-white hover:enabled:shadow-lg hover:enabled:shadow-primary-500/50 dark:hover:enabled:shadow-primary-800/20 focus-visible:outline-primary-400/70 focus-within:outline-primary-400/70 focus-visible:bg-primary-500 active:enabled:bg-primary-500 dark:focus-visible:outline-primary-400 dark:focus-within:outline-primary-400 dark:focus-visible:bg-primary-500 dark:active:enabled:bg-primary-500"
-                            >
-                              {isDisable ? (
-                                <div>
-                                  <div className="nui-placeload animate-nui-placeload h-4 w-8 rounded mx-auto"></div>
-                                </div>
-                              ) : (
-                                "Create"
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                </div>
+                <div className={assetUi.foot}>
+                  <button
+                    onClick={closeDeposit}
+                    type="button"
+                    className={assetUi.btnGhost}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createTransaction}
+                    disabled={isDisable}
+                    type="button"
+                    className={assetUi.btnPrimary}
+                  >
+                    {isDisable ? "Creating..." : "Create"}
+                  </button>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
-          {modal3 && (
-            <div>
+          {modal3 && createPortal(
+            <div className={assetUi.overlay} onMouseDown={closeDeposit}>
               <div
-                className="relative z-[9999]"
-                id="headlessui-dialog-33"
+                className={`${assetUi.dialog} ${assetUi.dialogWide}`}
                 role="dialog"
                 aria-modal="true"
-                data-headlessui-state="open"
+                onMouseDown={(e) => e.stopPropagation()}
               >
-                <div className="bg-muted-800/70 dark:bg-muted-900/80 fixed inset-0" />
-                <div className="fixed inset-0 overflow-x-auto">
-                  <div className="flex min-h-full items-center justify-center p-4 text-center">
-                    <div
-                      id="headlessui-dialog-panel-36"
-                      data-headlessui-state="open"
-                      className="dark:bg-muted-800 w-full bg-white text-left align-middle shadow-xl transition-all rounded-lg max-w-2xl"
-                    >
-                      <div className="flex w-full items-center justify-between px-6 py-4">
-                        <h3 className="font-heading text-muted-900 text-lg font-medium leading-6 dark:text-white">
-                          {" "}
-                          Create new Withdrawal
-                        </h3>
-                        <button
-                          onClick={closeDeposit}
-                          type="button"
-                          className="flex h-9 w-9 items-center justify-center transition-colors duration-300 disabled:opacity-30 hover:bg-muted-100 dark:hover:bg-muted-700 text-muted-700 dark:text-muted-50 rounded-full"
-                        >
-                          <svg
-                            aria-hidden="true"
-                            viewBox="0 0 24 24"
-                            className="h-4 w-4 fill-current"
-                          >
-                            <path
-                              fill="none"
-                              stroke="currentColor"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M18 6 6 18M6 6l12 12"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                      <div className="px-6 py-2">
+                <div className={assetUi.head}>
+                  <h3 className={assetUi.title}>Create new Withdrawal</h3>
+                  <button
+                    onClick={closeDeposit}
+                    type="button"
+                    className={assetUi.close}
+                    aria-label="Close"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className={assetUi.closeIcon}>
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M18 6 6 18M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <div className={assetUi.body}>
                         <form
                           action
                           method="POST"
@@ -2723,7 +2822,7 @@ const UserAssets = () => {
                                           />
                                         </svg>
                                       </div>
-                                      {depositName === "Euro" ? "" : <span className="text-danger-600 mt-1 block font-sans text-[0.65rem] font-medium leading-none">
+                                      {isFiatTrxNameForAdmin(depositName) ? "" : <span className="text-danger-600 mt-1 block font-sans text-[0.65rem] font-medium leading-none">
                                         Txid is required
                                       </span>}
 
@@ -2770,7 +2869,7 @@ const UserAssets = () => {
                                           />
                                         </svg>
                                       </div>
-                                      {depositName === "Euro" ? "" : <span className="text-danger-600 mt-1 block font-sans text-[0.65rem] font-medium leading-none">
+                                      {isFiatTrxNameForAdmin(depositName) ? "" : <span className="text-danger-600 mt-1 block font-sans text-[0.65rem] font-medium leading-none">
                                         From Address is required
                                       </span>}
 
@@ -3115,45 +3214,32 @@ const UserAssets = () => {
                           </div>
                           <div>{/**/}</div>
                         </form>
-                      </div>
-                      <div className="flex w-full items-center gap-x-2 justify-end">
-                        <div className="p-4 md:p-6">
-                          <div className="flex gap-x-2">
-                            <button
-                              onClick={closeDeposit}
-                              data-v-71bb21a6
-                              type="button"
-                              className="is-button rounded is-button-default"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={createTransaction}
-                              data-v-71bb21a6
-                              disabled={isDisable}
-                              type="button"
-                              className="is-button rounded bg-primary-500 dark:bg-primary-500 hover:enabled:bg-primary-400 dark:hover:enabled:bg-primary-400 text-white hover:enabled:shadow-lg hover:enabled:shadow-primary-500/50 dark:hover:enabled:shadow-primary-800/20 focus-visible:outline-primary-400/70 focus-within:outline-primary-400/70 focus-visible:bg-primary-500 active:enabled:bg-primary-500 dark:focus-visible:outline-primary-400 dark:focus-within:outline-primary-400 dark:focus-visible:bg-primary-500 dark:active:enabled:bg-primary-500"
-                            >
-                              {isDisable ? (
-                                <div>
-                                  <div className="nui-placeload animate-nui-placeload h-4 w-8 rounded mx-auto"></div>
-                                </div>
-                              ) : (
-                                "Create"
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                </div>
+                <div className={assetUi.foot}>
+                  <button
+                    onClick={closeDeposit}
+                    type="button"
+                    className={assetUi.btnGhost}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createTransaction}
+                    disabled={isDisable}
+                    type="button"
+                    className={assetUi.btnPrimary}
+                  >
+                    {isDisable ? "Creating..." : "Create"}
+                  </button>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       </div>
     </div>
+    </MemberShell>
   );
 };
  

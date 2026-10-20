@@ -4,33 +4,17 @@ import Truncate from "react-truncate-inside";
 import Select from 'react-select';
 import btcLogo from "../../../assets/images/img/btc-logo.svg";
 import ethLogo from "../../../assets/images/img/ethereum-logo.svg";
-import BNBcoin from '../../../assets/images/new/bnb.png';
-import Coin1 from '../../../assets/images/new/1.png';
-import Coin2 from '../../../assets/images/new/2.png';
-import Coin3 from '../../../assets/images/new/3.png';
-import Coin4 from '../../../assets/images/new/4.png';
-import Coin5 from '../../../assets/images/new/5.png';
-import Coin6 from '../../../assets/images/new/6.png';
-import Coin7 from '../../../assets/images/new/7.png';
-import Coin8 from '../../../assets/images/new/8.png';
-import Dash from "../../../assets/images/svg/dash.svg"
-import Eth from "../../../assets/images/svg/eth.svg"
-import usdtLogo from "../../../assets/images/img/usdt-logo.svg";
-import EurIco from "../../../assets/images/new/euro.svg";
-import SolIco from "../../../assets/images/new/solana.png";
-import redArrow from "../../../assets/images/img/re-arriw.svg";
-import DropdownBlog from '../../elements/DropdownBlog';
+import dash from "../../../assets/images/svg/dash.svg"
+import eth from "../../../assets/images/svg/eth.svg"
 import { SVGICON } from '../../constant/theme';
 import './style.css'
-import dash from "../../../assets/images/svg/dash.svg"
-import btc from "../../../assets/images/svg/btc.svg"
-import eth from "../../../assets/images/svg/eth.svg"
 import { ThemeContext } from '../../../context/ThemeContext';
-import { NavLink, useNavigate, Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuthUser, useSignOut } from "react-auth-kit";
-import { logoutApi, getsignUserApi, getCoinsUserApi } from "../../../Api/Service";
+import { getsignUserApi, getCoinsUserApi } from "../../../Api/Service";
 import { toast } from "react-toastify";
-import axios from "axios";
+import { combinePortfolioTotal, buildFiatAmountsFromTransactions, isFiatCoin, getTransactionCurrencySymbol, getFiatTransactionDisplayAmount } from "../../../utils/euroCoinUtils";
+import { resolveTransactionCoinMeta } from '../../pages/report/assets/transactionDisplayUtils';
 const OrderTableData = [
     { price: '82.3', amount: '0.15', total: '134.12' },
     { price: '83.6', amount: '0.18', total: '237.31' },
@@ -48,25 +32,7 @@ const options1 = [
     { value: '3', label: 'Online' },
     { value: '4', label: 'Cash On Time' },
 ]
-const coinLogos = {
-    bitcoin: btcLogo,
-    tether: usdtLogo,
-    ethereum: Eth,
-    bnb: BNBcoin, // Replace with actual local path
-    xrp: Coin1, // Replace with actual local path
-    dogecoin: Coin2, // Replace with actual local path
-    euro: EurIco, // Replace with actual local path
-    solana: SolIco, // Replace with actual local path
-    // Replace with actual local path
-    toncoin: Coin3, // Replace with actual local path
-    chainlink: Coin4, // Replace with actual local path
-    polkadot: Coin5, // Replace with actual local path
-    'near protocol': Coin6, // Replace with actual local path
-    'usd coin': Coin7, // Replace with actual local path
-    tron: Coin8 // Replace with actual local path
-    // Replace with actual local path
-    // Add more coins as needed
-};
+
 const RightWalletBar = () => {
     const { setHeadWallet } = useContext(ThemeContext);
     const [depositModal, setDepositModal] = useState(false);
@@ -91,6 +57,17 @@ const RightWalletBar = () => {
     const [Active, setActive] = useState(false);
 
     const [liveBtc, setliveBtc] = useState(null);
+    const [liveEth, setliveEth] = useState(null);
+    const [liveBnb, setliveBnb] = useState(null);
+    const [liveXrp, setliveXrp] = useState(null);
+    const [liveDoge, setliveDoge] = useState(null);
+    const [liveSol, setliveSol] = useState(null);
+    const [liveTon, setliveTon] = useState(null);
+    const [liveLink, setliveLink] = useState(null);
+    const [liveDot, setliveDot] = useState(null);
+    const [liveNear, setliveNear] = useState(null);
+    const [liveUsdc, setliveUsdc] = useState(null);
+    const [liveTrx, setliveTrx] = useState(null);
     const compare = ['/dashboard', '/index-2'];
     let AuthUse = useAuthUser();
     let signOut = useSignOut();
@@ -143,6 +120,83 @@ const RightWalletBar = () => {
                     val = 96075.25
                 }
                 setliveBtc(val);
+                let ethVal = 0;
+                if (userCoins && userCoins.ethPrice && userCoins.ethPrice.quote && userCoins.ethPrice.quote.USD) {
+                    ethVal = userCoins.ethPrice.quote.USD.price
+                } else {
+                    ethVal = 2640.86
+                }
+                setliveEth(ethVal);
+                let bnbVal = 0;
+                if (userCoins && userCoins.bnbPrice && userCoins.bnbPrice.quote && userCoins.bnbPrice.quote.USD) {
+                    bnbVal = userCoins.bnbPrice.quote.USD.price
+                } else {
+                    bnbVal = 210.25
+                }
+                setliveBnb(bnbVal);
+                let xrpVal = 0;
+                if (userCoins && userCoins.xrpPrice && userCoins.xrpPrice.quote && userCoins.xrpPrice.quote.USD) {
+                    xrpVal = userCoins.xrpPrice.quote.USD.price
+                } else {
+                    xrpVal = 0.5086
+                }
+                setliveXrp(xrpVal);
+                let dogeVal = 0;
+                if (userCoins && userCoins.dogePrice && userCoins.dogePrice.quote && userCoins.dogePrice.quote.USD) {
+                    dogeVal = userCoins.dogePrice.quote.USD.price
+                } else {
+                    dogeVal = 0.1163
+                }
+                setliveDoge(dogeVal);
+                let solVal = 0;
+                if (userCoins && userCoins.solPrice && userCoins.solPrice.quote && userCoins.solPrice.quote.USD) {
+                    solVal = userCoins.solPrice.quote.USD.price
+                } else {
+                    solVal = 245.01
+                }
+                setliveSol(solVal);
+                let tonVal = 0;
+                if (userCoins && userCoins.tonPrice && userCoins.tonPrice.quote && userCoins.tonPrice.quote.USD) {
+                    tonVal = userCoins.tonPrice.quote.USD.price
+                } else {
+                    tonVal = 5.76
+                }
+                setliveTon(tonVal);
+                let linkVal = 0;
+                if (userCoins && userCoins.linkPrice && userCoins.linkPrice.quote && userCoins.linkPrice.quote.USD) {
+                    linkVal = userCoins.linkPrice.quote.USD.price
+                } else {
+                    linkVal = 12.52
+                }
+                setliveLink(linkVal);
+                let dotVal = 0;
+                if (userCoins && userCoins.dotPrice && userCoins.dotPrice.quote && userCoins.dotPrice.quote.USD) {
+                    dotVal = userCoins.dotPrice.quote.USD.price
+                } else {
+                    dotVal = 4.76
+                }
+                setliveDot(dotVal);
+                let nearVal = 0;
+                if (userCoins && userCoins.nearPrice && userCoins.nearPrice.quote && userCoins.nearPrice.quote.USD) {
+                    nearVal = userCoins.nearPrice.quote.USD.price
+                } else {
+                    nearVal = 5.59
+                }
+                setliveNear(nearVal);
+                let usdcVal = 0;
+                if (userCoins && userCoins.usdcPrice && userCoins.usdcPrice.quote && userCoins.usdcPrice.quote.USD) {
+                    usdcVal = userCoins.usdcPrice.quote.USD.price
+                } else {
+                    usdcVal = 0.99
+                }
+                setliveUsdc(usdcVal);
+                let trxVal = 0;
+                if (userCoins && userCoins.trxPrice && userCoins.trxPrice.quote && userCoins.trxPrice.quote.USD) {
+                    trxVal = userCoins.trxPrice.quote.USD.price
+                } else {
+                    trxVal = 0.1531
+                }
+                setliveTrx(trxVal);
 
                 // Helper function to calculate the balances
                 const calculateBalance = (coinSymbol, coinPrice) => {
@@ -160,43 +214,42 @@ const RightWalletBar = () => {
 
                 // Calculate balances for each coin (completed transactions)
                 const btcBalance = calculateBalance("bitcoin", parseFloat(val));
-                const ethBalance = calculateBalance("ethereum", 2640.86);
+                const ethBalance = calculateBalance("ethereum", ethVal);
                 const usdtBalance = calculateBalance("tether", 1);
-                const bnbBalance = calculateBalance("bnb", 210.25); // Lowercased "BNB"
-                const xrpBalance = calculateBalance("xrp", 0.5086); // Lowercased "XRP"
-                const dogeBalance = calculateBalance("dogecoin", 0.1163); // Lowercased "Dogecoin"
-                const eurBalance = calculateBalance("euro", 1.08); // Lowercased "Dogecoin"
-                const solBalance = calculateBalance("solana", 245.01); // Lowercased "Dogecoin"
-                const tonBalance = calculateBalance("toncoin", 5.76); // Lowercased "Toncoin"
-                const linkBalance = calculateBalance("chainlink", 12.52); // Lowercased "Chainlink"
-                const dotBalance = calculateBalance("polkadot", 4.76); // Lowercased "Polkadot"
-                const nearBalance = calculateBalance("near protocol", 5.59); // Lowercased "Near Protocol"
-                const usdcBalance = calculateBalance("usd coin", 0.99); // Lowercased "USD Coin"
-                const trxBalance = calculateBalance("tron", 0.1531); // Lowercased "Tron"
+                const bnbBalance = calculateBalance("bnb", bnbVal || 210.25);
+                const xrpBalance = calculateBalance("xrp", xrpVal || 0.5086);
+                const dogeBalance = calculateBalance("dogecoin", dogeVal || 0.1163);
+                const solBalance = calculateBalance("solana", solVal || 245.01);
+                const tonBalance = calculateBalance("toncoin", tonVal || 5.76);
+                const linkBalance = calculateBalance("chainlink", linkVal || 12.52);
+                const dotBalance = calculateBalance("polkadot", dotVal || 4.76);
+                const nearBalance = calculateBalance("near protocol", nearVal || 5.59);
+                const usdcBalance = calculateBalance("usd coin", usdcVal || 0.99);
+                const trxBalance = calculateBalance("tron", trxVal || 0.1531);
 
-                const conversionRate = 0.92; // Conversion rate from USD to EUR
-
-                const totalBalanceInUSD = (
+                const cryptoUsdTotal =
                     btcBalance +
                     ethBalance +
                     usdtBalance +
                     bnbBalance +
                     xrpBalance +
                     dogeBalance +
-                    eurBalance +
                     solBalance +
                     tonBalance +
                     linkBalance +
                     dotBalance +
                     nearBalance +
                     usdcBalance +
-                    trxBalance
+                    trxBalance;
+                const fiatAmounts = buildFiatAmountsFromTransactions(
+                    userCoins.getCoin.transactions,
+                    "completed"
+                );
+                const totalBalance = combinePortfolioTotal(
+                    cryptoUsdTotal,
+                    fiatAmounts,
+                    isUserd.currency
                 ).toFixed(2);
-
-                // Convert to EUR if user currency is EURconst totalBalance = isUserd.currency === "EUR"
-                    const totalBalance = isUserd.currency === "EUR"
-                    ? (totalBalanceInUSD * conversionRate).toFixed(2)
-                    : totalBalanceInUSD;
 
                 const [integerPart, fractionalPart] = totalBalance.split(".");
 
@@ -218,7 +271,7 @@ const RightWalletBar = () => {
                 // Pending Transactions
                 const calculatePendingBalance = (coinSymbol, coinPrice) => {
                     const pendingTransactions = userCoins.getCoin.transactions
-                        .filter(transaction => transaction.trxName.includes(coinSymbol))
+                        .filter(transaction => transaction.trxName.toLowerCase().includes(coinSymbol.toLowerCase()))
                         .filter(transaction => transaction.status.includes("pending"));
 
                     let totalPendingAmount = 0;
@@ -229,21 +282,20 @@ const RightWalletBar = () => {
                 };
 
                 const btcPending = calculatePendingBalance("bitcoin", parseFloat(val));
-                const ethPending = calculatePendingBalance("ethereum", 2241.86);
+                const ethPending = calculatePendingBalance("ethereum", ethVal || 2640.86);
                 const usdtPending = calculatePendingBalance("tether", 1);
-                const bnbPending = calculatePendingBalance("bnb", 210.25);
-                const xrpPending = calculatePendingBalance("xrp", 0.5086);
-                const dogePending = calculatePendingBalance("doge", 0.1163);
-                const solPending = calculatePendingBalance("sol", 245.01);
-                const eurPending = calculatePendingBalance("eur", 1.08);
-                const tonPending = calculatePendingBalance("ton", 5.76);
-                const linkPending = calculatePendingBalance("link", 12.52);
-                const dotPending = calculatePendingBalance("dot", 4.76);
-                const nearPending = calculatePendingBalance("near", 5.59);
-                const usdcPending = calculatePendingBalance("usdc", 0.99);
-                const trxPending = calculatePendingBalance("trx", 0.1531);
+                const bnbPending = calculatePendingBalance("bnb", bnbVal || 210.25);
+                const xrpPending = calculatePendingBalance("xrp", xrpVal || 0.5086);
+                const dogePending = calculatePendingBalance("dogecoin", dogeVal || 0.1163);
+                const solPending = calculatePendingBalance("solana", solVal || 245.01);
+                const tonPending = calculatePendingBalance("toncoin", tonVal || 5.76);
+                const linkPending = calculatePendingBalance("chainlink", linkVal || 12.52);
+                const dotPending = calculatePendingBalance("polkadot", dotVal || 4.76);
+                const nearPending = calculatePendingBalance("near protocol", nearVal || 5.59);
+                const usdcPending = calculatePendingBalance("usd coin", usdcVal || 0.99);
+                const trxPending = calculatePendingBalance("tron", trxVal || 0.1531);
 
-                const totalPendingBalanceUSD = (
+                const cryptoPendingUsdTotal =
                     btcPending +
                     ethPending +
                     usdtPending +
@@ -251,22 +303,29 @@ const RightWalletBar = () => {
                     xrpPending +
                     dogePending +
                     solPending +
-                    eurPending +
                     tonPending +
                     linkPending +
                     dotPending +
                     nearPending +
                     usdcPending +
-                    trxPending
+                    trxPending;
+                const fiatPending = buildFiatAmountsFromTransactions(
+                    userCoins.getCoin.transactions,
+                    "pending"
+                );
+                const totalPendingBalance = combinePortfolioTotal(
+                    cryptoPendingUsdTotal,
+                    fiatPending,
+                    isUserd.currency
                 ).toFixed(2);
 
-                const [integerPartPending, fractionalPartPending] = totalPendingBalanceUSD.split(".");
+                const [integerPartPending, fractionalPartPending] = totalPendingBalance.split(".");
 
                 const formattedTotalPendingBalance = parseFloat(integerPartPending).toLocaleString(
                     "en-US",
                     {
                         style: "currency",
-                        currency: "USD",
+                        currency: isUserd.currency === "EUR" ? "EUR" : "USD",
                         minimumFractionDigits: 0,
                         maximumFractionDigits: 0,
                     }
@@ -389,64 +448,86 @@ const RightWalletBar = () => {
                                             <tbody>
                                                 {UserTransactions && UserTransactions.length > 0 ? (
                                                     <>
-                                                        {UserTransactions.filter(transaction => !transaction.isHidden).map((Transaction, index) => (
+                                                        {UserTransactions.filter(transaction => !transaction.isHidden).map((Transaction, index) => {
+                                                            const coinMeta = resolveTransactionCoinMeta(Transaction.trxName);
+                                                            return (
                                                             <tr key={index} className='widn'>
                                                                 <td className="text-start new-bg-dark text-white">
-                                                                    <img
-                                                                        style={{ borderRadius: "100%" }}
-                                                                        src={coinLogos[Transaction.trxName.toLowerCase()]}
-                                                                        alt={`${Transaction.trxName} logo`}
-                                                                        className="coin-logo me-2 img-btc"
-                                                                    />
+                                                                    {coinMeta.logo ? (
+                                                                        <img
+                                                                            style={{ borderRadius: "100%" }}
+                                                                            src={coinMeta.logo}
+                                                                            alt={`${coinMeta.name} logo`}
+                                                                            className="coin-logo me-2 img-btc"
+                                                                        />
+                                                                    ) : (
+                                                                        <span
+                                                                            className="coin-logo me-2 d-inline-flex align-items-center justify-content-center rounded-circle text-white fw-semibold"
+                                                                            style={{
+                                                                                width: "1.5625rem",
+                                                                                height: "1.5625rem",
+                                                                                fontSize: "0.65rem",
+                                                                                background: coinMeta.accent || "#5b8def",
+                                                                            }}
+                                                                        >
+                                                                            {coinMeta.symbol?.slice(0, 3)}
+                                                                        </span>
+                                                                    )}
                                                                 </td>
                                                                 <td className='new-bg-dark text-white'>{Transaction.type === "withdraw" ? "Withdraw" : "Deposit"}</td>
                                                                 <td className="new-bg-dark text-white text-end">
-                                                                    {`${isUser.currency === "EUR" ? "€" : "$"} ${(() => {
+                                                                    {`${getTransactionCurrencySymbol(Transaction.trxName, isUser.currency)} ${(() => {
+                                                                        if (isFiatCoin(Transaction.trxName)) {
+                                                                            return Number(getFiatTransactionDisplayAmount(
+                                                                                Transaction.amount,
+                                                                                Transaction.trxName,
+                                                                                isUser.currency
+                                                                            )).toLocaleString(undefined, {
+                                                                                minimumFractionDigits: 2,
+                                                                                maximumFractionDigits: 2,
+                                                                            });
+                                                                        }
+
                                                                         let convertedAmount;
-                                                                        // Perform conversion only if the user's currency is EUR
                                                                         const amountInUSD = (() => {
                                                                             switch (Transaction.trxName.toLowerCase()) {
                                                                                 case "bitcoin":
                                                                                     return Transaction.amount * liveBtc;
                                                                                 case "ethereum":
-                                                                                    return Transaction.amount * 2640;
+                                                                                    return Transaction.amount * (liveEth || 2640);
                                                                                 case "tether":
                                                                                     return Transaction.amount;
                                                                                 case "bnb":
-                                                                                    return Transaction.amount * 210.25;
+                                                                                    return Transaction.amount * (liveBnb || 210.25);
                                                                                 case "xrp":
-                                                                                    return Transaction.amount * 0.5086;
+                                                                                    return Transaction.amount * (liveXrp || 0.5086);
                                                                                 case "dogecoin":
-                                                                                    return Transaction.amount * 0.5086;
-                                                                                case "euro":
-                                                                                    return Transaction.amount * 1.08;
+                                                                                    return Transaction.amount * (liveDoge || 0.1163);
                                                                                 case "solana":
-                                                                                    return Transaction.amount * 245.01;
+                                                                                    return Transaction.amount * (liveSol || 245.01);
                                                                                 case "toncoin":
-                                                                                    return Transaction.amount * 5.76;
+                                                                                    return Transaction.amount * (liveTon || 5.76);
                                                                                 case "chainlink":
-                                                                                    return Transaction.amount * 12.52;
+                                                                                    return Transaction.amount * (liveLink || 12.52);
                                                                                 case "polkadot":
-                                                                                    return Transaction.amount * 4.76;
+                                                                                    return Transaction.amount * (liveDot || 4.76);
                                                                                 case "near protocol":
-                                                                                    return Transaction.amount * 5.59;
+                                                                                    return Transaction.amount * (liveNear || 5.59);
                                                                                 case "usd coin":
-                                                                                    return Transaction.amount * 0.99;
+                                                                                    return Transaction.amount * (liveUsdc || 0.99);
                                                                                 case "tron":
-                                                                                    return Transaction.amount * 0.1531;
+                                                                                    return Transaction.amount * (liveTrx || 0.1531);
                                                                                 default:
                                                                                     return 0;
                                                                             }
                                                                         })();
 
-                                                                        // If the currency is EUR, convert to EUR by dividing by 0.92
                                                                         if (isUser.currency === "EUR") {
                                                                             convertedAmount = (amountInUSD * 0.92).toLocaleString(undefined, {
                                                                                 minimumFractionDigits: 2,
                                                                                 maximumFractionDigits: 2,
                                                                             });
                                                                         } else {
-                                                                            // Otherwise, keep in USD
                                                                             convertedAmount = amountInUSD.toLocaleString(undefined, {
                                                                                 minimumFractionDigits: 2,
                                                                                 maximumFractionDigits: 2,
@@ -457,7 +538,8 @@ const RightWalletBar = () => {
                                                                     })()}`}
                                                                 </td>
                                                             </tr>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </>
                                                 ) : <h5 className='text-center d-flex items-center' style={{ textAlign: "center" }}>No Transaction Found</h5>}
 
@@ -483,6 +565,7 @@ const RightWalletBar = () => {
                                     </div>
 
                                     <div className="card-body p-3 py-0">
+                                        
                                         <div className="table-responsive">
                                             <table className="table text-center bg-pink-hover tr-rounded order-tbl mt-2">
 

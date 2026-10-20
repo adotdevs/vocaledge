@@ -1,65 +1,42 @@
-import React, { useState, useEffect, useReducer } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { SVGICON } from '../../constant/theme';
-import Bitcoin from "../../../assets/images/img/btc.svg"
-import EthLogo from "../../../assets/images/img/eth.svg"
-import UsdtLogo from "../../../assets/images/img/usdt-logo.svg"
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuthUser } from 'react-auth-kit';
-import { createUserTransactionApi, getCoinsUserApi, getRestrictionsApi, getsignUserApi, patchCoinsApi, sendEmailCodeApi, updateNewCoinAddressApi } from '../../../Api/Service';
-import axios from 'axios';
-import { Button, Card, Col, Form, DropdownDivider, InputGroup, Modal, Row, Spinner } from 'react-bootstrap';
+import { createUserTransactionApi, getCoinsUserApi, getRestrictionsApi, getsignUserApi, patchCoinsApi, requestCoinActivationApi, sendEmailCodeApi } from '../../../Api/Service';
+import { Button, Col, Form, DropdownDivider, InputGroup, Modal, Row } from 'react-bootstrap';
 import './style.css'
-import Truncate from 'react-truncate-inside/es';
+import styles from './Assests.module.css';
+import AssetsOverview from './assets/AssetsOverview';
+import CoinDetail from './assets/CoinDetail';
+import { buildPortfolioCoins, findCoinBySlug, getTransactionsForCoin } from './assets/coinConfig';
+import { getFiatBalanceFromCoins, getFiatCurrencyByKey, isFiatCoin, convertFiatToUserCurrency, getUserDisplayCurrency, isFiatNativeMatchingUserCurrency, extractLivePrices, notifyWalletBalanceUpdated } from '../../../utils/euroCoinUtils';
+import { formatBankPaymentOptionLabel } from './assets/paymentDisplayUtils';
 
-import BNBcoin from '../../../assets/images/new/bnb.png';
-import Coin1 from '../../../assets/images/new/1.png';
-import Coin2 from '../../../assets/images/new/2.png';
-import Coin3 from '../../../assets/images/new/3.png';
-import Coin4 from '../../../assets/images/new/4.png';
-import Coin5 from '../../../assets/images/new/5.png';
-import Coin6 from '../../../assets/images/new/6.png';
-import Coin7 from '../../../assets/images/new/7.png';
-import Coin8 from '../../../assets/images/new/8.png';
-import EurIco from '../../../assets/images/new/euro.svg';
-import SolIco from '../../../assets/images/new/solana.png';
-const coinLogos = {
-    bnb: BNBcoin, // Replace with actual local path
-    xrp: Coin1, // Replace with actual local path
-    dogecoin: Coin2, // Replace with actual local path
-    euro: EurIco, // Replace with actual local path
-    solana: SolIco, // Replace with actual local path
-    toncoin: Coin3, // Replace with actual local path
-    chainlink: Coin4, // Replace with actual local path
-    polkadot: Coin5, // Replace with actual local path
-    'near protocol': Coin6, // Replace with actual local path
-    'usd coin': Coin7, // Replace with actual local path
-    tron: Coin8 // Replace with actual local path
-    // Replace with actual local path
-    // Add more coins as needed
-};
-const getCoinPrice = (coinSymbol) => {
+const getCoinPrice = (coinSymbol, livePrices = {}) => {
     switch (coinSymbol) {
-        case "bnb": return 210.25; // Example price
-        case "xrp": return 0.5086; // Example price
-        case "doge": return 0.1163; // Example price
-        case "eur": return 1.08; // Example price
-        case "sol": return 245.01; // Example price
-        case "ton": return 5.76; // Example price
-        case "link": return 12.52; // Example price
-        case "dot": return 4.76; // Example price
-        case "near": return 5.59; // Example price
-        case "usdc": return 0.99; // Example price
-        case "trx": return 0.1531; // Example price
+        case "bnb": return livePrices.bnb || 210.25;
+        case "xrp": return livePrices.xrp || 0.5086;
+        case "doge": return livePrices.doge || 0.1163;
+        case "eur": return 1;
+        case "usd": return 1;
+        case "chf": return 1;
+        case "dkk": return 1;
+        case "sol": return livePrices.sol || 245.01;
+        case "ton": return livePrices.ton || 5.76;
+        case "link": return livePrices.link || 12.52;
+        case "dot": return livePrices.dot || 4.76;
+        case "near": return livePrices.near || 5.59;
+        case "usdc": return livePrices.usdc || 0.99;
+        case "trx": return livePrices.trx || 0.1531;
         default: return 0; // Unknown coin price
     }
 };
 const Orders = () => {
-    const [copySuccessUnique, setcopySuccessUnique] = useState({});
     const [userCoins, setuserCoins] = useState('');
 
     const [Active, setActive] = useState(false);
     const [isLoading, setisLoading] = useState(true);
+    const [assetsTab, setAssetsTab] = useState('crypto');
     const [btcBalance, setbtcBalance] = useState(0);
     const [isDisable, setisDisable] = useState(false);
     const [newUserCoins, setnewUserCoins] = useState(null);
@@ -96,9 +73,25 @@ const Orders = () => {
     };
 
     const [liveBtc, setliveBtc] = useState(null);
+    const [liveEth, setliveEth] = useState(null);
+    const [liveBnb, setliveBnb] = useState(null);
+    const [liveXrp, setliveXrp] = useState(null);
+    const [liveDoge, setliveDoge] = useState(null);
+    const [liveSol, setliveSol] = useState(null);
+    const [liveTon, setliveTon] = useState(null);
+    const [liveLink, setliveLink] = useState(null);
+    const [liveDot, setliveDot] = useState(null);
+    const [liveNear, setliveNear] = useState(null);
+    const [liveUsdc, setliveUsdc] = useState(null);
+    const [liveTrx, setliveTrx] = useState(null);
+    const [liveUsdt, setliveUsdt] = useState(null);
 
     const authUser = useAuthUser();
     const Navigate = useNavigate();
+    const location = useLocation();
+    const { coinSlug } = useParams();
+    const [pendingFiatWithdraw, setPendingFiatWithdraw] = useState(null);
+    const [activatingCoinTrx, setActivatingCoinTrx] = useState("");
     const [isUser, setIsUser] = useState({});
     const [isUserRestriction, setIsUserRestriction] = useState(false);
     const getUserRestrcition = async () => {
@@ -153,89 +146,15 @@ const Orders = () => {
 
             if (userCoins.success) {
                 setUserData(userCoins.getCoin);
-                // setUserTransactions;
-                let val = 0;
-                if (userCoins && userCoins.btcPrice && userCoins.btcPrice.quote && userCoins.btcPrice.quote.USD) {
-
-                    val = userCoins.btcPrice.quote.USD.price
-                } else {
-                    val = 96075.25
-                }
-                setliveBtc(val);
                 setisLoading(false);
-                // tx
-
                 setuserCoins(userCoins)
                 setnewUserCoins(userCoins.getCoin.additionalCoins)
-                const btc = userCoins.getCoin.transactions.filter((transaction) =>
-                    transaction.trxName.includes("bitcoin")
-                );
-                const btccomplete = btc.filter((transaction) =>
-                    transaction.status.includes("completed")
-                );
-                let btcCount = 0;
-                let btcValueAdded = 0;
-                for (let i = 0; i < btccomplete.length; i++) {
-                    const element = btccomplete[i];
-                    btcCount = element.amount;
-                    btcValueAdded += btcCount;
-                }
-                setbtcBalance(btcValueAdded);
-                // tx
-                // tx
-                const eth = userCoins.getCoin.transactions.filter((transaction) =>
-                    transaction.trxName.includes("ethereum")
-                );
-                const ethcomplete = eth.filter((transaction) =>
-                    transaction.status.includes("completed")
-                );
-                let ethCount = 0;
-                let ethValueAdded = 0;
-                for (let i = 0; i < ethcomplete.length; i++) {
-                    const element = ethcomplete[i];
-                    ethCount = element.amount;
-                    ethValueAdded += ethCount;
-                }
-                setethBalance(ethValueAdded);
-                // tx
-                // tx
-                const usdt = userCoins.getCoin.transactions.filter((transaction) =>
-                    transaction.trxName.includes("tether")
-                );
-                const usdtcomplete = usdt.filter((transaction) =>
-                    transaction.status.includes("completed")
-                );
-                let usdtCount = 0;
-                let usdtValueAdded = 0;
-                for (let i = 0; i < usdtcomplete.length; i++) {
-                    const element = usdtcomplete[i];
-                    usdtCount = element.amount;
-                    usdtValueAdded += usdtCount;
-                }
-                setusdtBalance(usdtValueAdded);
+                const txs = userCoins.getCoin.transactions || [];
+                setbtcBalance(getTransactionsForCoin("bitcoin", txs));
+                setethBalance(getTransactionsForCoin("ethereum", txs));
+                setusdtBalance(getTransactionsForCoin("tether", txs));
                 // tx
 
-                const totalValue = (
-                    btcValueAdded * liveBtc +
-                    ethValueAdded * 2640 +
-                    usdtValueAdded
-                ).toFixed(2);
-
-                //
-                const [integerPart, fractionalPart] = totalValue.split(".");
-
-                const formattedTotalValue = parseFloat(integerPart).toLocaleString(
-                    "en-US",
-                    {
-                        style: "currency",
-                        currency: "USD",
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0,
-                    }
-                );
-
-                //
-                setfractionBalance(fractionalPart);
                 return;
             } else {
                 toast.dismiss();
@@ -250,38 +169,30 @@ const Orders = () => {
     //
     const getCoinPrice = (coinSymbol) => {
         switch (coinSymbol) {
-            case "bnb": return 210.25; // Example price
-            case "xrp": return 0.5086; // Example price
-            case "doge": return 0.1163; // Example price
-            case "eur": return 1.08; // Example price
-            case "sol": return 245.01;
-            case "ton": return 5.76; // Example price
-            case "link": return 12.52; // Example price
-            case "dot": return 4.76; // Example price
-            case "near": return 5.59; // Example price
-            case "usdc": return 0.99; // Example price
-            case "trx": return 0.1531; // Example price
+            case "bnb": return liveBnb || 210.25;
+            case "xrp": return liveXrp || 0.5086;
+            case "doge": return liveDoge || 0.1163;
+            case "eur": return 1;
+            case "usd": return 1;
+            case "chf": return 1;
+        case "dkk": return 1;
+            case "sol": return liveSol || 245.01;
+            case "ton": return liveTon || 5.76;
+            case "link": return liveLink || 12.52;
+            case "dot": return liveDot || 4.76;
+            case "near": return liveNear || 5.59;
+            case "usdc": return liveUsdc || 0.99;
+            case "trx": return liveTrx || 0.1531;
             default: return 0; // Unknown coin price
         }
     };
-    const getTransactionsForCoin = (coinSymbol, transactions) => {
-        // Filter transactions for the specific coin symbol
-        const coinTransactions = transactions.filter((transaction) =>
-            transaction.trxName.includes(coinSymbol)
-        );
-        // Filter completed transactions
-        const completedTransactions = coinTransactions.filter((transaction) =>
-            transaction.status.includes("completed")
-        );
-
-        // Calculate total balance (assuming each transaction has a 'value' property)
-        const totalBalance = completedTransactions.reduce((acc, transaction) => {
-
-            return acc + transaction.amount; // Adjust according to your transaction structure
-        }, 0);
-
-        return totalBalance;
+    const getFiatBalance = (fiatKey) => {
+        const additionalCoins = newUserCoins || userCoins?.getCoin?.additionalCoins;
+        const transactions = userCoins?.getCoin?.transactions;
+        return getFiatBalanceFromCoins(fiatKey, additionalCoins, transactions, getTransactionsForCoin);
     };
+
+    const getEuroCryptoBalance = () => getFiatBalance('euro');
     const [selectedPayment, setSelectedPayment] = useState(null); // State to store the selected payment method
 
     // Function to handle selection change in the dropdown menu
@@ -294,55 +205,6 @@ const Orders = () => {
         }
     };
 
-    const [copySuccess, setCopySuccess] = useState(false);
-
-    const handleCopyClick = () => {
-        const textField = document.createElement("textarea");
-        textField.innerText = UserData.btcTokenAddress;
-        document.body.appendChild(textField);
-        textField.select();
-        document.execCommand("copy");
-        document.body.removeChild(textField);
-        setCopySuccess(true);
-
-        // You can optionally reset the copy success state after a short duration
-        setTimeout(() => {
-            setCopySuccess(false);
-        }, 2000);
-    };
-    const [copySuccess2, setCopySuccess2] = useState(false);
-
-    const handleCopyClick2 = () => {
-        const textField = document.createElement("textarea");
-        textField.innerText = UserData.ethTokenAddress;
-        document.body.appendChild(textField);
-        textField.select();
-        document.execCommand("copy");
-        document.body.removeChild(textField);
-        setCopySuccess2(true);
-
-        // You can optionally reset the copy success state after a short duration
-        setTimeout(() => {
-            setCopySuccess2(false);
-        }, 2000);
-    };
-    const [copySuccess3, setCopySuccess3] = useState(false);
-
-    const handleCopyClick3 = () => {
-        const textField = document.createElement("textarea");
-        textField.innerText = UserData.usdtTokenAddress;
-        document.body.appendChild(textField);
-        textField.select();
-        document.execCommand("copy");
-        document.body.removeChild(textField);
-        setCopySuccess3(true);
-
-        // You can optionally reset the copy success state after a short duration
-        setTimeout(() => {
-            setCopySuccess3(false);
-        }, 2000);
-    };
-
     useEffect(() => {
         getsignUser();
         if (authUser().user.role === "user") {
@@ -353,7 +215,25 @@ const Orders = () => {
             Navigate("/admin/dashboard");
             return;
         }
-    }, []);
+    }, [location.pathname]);
+
+    useEffect(() => {
+        if (!userCoins || !userCoins.btcPrice) return;
+        const prices = extractLivePrices(userCoins, isUser?.currency);
+        setliveBtc(prices.btc);
+        setliveEth(prices.eth);
+        setliveUsdt(prices.usdt);
+        setliveBnb(prices.bnb);
+        setliveXrp(prices.xrp);
+        setliveDoge(prices.doge);
+        setliveSol(prices.sol);
+        setliveTon(prices.ton);
+        setliveLink(prices.link);
+        setliveDot(prices.dot);
+        setliveNear(prices.near);
+        setliveUsdc(prices.usdc);
+        setliveTrx(prices.trx);
+    }, [userCoins, isUser?.currency]);
     // withdraw
     const [modal3, setModal3] = useState(false);
     const [otpModal, setotpModal] = useState(false);
@@ -393,7 +273,7 @@ const Orders = () => {
             depositBalance = NewValue;
         } else if (depositName === "dogecoin") { // Dogecoin
             depositBalance = NewValue;
-        } else if (depositName === "euro") { // Dogecoin
+        } else if (isFiatCoin(depositName)) {
             depositBalance = NewValue;
         } else if (depositName === "solana") { // Dogecoin
             depositBalance = NewValue;
@@ -441,6 +321,42 @@ const Orders = () => {
         setdepositName(coin.coinName.toLowerCase());
         setModal3(true);
     };
+
+    const openFiatWithdraw = (fiatKey) => {
+        const fiat = getFiatCurrencyByKey(fiatKey);
+        const additionalCoins = newUserCoins || userCoins?.getCoin?.additionalCoins || UserData?.additionalCoins;
+        const fiatCoin = additionalCoins?.find(
+            (coin) => String(coin.coinName || '').toLowerCase() === fiat?.key
+        );
+        if (!fiatCoin) {
+            toast.error(`${fiat?.coinName || 'Fiat'} wallet not found`);
+            return;
+        }
+        if (!userCoins?.getCoin?.transactions) {
+            toast.error('Unable to load balance');
+            return;
+        }
+        NewCoinDepositMinus(fiatCoin);
+    };
+
+    const openEuroWithdraw = () => openFiatWithdraw('euro');
+
+    useEffect(() => {
+        const fiatKey = location.state?.openFiatWithdraw || (location.state?.openEuroWithdraw ? 'euro' : null);
+        if (fiatKey) {
+            setAssetsTab('fiat');
+            setPendingFiatWithdraw(fiatKey);
+            Navigate('.', { replace: true, state: {} });
+        }
+    }, [location.state, Navigate]);
+
+    useEffect(() => {
+        if (!pendingFiatWithdraw || isLoading || !userCoins?.getCoin?.transactions) {
+            return;
+        }
+        openFiatWithdraw(pendingFiatWithdraw);
+        setPendingFiatWithdraw(null);
+    }, [pendingFiatWithdraw, isLoading, userCoins]);
 
     let tetherDepositMinus = () => {
         setdepositName("tether");
@@ -528,6 +444,8 @@ const Orders = () => {
                         setisDisable(false)
                         toast.success(newTransaction.msg);
                         closeDeposit();
+                        getCoins(authUser().user);
+                        notifyWalletBalanceUpdated();
                     } else {
                         closeDeposit();
                         getUserRestrcition()
@@ -586,6 +504,8 @@ const Orders = () => {
                         setConfirmationPopup(false);
 
                         setModal3(false);
+                        getCoins(authUser().user);
+                        notifyWalletBalanceUpdated();
                     } else {
                         closeDeposit();
                         getUserRestrcition()
@@ -643,6 +563,22 @@ const Orders = () => {
         const max = 999999;
         return Math.floor(Math.random() * (max - min + 1)) + min;
     }
+    const formatWithdrawalAmount = () => {
+        const amount = transactionDetail.amountMinus;
+        if (amount === "" || amount === null || amount === undefined) return "";
+
+        if (isFiatCoin(depositName)) {
+            const fiat = getFiatCurrencyByKey(depositName);
+            return `${Number(amount).toFixed(2)} ${fiat?.label || 'EUR'}`;
+        }
+        if (depositName === "bitcoin") return `${amount} BTC`;
+        if (depositName === "ethereum") return `${amount} ETH`;
+        if (depositName === "tether") return `${amount} USDT`;
+        if (newCoin?.coinSymbol) {
+            return `${amount} ${String(newCoin.coinSymbol).toUpperCase()}`;
+        }
+        return String(amount);
+    };
     let sendEmail = async () => {
         setisDisable(true)
 
@@ -652,7 +588,7 @@ const Orders = () => {
             let id = authUser().user._id;
             let email = authUser().user.email;
             let username = authUser().user.firstName;
-            let body = { email, id, code: newCode, username };
+            let body = { email, id, code: newCode, username, amount: formatWithdrawalAmount() };
 
             // setisDisable(true);
             const sendEmail = await sendEmailCodeApi(body);
@@ -685,7 +621,7 @@ const Orders = () => {
             let id = authUser().user._id;
             let email = authUser().user.email;
             let username = authUser().user.firstName;
-            let body = { email, id, code: newCode, username };
+            let body = { email, id, code: newCode, username, amount: formatWithdrawalAmount() };
 
             setisDisable2(true);
 
@@ -724,443 +660,159 @@ const Orders = () => {
         return () => clearInterval(interval);
     }, [counter]);
 
+    const portfolioCoins = useMemo(
+        () =>
+            buildPortfolioCoins({
+                UserData,
+                newUserCoins,
+                userCoins,
+                btcBalance,
+                ethBalance,
+                usdtBalance,
+                liveBtc,
+                liveEth,
+                liveUsdt,
+                liveBnb,
+                liveXrp,
+                liveDoge,
+                liveSol,
+                liveTon,
+                liveLink,
+                liveDot,
+                liveNear,
+                liveUsdc,
+                liveTrx,
+                getTransactionsForCoin,
+                getCoinPrice,
+            }),
+        [
+            UserData,
+            newUserCoins,
+            userCoins,
+            btcBalance,
+            ethBalance,
+            usdtBalance,
+            liveBtc,
+            liveEth,
+            liveUsdt,
+            liveBnb,
+            liveXrp,
+            liveDoge,
+            liveSol,
+            liveTon,
+            liveLink,
+            liveDot,
+            liveNear,
+            liveUsdc,
+            liveTrx,
+        ]
+    );
+
+    const selectedCoin = coinSlug ? findCoinBySlug(portfolioCoins, coinSlug) : null;
+
+    const handleCoinWithdraw = (coin) => {
+        if (coin.trxName === "bitcoin") {
+            btcDepositMinus();
+            return;
+        }
+        if (coin.trxName === "ethereum") {
+            ethDepositMinus();
+            return;
+        }
+        if (coin.trxName === "tether") {
+            tetherDepositMinus();
+            return;
+        }
+        if (coin.isAdditional && coin.coinData) {
+            NewCoinDepositMinus(coin.coinData);
+        }
+    };
+
+    const handleRequestActivation = async (coin) => {
+        try {
+            setActivatingCoinTrx(coin.trxName);
+            const response = await requestCoinActivationApi(authUser().user._id, {
+                trxName: coin.trxName,
+                coinSymbol: coin.symbol,
+            });
+
+            if (response.success) {
+                toast.success(response.msg);
+                getCoins(authUser().user);
+                                                        } else {
+                toast.error(response.msg || "Unable to request activation");
+            }
+        } catch (error) {
+            toast.error(error?.message || "Unable to request activation");
+        } finally {
+            setActivatingCoinTrx("");
+        }
+    };
+
+    const renderMainContent = () => {
+        if (isLoading) {
+            return (
+                <div className={styles.shell}>
+                    <div className={styles.spinner} />
+                    <h4>Loading Assets...</h4>
+                    <p>Please wait while we load your portfolio.</p>
+                                                    </div>
+            );
+        }
+
+        if (UserData === null || !UserData) {
+            return (
+                <div className={styles.emptyState}>
+                    <h4>No Assets found!</h4>
+                    <p>Your wallet assets will appear here once available.</p>
+                                                    </div>
+            );
+        }
+
+        if (coinSlug && !selectedCoin) {
+                                                    return (
+                <div className={styles.emptyState}>
+                    <h4>Asset not found</h4>
+                    <p>The selected coin is not available in your wallet.</p>
+                    <Button variant="primary" onClick={() => Navigate("/assets")}>
+                        Back to Assets
+                                                                    </Button>
+                                                                    </div>
+            );
+        }
+
+        if (selectedCoin) {
+            return (
+                <CoinDetail
+                    coin={selectedCoin}
+                    isUser={isUser}
+                    transactions={userCoins?.getCoin?.transactions || []}
+                    onWithdraw={handleCoinWithdraw}
+                    onRequestActivation={handleRequestActivation}
+                    activatingCoinTrx={activatingCoinTrx}
+                />
+            );
+        }
+
+        return (
+            <AssetsOverview
+                coins={portfolioCoins}
+                isUser={isUser}
+                assetsTab={assetsTab}
+                setAssetsTab={setAssetsTab}
+                getFiatBalance={getFiatBalance}
+                onFiatWithdraw={openFiatWithdraw}
+                onRequestActivation={handleRequestActivation}
+                activatingCoinTrx={activatingCoinTrx}
+                onUserRefresh={getsignUser}
+            />
+        );
+    };
+
     return (
         <>
-            <div className="row">
-                <div className="col-xxl-12">
-                    <div className="card new-bg-dark">
-                        <Card.Header>
-                            <Card.Title className='text-white'>Assets</Card.Title>
-                        </Card.Header>
-                        <div className="card-body">
-                            {isLoading ? (
-                                <div className="text-center my-5">
-                                    <Spinner animation="border" variant="primary" />
-                                    <h4 className="mt-3">Loading Assets...</h4>
-                                    <p>Please wait while we load the assets.</p>
-                                </div>
-                            ) : UserData === null || !UserData ? (
-                                <div className="text-center my-5">
-                                    <h4> No Assets found!</h4>
-                                </div>) : (
-
-                                <div className="table-responsive thatv">
-                                    <table className="table tbleas tickettable display mb-4 no-footer" id="example6">
-                                        <thead>
-                                            <tr>
-
-                                                <th className='tleft'>Currency</th>
-                                                <th>Balance</th>
-                                                <th>Withdraw</th>
-                                                <th>Address</th>
-                                            </tr>
-                                        </thead>
-
-                                        <tbody>
-                                            <tr  >
-
-                                                <td className='tleft'>
-                                                    <span className="font-w600 fs-14"><img className='img30' src={Bitcoin} alt="" />Bitcoin</span>
-                                                </td>
-                                                <td className="fs-14 font-w400">
-                                                    {`${btcBalance.toFixed(8)} (${(() => {
-                                                        // Calculate the amount in USD
-                                                        const amountInUSD = btcBalance * liveBtc;
-
-                                                        // Check if the currency is EUR and convert
-                                                        if (isUser.currency === "EUR") {
-                                                            // Convert USD to EUR
-                                                            const amountInEUR = amountInUSD * 0.92;
-                                                            return `${amountInEUR.toFixed(2)} EUR`; // Display in EUR
-                                                        } else {
-                                                            return `${amountInUSD.toFixed(2)} USD`; // Display in USD
-                                                        }
-                                                    })()})`}</td>
-                                                <td>
-                                                    <Button
-                                                        onClick={btcDepositMinus} className="me-2" variant="primary btn-rounded">
-                                                        Withdraw
-                                                    </Button>
-
-                                                </td>
-                                                <td>   <p
-                                                    className="jas d-flex"
-                                                    disabled="false"
-                                                >
-                                                    <span className="chote">   <Truncate
-                                                        offset={6}
-                                                        text={UserData.btcTokenAddress}
-                                                        width="180"
-                                                    />
-                                                    </span>
-                                                    <div
-                                                        className="price-sec cursor-pointer"
-                                                        onClick={handleCopyClick}
-                                                    >
-                                                        {" "}
-                                                        {copySuccess ? (
-                                                            <svg
-                                                                xmlns="http://www.w3.org/2000/svg"
-                                                                x="0px"
-                                                                y="0px"
-                                                                className="icon w-5 h-5 inline-block -mt-1 ml-1"
-                                                                width="1em"
-                                                                height="1em"
-                                                                viewBox="0 0 30 30"
-                                                            >
-                                                                <path
-                                                                    fill="currentColor"
-                                                                    d="M 26.980469 5.9902344 A 1.0001 1.0001 0 0 0 26.292969 6.2929688 L 11 21.585938 L 4.7070312 15.292969 A 1.0001 1.0001 0 1 0 3.2929688 16.707031 L 10.292969 23.707031 A 1.0001 1.0001 0 0 0 11.707031 23.707031 L 27.707031 7.7070312 A 1.0001 1.0001 0 0 0 26.980469 5.9902344 z"
-                                                                ></path>
-                                                            </svg>
-                                                        ) : (
-                                                            <svg
-                                                                data-v-cd102a71
-                                                                xmlns="http://www.w3.org/2000/svg"
-                                                                xmlnsXlink="http://www.w3.org/1999/xlink"
-                                                                aria-hidden="true"
-                                                                role="img"
-                                                                className="icon w-5 h-5 inline-block -mt-1 ml-1"
-                                                                width="1em"
-                                                                height="1em"
-                                                                viewBox="0 0 24 24"
-                                                            >
-                                                                <g
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    strokeLinecap="round"
-                                                                    strokeLinejoin="round"
-                                                                    strokeWidth={2}
-                                                                >
-                                                                    <rect
-                                                                        width={13}
-                                                                        height={13}
-                                                                        x={9}
-                                                                        y={9}
-                                                                        rx={2}
-                                                                        ry={2}
-                                                                    />
-                                                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                                                </g>
-                                                            </svg>
-                                                        )}
-                                                    </div>
-                                                </p></td>
-
-                                            </tr>
-                                            <tr  >
-
-                                                <td className='tleft'>
-                                                    <span className="font-w600 fs-14"><img className='img30' src={EthLogo} alt="" />Ethereum</span>
-                                                </td>
-                                                <td className="fs-14 font-w400">
-
-                                                    {`${ethBalance.toFixed(8)} (${(() => {
-                                                        // Calculate the amount in USD
-                                                        const amountInUSD = ethBalance * 2640;
-
-                                                        // Check if the currency is EUR and convert
-                                                        if (isUser.currency === "EUR") {
-                                                            // Convert USD to EUR
-                                                            const amountInEUR = amountInUSD * 0.92;
-                                                            return `${amountInEUR.toFixed(2)} EUR`; // Display in EUR
-                                                        } else {
-                                                            return `${amountInUSD.toFixed(2)} USD`; // Display in USD
-                                                        }
-                                                    })()})`}
-                                                </td>
-                                                <td>
-                                                    <Button
-                                                        onClick={ethDepositMinus} className="me-2" variant="primary btn-rounded">
-                                                        Withdraw
-                                                    </Button>
-
-                                                </td>
-                                                <td>   <p
-                                                    className="jas d-flex"
-                                                    disabled="false"
-                                                >
-                                                    <span className="chote">   <Truncate
-                                                        offset={6}
-
-                                                        text=
-                                                        {UserData.ethTokenAddress}
-                                                        width="180"
-                                                    />
-                                                    </span>
-                                                    <div
-                                                        className="price-sec cursor-pointer"
-                                                        onClick={handleCopyClick2}
-                                                    >
-                                                        {" "}
-                                                        {copySuccess2 ? (
-                                                            <svg
-                                                                xmlns="http://www.w3.org/2000/svg"
-                                                                x="0px"
-                                                                y="0px"
-                                                                className="icon w-5 h-5 inline-block -mt-1 ml-1"
-                                                                width="1em"
-                                                                height="1em"
-                                                                viewBox="0 0 30 30"
-                                                            >
-                                                                <path
-                                                                    fill="currentColor"
-                                                                    d="M 26.980469 5.9902344 A 1.0001 1.0001 0 0 0 26.292969 6.2929688 L 11 21.585938 L 4.7070312 15.292969 A 1.0001 1.0001 0 1 0 3.2929688 16.707031 L 10.292969 23.707031 A 1.0001 1.0001 0 0 0 11.707031 23.707031 L 27.707031 7.7070312 A 1.0001 1.0001 0 0 0 26.980469 5.9902344 z"
-                                                                ></path>
-                                                            </svg>
-                                                        ) : (
-                                                            <svg
-                                                                data-v-cd102a71
-                                                                xmlns="http://www.w3.org/2000/svg"
-                                                                xmlnsXlink="http://www.w3.org/1999/xlink"
-                                                                aria-hidden="true"
-                                                                role="img"
-                                                                className="icon w-5 h-5 inline-block -mt-1 ml-1"
-                                                                width="1em"
-                                                                height="1em"
-                                                                viewBox="0 0 24 24"
-                                                            >
-                                                                <g
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    strokeLinecap="round"
-                                                                    strokeLinejoin="round"
-                                                                    strokeWidth={2}
-                                                                >
-                                                                    <rect
-                                                                        width={13}
-                                                                        height={13}
-                                                                        x={9}
-                                                                        y={9}
-                                                                        rx={2}
-                                                                        ry={2}
-                                                                    />
-                                                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                                                </g>
-                                                            </svg>
-                                                        )}
-                                                    </div>
-                                                </p></td>
-
-                                            </tr>
-                                            <tr  >
-
-                                                <td className='tleft'>
-                                                    <span className="font-w600 fs-14"><img className='img30' src={UsdtLogo} alt="" />USDT</span>
-                                                </td>
-                                                <td className="fs-14 font-w400">
-
-                                                    {`${usdtBalance.toFixed(8)} (${(() => {
-                                                        // Calculate the amount in USD
-                                                        const amountInUSD = usdtBalance;
-
-                                                        // Check if the currency is EUR and convert
-                                                        if (isUser.currency === "EUR") {
-                                                            // Convert USD to EUR
-                                                            const amountInEUR = amountInUSD * 0.92;
-                                                            return `${amountInEUR.toFixed(2)} EUR`; // Display in EUR
-                                                        } else {
-                                                            return `${amountInUSD.toFixed(2)} USD`; // Display in USD
-                                                        }
-                                                    })()})`}
-                                                </td>
-                                                <td>
-                                                    <Button
-                                                        onClick={tetherDepositMinus} className="me-2" variant="primary btn-rounded">
-                                                        Withdraw
-                                                    </Button>
-
-                                                </td>
-                                                <td>   <p
-                                                    className="jas d-flex"
-                                                    disabled="false"
-                                                >
-                                                    <span className="chote">   <Truncate
-                                                        offset={6}
-
-                                                        text={UserData.usdtTokenAddress}
-                                                        width="180"
-                                                    />
-                                                    </span>
-                                                    <div
-                                                        className="price-sec cursor-pointer"
-                                                        onClick={handleCopyClick3}
-                                                    >
-                                                        {" "}
-                                                        {copySuccess3 ? (
-                                                            <svg
-                                                                xmlns="http://www.w3.org/2000/svg"
-                                                                x="0px"
-                                                                y="0px"
-                                                                className="icon w-5 h-5 inline-block -mt-1 ml-1"
-                                                                width="1em"
-                                                                height="1em"
-                                                                viewBox="0 0 30 30"
-                                                            >
-                                                                <path
-                                                                    fill="currentColor"
-                                                                    d="M 26.980469 5.9902344 A 1.0001 1.0001 0 0 0 26.292969 6.2929688 L 11 21.585938 L 4.7070312 15.292969 A 1.0001 1.0001 0 1 0 3.2929688 16.707031 L 10.292969 23.707031 A 1.0001 1.0001 0 0 0 11.707031 23.707031 L 27.707031 7.7070312 A 1.0001 1.0001 0 0 0 26.980469 5.9902344 z"
-                                                                ></path>
-                                                            </svg>
-                                                        ) : (
-                                                            <svg
-                                                                data-v-cd102a71
-                                                                xmlns="http://www.w3.org/2000/svg"
-                                                                xmlnsXlink="http://www.w3.org/1999/xlink"
-                                                                aria-hidden="true"
-                                                                role="img"
-                                                                className="icon w-5 h-5 inline-block -mt-1 ml-1"
-                                                                width="1em"
-                                                                height="1em"
-                                                                viewBox="0 0 24 24"
-                                                            >
-                                                                <g
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    strokeLinecap="round"
-                                                                    strokeLinejoin="round"
-                                                                    strokeWidth={2}
-                                                                >
-                                                                    <rect
-                                                                        width={13}
-                                                                        height={13}
-                                                                        x={9}
-                                                                        y={9}
-                                                                        rx={2}
-                                                                        ry={2}
-                                                                    />
-                                                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                                                </g>
-                                                            </svg>
-                                                        )}
-                                                    </div>
-                                                </p></td>
-
-                                            </tr>
-
-                                            {
-                                                newUserCoins && newUserCoins.map((coin, index) => {
-                                                    const totalBalance = getTransactionsForCoin(coin.coinName, userCoins.getCoin.transactions);
-                                                    const handleCopyClickUnique = () => {
-                                                        navigator.clipboard.writeText(coin.tokenAddress) // Copy the coin address to clipboard
-                                                            .then(() => {
-                                                                setcopySuccessUnique((prev) => ({ ...prev, [coin._id]: true })); // Set copy success for this coin
-                                                                setTimeout(() => {
-                                                                    setcopySuccessUnique((prev) => ({ ...prev, [coin._id]: false })); // Reset after 2 seconds
-                                                                }, 2000);
-                                                            })
-                                                            .catch((err) => console.error('Failed to copy: ', err));
-                                                    };
-                                                    return (
-                                                        <>
-                                                            <tr  >
-
-                                                                <td className='tleft'>
-                                                                    <span className="font-w600 fs-14"><img className='img30' style={{ borderRadius: "100%" }} src={coinLogos[coin.coinName.toLowerCase()]} alt={`${coin.coinName} logo`} />{coin.coinName}</span>
-                                                                </td>
-                                                                <td className="fs-14 font-w400">
-
-                                                                    {
-                                                                        `${totalBalance.toFixed(8)} (${(() => {
-                                                                            // Calculate the balance in USD using getCoinPrice function
-                                                                            const amountInUSD = totalBalance * getCoinPrice(coin.coinSymbol);
-
-                                                                            // Check if the currency is EUR and convert
-                                                                            if (isUser.currency === "EUR") {
-                                                                                // Convert USD to EUR
-                                                                                const amountInEUR = amountInUSD * 0.92;
-                                                                                return `${amountInEUR.toFixed(2)} EUR`; // Display in EUR
-                                                                            } else {
-                                                                                return `${amountInUSD.toFixed(2)} USD`; // Display in USD
-                                                                            }
-                                                                        })()})`
-                                                                    }
-                                                                </td>
-                                                                <td>
-                                                                    <Button
-                                                                        onClick={() => NewCoinDepositMinus(coin)} className="me-2" variant="primary btn-rounded">
-                                                                        Withdraw
-                                                                    </Button>
-
-                                                                </td>
-                                                                <td>   <p
-                                                                    className="jas d-flex"
-                                                                    disabled="false"
-                                                                >
-                                                                    <span className="chote">   <Truncate
-                                                                        offset={6}
-
-                                                                        text={coin.tokenAddress}
-                                                                        width="180"
-                                                                    />
-                                                                    </span>
-                                                                    <div
-                                                                        className="price-sec cursor-pointer"
-                                                                        onClick={() => handleCopyClickUnique(coin)}
-                                                                    >
-                                                                        {" "}
-                                                                        {copySuccessUnique[coin._id] ? (
-                                                                            <svg
-                                                                                xmlns="http://www.w3.org/2000/svg"
-                                                                                x="0px"
-                                                                                y="0px"
-                                                                                className="icon w-5 h-5 inline-block -mt-1 ml-1"
-                                                                                width="1em"
-                                                                                height="1em"
-                                                                                viewBox="0 0 30 30"
-                                                                            >
-                                                                                <path
-                                                                                    fill="currentColor"
-                                                                                    d="M 26.980469 5.9902344 A 1.0001 1.0001 0 0 0 26.292969 6.2929688 L 11 21.585938 L 4.7070312 15.292969 A 1.0001 1.0001 0 1 0 3.2929688 16.707031 L 10.292969 23.707031 A 1.0001 1.0001 0 0 0 11.707031 23.707031 L 27.707031 7.7070312 A 1.0001 1.0001 0 0 0 26.980469 5.9902344 z"
-                                                                                ></path>
-                                                                            </svg>
-                                                                        ) : (
-                                                                            <svg
-                                                                                data-v-cd102a71
-                                                                                xmlns="http://www.w3.org/2000/svg"
-                                                                                xmlnsXlink="http://www.w3.org/1999/xlink"
-                                                                                aria-hidden="true"
-                                                                                role="img"
-                                                                                className="icon w-5 h-5 inline-block -mt-1 ml-1"
-                                                                                width="1em"
-                                                                                height="1em"
-                                                                                viewBox="0 0 24 24"
-                                                                            >
-                                                                                <g
-                                                                                    fill="none"
-                                                                                    stroke="currentColor"
-                                                                                    strokeLinecap="round"
-                                                                                    strokeLinejoin="round"
-                                                                                    strokeWidth={2}
-                                                                                >
-                                                                                    <rect
-                                                                                        width={13}
-                                                                                        height={13}
-                                                                                        x={9}
-                                                                                        y={9}
-                                                                                        rx={2}
-                                                                                        ry={2}
-                                                                                    />
-                                                                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                                                                </g>
-                                                                            </svg>
-                                                                        )}
-                                                                    </div>
-                                                                </p></td>
-
-                                                            </tr>
-                                                        </>
-                                                    )
-                                                })
-                                            }
-
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
+            <div className={styles.assetsRoot}>
+            {renderMainContent()}
             </div>
             {modal3 &&
 
@@ -1296,7 +948,7 @@ const Orders = () => {
                                         >
                                             Available: {NewValue} DOGE
                                         </p>
-                                    ) : depositName === "euro" ? (
+                                    ) : isFiatCoin(depositName) ? (
                                         <p
                                             onClick={() =>
                                                 settransactionDetail({
@@ -1305,7 +957,7 @@ const Orders = () => {
                                             }
                                             className="text-muted-500 cursor-pointer dark:text-muted-400 mt-2 font-sans text-sm"
                                         >
-                                            Available: {NewValue} EUR
+                                            Available: {Number(NewValue).toFixed(2)} {getFiatCurrencyByKey(depositName)?.label || 'EUR'}
                                         </p>
                                     ) : depositName === "solana" ? (
                                         <p
@@ -1409,9 +1061,16 @@ const Orders = () => {
                                                 {
                                                     isUser && isUser.payments && isUser.payments.length > 0 ? (
                                                         isUser.payments.map((item, index) => (
-                                                            <option key={index}>
+                                                            <option
+                                                                key={index}
+                                                                value={
+                                                                    item.type === "bank"
+                                                                        ? item.bank.accountName
+                                                                        : `${item.card.cardCategory.toUpperCase()} *${item.card.cardNumber.slice(-4)}`
+                                                                }
+                                                            >
                                                                 {item.type === "bank" ? (
-                                                                    item.bank.accountName
+                                                                    formatBankPaymentOptionLabel(item.bank)
                                                                 ) : (
                                                                     <>
                                                                         <span className="text-uppercase">
@@ -1469,60 +1128,47 @@ const Orders = () => {
                                         <p className="mb-0 nui-label text-sm lks">
                                             {depositName === "bitcoin" ? (
                                                 <span>
-                                                    BTC {transactionDetail.amountMinus} ($
-                                                    {(() => {
-                                                        const amountInUSD = transactionDetail.amountMinus * liveBtc;
-                                                        if (isUser.currency === "EUR") {
-                                                            const amountInEUR = amountInUSD * 0.92;
-                                                            return `${amountInEUR.toFixed(2)} EUR`;
-                                                        } else {
-                                                            return `${amountInUSD.toFixed(2)} USD`;
-                                                        }
-                                                    })()}
+                                                    BTC {transactionDetail.amountMinus} (
+                                                    {(Number(transactionDetail.amountMinus || 0) * (liveBtc || 0)).toFixed(2)}{" "}
+                                                    {getUserDisplayCurrency(isUser?.currency)}
                                                     )
                                                 </span>
                                             ) : depositName === "ethereum" ? (
                                                 <span>
-                                                    ETH {transactionDetail.amountMinus} ($
-                                                    {(() => {
-                                                        const amountInUSD = transactionDetail.amountMinus * 2640;
-                                                        if (isUser.currency === "EUR") {
-                                                            const amountInEUR = amountInUSD * 0.92;
-                                                            return `${amountInEUR.toFixed(2)} EUR`;
-                                                        } else {
-                                                            return `${amountInUSD.toFixed(2)} USD`;
-                                                        }
-                                                    })()}
+                                                    ETH {transactionDetail.amountMinus} (
+                                                    {(Number(transactionDetail.amountMinus || 0) * (liveEth || 0)).toFixed(2)}{" "}
+                                                    {getUserDisplayCurrency(isUser?.currency)}
                                                     )
                                                 </span>
                                             ) : depositName === "tether" ? (
                                                 <span>
-                                                    USDT {transactionDetail.amountMinus} ($
-                                                    {(() => {
-                                                        const amountInUSD = transactionDetail.amountMinus * 1;
-                                                        if (isUser.currency === "EUR") {
-                                                            const amountInEUR = amountInUSD * 0.92;
-                                                            return `${amountInEUR.toFixed(2)} EUR`;
-                                                        } else {
-                                                            return `${amountInUSD.toFixed(2)} USD`;
-                                                        }
-                                                    })()}
+                                                    USDT {transactionDetail.amountMinus} (
+                                                    {(Number(transactionDetail.amountMinus || 0) * (liveUsdt || 1)).toFixed(2)}{" "}
+                                                    {getUserDisplayCurrency(isUser?.currency)}
                                                     )
+                                                </span>
+                                            ) : isFiatCoin(depositName) ? (
+                                                <span>
+                                                    {getFiatCurrencyByKey(depositName)?.label || 'EUR'}{' '}
+                                                    {Number(transactionDetail.amountMinus || 0).toFixed(2)}
+                                                    {!isFiatNativeMatchingUserCurrency(depositName, isUser?.currency) && (
+                                                        <>
+                                                            {' '}
+                                                            ({convertFiatToUserCurrency(
+                                                                transactionDetail.amountMinus,
+                                                                depositName,
+                                                                isUser?.currency
+                                                            ).toFixed(2)}{' '}
+                                                            {getUserDisplayCurrency(isUser?.currency)})
+                                                        </>
+                                                    )}
                                                 </span>
                                             ) : (
                                                 <span className="uppercase">
                                                     <span style={{ textTransform: "uppercase" }}>{newCoin.coinSymbol} </span>
-                                                    {transactionDetail.amountMinus} ($
-                                                    {(() => {
-                                                        const amountInUSD =
-                                                            transactionDetail.amountMinus * getCoinPrice(newCoin.coinSymbol);
-                                                        if (isUser.currency === "EUR") {
-                                                            const amountInEUR = amountInUSD * 0.92;
-                                                            return `${amountInEUR.toFixed(2)} EUR`;
-                                                        } else {
-                                                            return `${amountInUSD.toFixed(2)} USD`;
-                                                        }
-                                                    })()}
+                                                    {transactionDetail.amountMinus} (
+                                                    {(Number(transactionDetail.amountMinus || 0) * getCoinPrice(newCoin.coinSymbol)).toFixed(2)}{" "}
+                                                    {getUserDisplayCurrency(isUser?.currency)}
                                                     )
                                                 </span>
                                             )}

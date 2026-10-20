@@ -1,169 +1,280 @@
-import React, { useState, useEffect, useReducer } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-
-import { toast } from 'react-toastify';
-import { useAuthUser } from 'react-auth-kit';
-import { createTicketApi, getsignUserApi, getUserTicketsApi, sendTicketApi } from "../../Api/Service";
-import axios from 'axios';
-import { Button, Card, Col, Form, DropdownDivider, InputGroup, Modal, Row, Spinner, Container } from 'react-bootstrap';
+import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "react-toastify";
+import { useAuthUser } from "react-auth-kit";
+import { createTicketApi, signleUsersApi } from "../../Api/Service";
+import {
+  TicketAttachmentInput,
+  appendTicketAttachments,
+} from "../components/tickets/TicketAttachments";
+import { isEmptyRichText } from "../../utils/emailTemplateUtils";
+import ReactQuill from "react-quill";
+import "react-quill/dist/quill.snow.css";
+import profile from "../../assets/images/7309681.jpg";
+import styles from "./CreateTicket.module.css";
+import {
+  ArrowBack as ArrowBackIcon,
+  Send as SendIcon,
+} from "@mui/icons-material";
 
 const CreateTicket = () => {
-    const [Active, setActive] = useState(false);
-    let param = useParams()
-    let toggleBar = () => {
-        if (Active === true) {
-            setActive(false);
-        } else {
-            setActive(true);
-        }
-    };
-    //
+  const { id, email } = useParams();
+  const authUser = useAuthUser();
+  const navigate = useNavigate();
 
-    let authUser = useAuthUser();
-    let Navigate = useNavigate();
+  const [ticketUser, setTicketUser] = useState(null);
+  const [userLoading, setUserLoading] = useState(true);
+  const [isDisable, setIsDisable] = useState(false);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [attachments, setAttachments] = useState([]);
 
-    const [isUser, setIsUser] = useState({});
-    const [isTicket, setisTicket] = useState(false);
-    const [isDisable, setisDisable] = useState(false);
-    const [title, setTitle] = useState("");
-    const [description, setDescription] = useState("");
+  const loadUser = async () => {
+    try {
+      setUserLoading(true);
+      const response = await signleUsersApi(id);
+      if (response.success) {
+        setTicketUser(response.signleUser);
+      }
+    } catch {
+      setTicketUser(null);
+    } finally {
+      setUserLoading(false);
+    }
+  };
 
-    const sendTicket = async (e) => {
-        try {
-            setisDisable(true);
-            let body = {
-                userId: param.id,
-                title: title,
-                description: description,
-                isAdmin: true
-            };
-            if (!title || !description) {
-                toast.dismiss();
-                toast.error("Both the fields are required");
-                return;
-            }
-            // if (description.length < 20) {
-            //     toast.dismiss();
-            //     toast.error("Please provide a more detailed description");
-            //     return;
-            // }
+  const sendTicket = async () => {
+    try {
+      setIsDisable(true);
 
-            const userCoins = await createTicketApi(body);
+      if (!title.trim()) {
+        toast.error("Title is required");
+        return;
+      }
 
-            if (userCoins.success) {
-                toast.success("Ticket created successfully");
-                Navigate("/admin/support")
-                // setisTicket(true);
-                return;
-            } else {
-                toast.dismiss();
-                toast.error(userCoins.msg);
-            }
-        } catch (error) {
-            toast.dismiss();
-            toast.error(error);
-        } finally {
-            setisDisable(false);
-        }
-    };
+      if (isEmptyRichText(description) && attachments.length === 0) {
+        toast.error("Add a description or at least one attachment");
+        return;
+      }
 
-    //
+      const formData = new FormData();
+      formData.append("userId", id);
+      formData.append("title", title.trim());
+      formData.append("description", description.trim());
+      formData.append("isAdmin", "true");
+      appendTicketAttachments(formData, attachments);
 
-    useEffect(() => {
-        if (authUser().user.role === "user") {
+      const response = await createTicketApi(formData);
 
-            Navigate("/dashboard");
-            return;
-        } else if (authUser().user.role === "admin") {
-            return;
-        }
-    }, []);
-    useEffect(() => {
-        const theme = document.body.getAttribute('data-theme-version');
-        if (theme === 'dark') {
-            document.body.classList.add('dark-mode');
-        } else {
-            document.body.classList.remove('dark-mode');
-        }
-    }, []);
-    return (
-        <>
-            <div className="row">
-                <div className="col-xxl-12">
-                    <div className="card">
-                        <Card.Header>
-                            <Card.Title style={{ cursor: "pointer" }} onClick={() => Navigate("/admin/users")}><i style={{ fontSize: "23px" }} className="fa-solid fa-arrow-left"></i></Card.Title>
-                            <Card.Title>Create  new Ticket </Card.Title>
+      if (response.success) {
+        toast.success("Ticket created successfully");
+        navigate("/admin/support");
+        return;
+      }
 
-                        </Card.Header>
+      toast.error(response.msg || "Failed to create ticket");
+    } catch (error) {
+      toast.error(error?.message || "Failed to create ticket");
+    } finally {
+      setIsDisable(false);
+    }
+  };
 
-                        {isTicket ? (
-                            <Card.Body className="">
-                                <p>Your ticket was sent. You will be answered by one of our representatives.</p>
-                            </Card.Body>
-                        ) : (
-                            <Card.Body>
-                                <div className="d-flex align-items-center gap-4 mb-4">
-                                    <div className="bg-primary text-white d-flex align-items-center justify-content-center rounded-circle" style={{ width: '56px', height: '56px' }}>
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 256 256">
-                                            <path d="M224 128a96 96 0 0 1-144.07 83.11l-37.39 12.47a8 8 0 0 1-10.12-10.12l12.47-37.39A96 96 0 1 1 224 128" opacity=".2" />
-                                            <path d="M128 24a104 104 0 0 0-91.82 152.88l-11.35 34.05a16 16 0 0 0 20.24 20.24l34.05-11.35A104 104 0 1 0 128 24m0 192a87.87 87.87 0 0 1-44.06-11.81a8 8 0 0 0-6.54-.67L40 216l12.47-37.4a8 8 0 0 0-.66-6.54A88 88 0 1 1 128 216" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <h3 className="h5 font-weight-semibold">Create a New Ticket for {param.email}</h3>
-                                        <p className="text-muted">Fill in the form below to create a new ticket.</p>
-                                    </div>
-                                </div>
-                                <Form>
-                                    <Form.Group className="mb-4">
-                                        <Form.Label htmlFor="title">Title</Form.Label>
-                                        <Form.Control
-                                            id="title"
-                                            type="text"
-                                            value={title}
-                                            onChange={(e) => setTitle(e.target.value)}
-                                            placeholder="Enter ticket title"
-                                            className="dark:bg-muted-900/75 dark:text-muted-200"
-                                        />
-                                    </Form.Group>
-                                    <Form.Group className="mb-4">
-                                        <Form.Label htmlFor="description">Description</Form.Label>
-                                        <Form.Control
-                                            id="description"
-                                            as="textarea"
-                                            rows={5}
-                                            value={description}
-                                            onChange={(e) => setDescription(e.target.value)}
-                                            placeholder="Enter ticket description"
-                                            className="dark:bg-muted-900/75 dark:text-muted-200"
-                                        />
-                                    </Form.Group>
-                                    <Button
-                                        onClick={sendTicket}
-                                        disabled={isDisable}
-                                        variant="primary"
-                                        className="w-100"
-                                    >
-                                        {isDisable ? (
-                                            <div className="spinner-border text-light" role="status">
-                                                <span className="visually-hidden">Loading...</span>
-                                            </div>
-                                        ) : (
-                                            'Create'
-                                        )}
-                                    </Button>
-                                </Form>
-                            </Card.Body>
-                        )}
+  useEffect(() => {
+    const role = authUser()?.user?.role;
+    if (role === "user") {
+      navigate("/dashboard");
+      return;
+    }
+    if (!["admin", "superadmin", "subadmin"].includes(role)) {
+      navigate("/login");
+    }
+  }, []);
 
-                    </div>
-                </div>
+  useEffect(() => {
+    loadUser();
+  }, [id]);
+
+  const displayEmail = ticketUser?.email || decodeURIComponent(email || "");
+  const displayName = ticketUser
+    ? `${ticketUser.firstName || ""} ${ticketUser.lastName || ""}`.trim()
+    : "Customer";
+
+  return (
+    <div className={`${styles.wrap} ${styles.page}`}>
+      <header className={styles.header}>
+        <button
+          type="button"
+          className={styles.backBtn}
+          onClick={() => navigate("/admin/support")}
+          aria-label="Back to support"
+        >
+          <ArrowBackIcon fontSize="small" />
+        </button>
+        <div>
+          <h1 className={styles.pageTitle}>Create Ticket</h1>
+          <p className={styles.pageSubtitle}>
+            Open a support ticket on behalf of this user
+          </p>
+        </div>
+      </header>
+
+      <div className={styles.layout}>
+        <section className={styles.panel}>
+          <div className={styles.panelHead}>
+            <div className={styles.panelIcon} aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v2h-2v-2zm0-10h2v8h-2V7z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className={styles.panelTitle}>Ticket details</h2>
+              <p className={styles.panelHint}>
+                The first message will be sent as support staff
+              </p>
+            </div>
+          </div>
+
+          <form
+            className={styles.form}
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendTicket();
+            }}
+          >
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="ticket-title">
+                Title
+              </label>
+              <input
+                id="ticket-title"
+                type="text"
+                className={styles.input}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Brief summary of the issue"
+                disabled={isDisable}
+                autoComplete="off"
+              />
             </div>
 
-        </>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="ticket-description">
+                Description
+              </label>
+              <div className={styles.editorWrap} id="ticket-description">
+                <ReactQuill
+                  theme="snow"
+                  value={description}
+                  onChange={setDescription}
+                  placeholder="Describe the issue or initial response..."
+                  readOnly={isDisable}
+                  modules={{
+                    toolbar: [
+                      ["bold", "italic", "underline"],
+                      [{ list: "ordered" }, { list: "bullet" }],
+                      [{ color: [] }],
+                      ["link", "clean"],
+                    ],
+                  }}
+                />
+              </div>
+            </div>
 
-    );
+            <div className={styles.field}>
+              <span className={styles.label}>Attachments</span>
+              <TicketAttachmentInput
+                files={attachments}
+                onChange={setAttachments}
+                disabled={isDisable}
+              />
+            </div>
+
+            <button
+              type="submit"
+              className={styles.submitBtn}
+              disabled={isDisable}
+            >
+              {isDisable ? (
+                <>
+                  <span className={styles.submitSpinner} aria-hidden="true" />
+                  Creating ticket...
+                </>
+              ) : (
+                <>
+                  <SendIcon sx={{ fontSize: 18 }} />
+                  Create ticket
+                </>
+              )}
+            </button>
+          </form>
+        </section>
+
+        <aside className={`${styles.panel} ${styles.panelSticky}`}>
+          <h2 className={styles.sideTitle}>Customer</h2>
+
+          {userLoading ? (
+            <div className={styles.skelWrap} aria-hidden="true">
+              <div className={styles.skelUser}>
+                <span className={`${styles.skelBone} ${styles.skelAvatar}`} />
+                <div className={styles.skelMeta}>
+                  <span className={`${styles.skelBone} ${styles.skelLine} ${styles.skelWide}`} />
+                  <span className={`${styles.skelBone} ${styles.skelLine} ${styles.skelMid}`} />
+                </div>
+              </div>
+              <hr className={styles.divider} />
+              <div className={styles.metaBlock}>
+                <span className={`${styles.skelBone} ${styles.skelLine} ${styles.skelMid}`} />
+                <span className={`${styles.skelBone} ${styles.skelLine} ${styles.skelFull}`} />
+              </div>
+              <hr className={styles.divider} />
+              <div className={styles.metaBlock}>
+                <span className={`${styles.skelBone} ${styles.skelLine} ${styles.skelMid}`} />
+                <span className={`${styles.skelBone} ${styles.skelLine} ${styles.skelFull}`} />
+              </div>
+              <hr className={styles.divider} />
+              <span className={`${styles.skelBone} ${styles.skelNote}`} />
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={styles.userCard}
+                onClick={() => navigate(`/admin/user/${id}/general`)}
+              >
+                <img src={profile} alt="" className={styles.avatar} />
+                <div className={styles.userMeta}>
+                  <p className={styles.userName}>{displayName || "Customer"}</p>
+                  <p className={styles.userLink}>View profile</p>
+                </div>
+              </button>
+
+              <hr className={styles.divider} />
+
+              <div className={styles.metaBlock}>
+                <span className={styles.metaLabel}>Email</span>
+                <p className={styles.metaValue}>{displayEmail}</p>
+              </div>
+
+              <hr className={styles.divider} />
+
+              <div className={styles.metaBlock}>
+                <span className={styles.metaLabel}>User ID</span>
+                <p className={styles.metaValueAccent}>{id}</p>
+              </div>
+
+              <hr className={styles.divider} />
+
+              <p className={styles.note}>
+                This ticket will appear in the user&apos;s support inbox and in the
+                admin support queue. They will be notified by email when created.
+              </p>
+            </>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
 };
 
 export default CreateTicket;

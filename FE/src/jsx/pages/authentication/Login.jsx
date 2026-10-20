@@ -7,6 +7,7 @@ import LogoNew from "../../../assets/newlogo/logo.png";
 import { loginApi } from "../../../Api/Service";
 import { useSignIn, useIsAuthenticated, useAuthUser } from "react-auth-kit";
 import { useAuth } from "../../../store/auth";
+import { isBackendLocalhost, isElectronApp } from "../../../config/appConfig";
 
 import { IMAGES } from '../../constant/theme';
 
@@ -81,38 +82,61 @@ function Login(props) {
 						postalCode: updateHeader.user.postalCode,
 						role: updateHeader.user.role,
 						status: updateHeader.user.status,
-
 						verified: updateHeader.user.verified,
+						permissions: updateHeader.user.permissions || {},
+						adminPermissions: updateHeader.user.adminPermissions || {},
 					},
 				};
 			}
+			// Extract token (can be string or nested object)
+			const tokenValue = typeof updateHeader.token === 'string' 
+				? updateHeader.token 
+				: updateHeader.token?.token || updateHeader.token;
+			
 			if (
 				updateHeader.success && updateHeader.link === false &&
+				tokenValue &&
 				signIn({
-					token: updateHeader.token.token,
+					token: tokenValue,
 					expiresIn: 4317,
 					tokenType: "Bearer",
 					authState: newData,
 					sameSite: false,
 				})
 			) {
-				// storeTokenInLs(updateHeader.token);
-				toast.dismiss();
-				toast.success(updateHeader.msg);if (updateHeader.user.role === "user") {
-					const redirectTo = location.state?.from || '/dashboard';
-					navigate(redirectTo);
-
-					return;
-				} else if (
-					updateHeader.user.role === "admin" ||
-					updateHeader.user.role === "subadmin" ||
-					updateHeader.user.role === "superadmin"
-				) {
-					const redirectTo = location.state?.from || '/admin/dashboard';
-					navigate(redirectTo);
-					// navigate("/admin/dashboard");
-					return
+				// Store token in localStorage for Electron OR localhost backend
+				// For production web  , cookies handle authentication
+				// CRITICAL: Store token BEFORE navigation to ensure it's available for subsequent API calls
+				if (isElectronApp() || isBackendLocalhost()) {
+					localStorage.setItem('jwttoken', tokenValue);
+					const envType = isElectronApp() ? 'Electron' : 'localhost backend';
+					console.log(`🔐 [Login] Token stored in localStorage for ${envType}:`, tokenValue.substring(0, 20) + '...');
+					// Verify it was stored
+					const stored = localStorage.getItem('jwttoken');
+					if (!stored || stored !== tokenValue) {
+						console.error('❌ [Login] Failed to store token in localStorage!');
+					}
 				}
+				toast.dismiss();
+				toast.success(updateHeader.msg);
+				
+				// Small delay to ensure token is stored before navigation
+				// This prevents race conditions where API calls happen before token is available
+				setTimeout(() => {
+					if (updateHeader.user.role === "user") {
+						const redirectTo = location.state?.from || '/dashboard';
+						navigate(redirectTo);
+						return;
+					} else if (
+						updateHeader.user.role === "admin" ||
+						updateHeader.user.role === "subadmin" ||
+						updateHeader.user.role === "superadmin"
+					) {
+						const redirectTo = location.state?.from || '/admin/dashboard';
+						navigate(redirectTo);
+						return
+					}
+				}, 100); // 100ms delay to ensure localStorage write completes
 			} else if (updateHeader.success === true && updateHeader.link === true) {
 				toast.dismiss();
 				toast.info(updateHeader.msg);setPassword("");

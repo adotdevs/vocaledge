@@ -12,6 +12,7 @@ import axios from 'axios';
 import { Button, Card, Col, Form, DropdownDivider, InputGroup, Modal, Row, Spinner } from 'react-bootstrap';
 import './style.css'
 import Truncate from 'react-truncate-inside/es';
+import { getTransactionsForCoin } from './assets/coinConfig';
 
 const LetterSec = () => {
 
@@ -21,6 +22,7 @@ const LetterSec = () => {
     const [isLoading, setisLoading] = useState(true);
     const [isDisable, setisDisable] = useState(false);
     const [liveBtc, setliveBtc] = useState(null);
+    const [liveEth, setliveEth] = useState(null);
     const [UserTransactions, setUserTransactions] = useState([]);
 
     const [btcBalance, setbtcBalance] = useState(0);
@@ -56,57 +58,26 @@ const LetterSec = () => {
                     val = userCoins.btcPrice.quote.USD.price
                 } else {
                     val = 96075.25
-                }setliveBtc(val);setisLoading(false);
-                // tx
-                const btc = userCoins.getCoin.transactions.filter((transaction) =>
-                    transaction.trxName.includes("bitcoin")
-                );
-                const btccomplete = btc.filter((transaction) =>
-                    transaction.status.includes("completed")
-                );
-                let btcCount = 0;
-                let btcValueAdded = 0;
-                for (let i = 0; i < btccomplete.length; i++) {
-                    const element = btccomplete[i];
-                    btcCount = element.amount;
-                    btcValueAdded += btcCount;
+                }setliveBtc(val);
+                let ethVal = 0;
+                if (userCoins && userCoins.ethPrice && userCoins.ethPrice.quote && userCoins.ethPrice.quote.USD) {
+                    ethVal = userCoins.ethPrice.quote.USD.price
+                } else {
+                    ethVal = 2640
                 }
-                setbtcBalance(btcValueAdded);// tx
-                // tx
-                const eth = userCoins.getCoin.transactions.filter((transaction) =>
-                    transaction.trxName.includes("ethereum")
-                );
-                const ethcomplete = eth.filter((transaction) =>
-                    transaction.status.includes("completed")
-                );
-                let ethCount = 0;
-                let ethValueAdded = 0;
-                for (let i = 0; i < ethcomplete.length; i++) {
-                    const element = ethcomplete[i];
-                    ethCount = element.amount;
-                    ethValueAdded += ethCount;
-                }
-                setethBalance(ethValueAdded);// tx
-                // tx
-                const usdt = userCoins.getCoin.transactions.filter((transaction) =>
-                    transaction.trxName.includes("tether")
-                );
-                const usdtcomplete = usdt.filter((transaction) =>
-                    transaction.status.includes("completed")
-                );
-                let usdtCount = 0;
-                let usdtValueAdded = 0;
-                for (let i = 0; i < usdtcomplete.length; i++) {
-                    const element = usdtcomplete[i];
-                    usdtCount = element.amount;
-                    usdtValueAdded += usdtCount;
-                }
+                setliveEth(ethVal);
+                setisLoading(false);
+                const txs = userCoins.getCoin.transactions || [];
+                const btcValueAdded = getTransactionsForCoin("bitcoin", txs);
+                const ethValueAdded = getTransactionsForCoin("ethereum", txs);
+                const usdtValueAdded = getTransactionsForCoin("tether", txs);
+                setbtcBalance(btcValueAdded);
+                setethBalance(ethValueAdded);
                 setusdtBalance(usdtValueAdded);
-                // tx
 
                 const totalValue = (
                     btcValueAdded * liveBtc +
-                    ethValueAdded * 2640 +
+                    ethValueAdded * (liveEth || 2640) +
                     usdtValueAdded
                 ).toFixed(2);
 
@@ -644,7 +615,7 @@ const LetterSec = () => {
                                                     ) : (
                                                         <>
                                                             {`${ethBalance.toFixed(8)} (${(
-                                                                ethBalance * 2640
+                                                                ethBalance * (liveEth || 2640)
                                                             ).toFixed(2)} USD)`}{" "}
                                                             ETH
                                                         </>

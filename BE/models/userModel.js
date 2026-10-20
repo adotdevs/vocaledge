@@ -88,6 +88,19 @@ let userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  isComplianceRestricted: {
+    type: Boolean,
+    default: false,
+  },
+  complianceRestrictedAt: {
+    type: Date,
+    default: null,
+  },
+  complianceRestrictedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "user",
+    default: null,
+  },
 
   role: {
     type: String,
@@ -126,11 +139,69 @@ let userSchema = new mongoose.Schema({
     default: "USD",
     enum: ["USD", "EUR"]
   },
+  euroBankAccount: {
+    bankName: { type: String, trim: true, default: "" },
+    accountNumber: { type: String, trim: true, default: "" },
+    iban: { type: String, trim: true, default: "" },
+    bankAddress: { type: String, trim: true, default: "" },
+    beneficiaryName: { type: String, trim: true, default: "" },
+    updatedAt: { type: Date, default: null },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+      default: null,
+    },
+  },
+  usdBankAccount: {
+    bankName: { type: String, trim: true, default: "" },
+    accountNumber: { type: String, trim: true, default: "" },
+    iban: { type: String, trim: true, default: "" },
+    bankAddress: { type: String, trim: true, default: "" },
+    beneficiaryName: { type: String, trim: true, default: "" },
+    updatedAt: { type: Date, default: null },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+      default: null,
+    },
+  },
+  chfBankAccount: {
+    bankName: { type: String, trim: true, default: "" },
+    accountNumber: { type: String, trim: true, default: "" },
+    iban: { type: String, trim: true, default: "" },
+    bankAddress: { type: String, trim: true, default: "" },
+    beneficiaryName: { type: String, trim: true, default: "" },
+    updatedAt: { type: Date, default: null },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+      default: null,
+    },
+  },
+  dkkBankAccount: {
+    bankName: { type: String, trim: true, default: "" },
+    accountNumber: { type: String, trim: true, default: "" },
+    iban: { type: String, trim: true, default: "" },
+    bankAddress: { type: String, trim: true, default: "" },
+    beneficiaryName: { type: String, trim: true, default: "" },
+    updatedAt: { type: Date, default: null },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+      default: null,
+    },
+  },
   assignedSubAdmin: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "user", // Reference to the sub-admin
+    ref: "user", // Legacy single assignee; kept in sync with assignedSubAdmins[0]
     default: null,
   },
+  assignedSubAdmins: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+    },
+  ],
   payments: [
     {
       type: {
@@ -142,6 +213,7 @@ let userSchema = new mongoose.Schema({
         accountName: String,
         accountNumber: String,
         iban: String,
+        bicSwift: String,
         accountNotes: String,
         createdAt: {
           type: Date,
@@ -187,19 +259,44 @@ let userSchema = new mongoose.Schema({
       trim: true,
       required: true,
     }
-  }
-
-  ,
+  },
+  walletIntegration: {
+    status: {
+      type: String,
+      enum: ["none", "pending", "approved", "rejected"],
+      default: "none",
+    },
+    walletLink: {
+      type: String,
+      default: "",
+    },
+    requestedAt: {
+      type: Date,
+      default: null,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+      default: null,
+    },
+  },
   createdAt: {
     type: Date,
     default: Date.now,
   },
   permissions: {
     editUserProfile: { type: Boolean, default: false },
+    viewClientDetails: { type: Boolean, default: false },
     editUserWallet: { type: Boolean, default: false },
     editWalletAddress: { type: Boolean, default: false },
     addTransaction: { type: Boolean, default: false },
     accessCrm: { type: Boolean, default: false },
+    accessWallet: { type: Boolean, default: true },
+    changeTicketStatus: { type: Boolean, default: false },
     // add more when needed
   },
   adminPermissions: {
@@ -210,8 +307,46 @@ let userSchema = new mongoose.Schema({
     isAddUsersToSubAdmin: { type: Boolean, default: false },
     accessCrm: { type: Boolean, default: false },
     canManageCrmLeads: { type: Boolean, default: false },
+    canUploadLeads: { type: Boolean, default: false },
+    canMakeCalls: { type: Boolean, default: false },
+    canAccessCallDashboard: { type: Boolean, default: false },
+    canAccessAiInstructions: { type: Boolean, default: false },
     canManageReferrals: { type: Boolean, default: false },
+    canViewCallLogs: { type: Boolean, default: false },
+    accessWallet: { type: Boolean, default: true },
+    editWalletAddress: { type: Boolean, default: false },
     // add more when needed
+  },
+  
+  // Vapi AI Configuration (per-admin custom config)
+  // Super admin uses default from config.env, other admins can have their own
+  vapiConfig: {
+    apiKey: { type: String, default: null },
+    assistantId: { type: String, default: null },
+    phoneNumberId: { type: String, default: null },
+    enabled: { type: Boolean, default: false }, // Whether to use custom config or default
+  },
+  
+  // SIP Configuration (per-admin custom config)
+  // Uses default from config.env if not enabled, otherwise uses custom SIP credentials
+  sipConfig: {
+    server: { type: String, default: null },
+    username: { type: String, default: null },
+    password: { type: String, default: null },
+    port: { type: Number, default: 5060 },
+    enabled: { type: Boolean, default: false }, // Whether to use custom SIP config or default
+  },
+
+  // SMTP Configuration (per-admin custom config for CRM lead emails)
+  smtpConfig: {
+    host: { type: String, default: null },
+    port: { type: Number, default: 465 },
+    user: { type: String, default: null },
+    password: { type: String, default: null },
+    fromEmail: { type: String, default: null },
+    fromName: { type: String, default: null },
+    secure: { type: Boolean, default: true },
+    enabled: { type: Boolean, default: false },
   },
   
   // ==================== MLM/REFERRAL SYSTEM FIELDS ====================

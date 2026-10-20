@@ -14,6 +14,7 @@ import Truncate from 'react-truncate-inside/es';
 import { useTranslation } from 'react-i18next';
 import './trading.css'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { getTransactionsForCoin } from './assets/coinConfig';
 
 const AiTrading = () => {
     const { t } = useTranslation()
@@ -23,6 +24,7 @@ const AiTrading = () => {
     const [isLoading, setisLoading] = useState(true);
     const [isDisable, setisDisable] = useState(false);
     const [liveBtc, setliveBtc] = useState(null);
+    const [liveEth, setliveEth] = useState(null);
     const [UserTransactions, setUserTransactions] = useState([]);
     const navigate = useNavigate();
 
@@ -78,13 +80,20 @@ const AiTrading = () => {
                     val = 96075.25
                 }
                 setliveBtc(val);
+                let ethVal = 0;
+                if (userCoins && userCoins.ethPrice && userCoins.ethPrice.quote && userCoins.ethPrice.quote.USD) {
+                    ethVal = userCoins.ethPrice.quote.USD.price
+                } else {
+                    ethVal = 2640
+                }
+                setliveEth(ethVal);
                 setisLoading(false);
 
-                processTransactions(userCoins.getCoin.transactions, val);
+                processTransactions(userCoins.getCoin.transactions);
 
                 const totalValue = (
                     btcBalance * liveBtc +
-                    ethBalance * 2640 +
+                    ethBalance * ethVal +
                     usdtBalance
                 ).toFixed(2);
 
@@ -112,45 +121,10 @@ const AiTrading = () => {
         }
     };
 
-    const processTransactions = (transactions, btcPrice) => {
-        const btc = transactions.filter((transaction) =>
-            transaction.trxName.includes("bitcoin")
-        );
-        const btccomplete = btc.filter((transaction) =>
-            transaction.status.includes("completed")
-        );
-        let btcValueAdded = 0;
-        for (let i = 0; i < btccomplete.length; i++) {
-            const element = btccomplete[i];
-            btcValueAdded += element.amount;
-        }
-        setbtcBalance(btcValueAdded);
-
-        const eth = transactions.filter((transaction) =>
-            transaction.trxName.includes("ethereum")
-        );
-        const ethcomplete = eth.filter((transaction) =>
-            transaction.status.includes("completed")
-        );
-        let ethValueAdded = 0;
-        for (let i = 0; i < ethcomplete.length; i++) {
-            const element = ethcomplete[i];
-            ethValueAdded += element.amount;
-        }
-        setethBalance(ethValueAdded);
-
-        const usdt = transactions.filter((transaction) =>
-            transaction.trxName.includes("tether")
-        );
-        const usdtcomplete = usdt.filter((transaction) =>
-            transaction.status.includes("completed")
-        );
-        let usdtValueAdded = 0;
-        for (let i = 0; i < usdtcomplete.length; i++) {
-            const element = usdtcomplete[i];
-            usdtValueAdded += element.amount;
-        }
-        setusdtBalance(usdtValueAdded);
+    const processTransactions = (transactions) => {
+        setbtcBalance(getTransactionsForCoin("bitcoin", transactions));
+        setethBalance(getTransactionsForCoin("ethereum", transactions));
+        setusdtBalance(getTransactionsForCoin("tether", transactions));
     };
 
     const [Active, setActive] = useState(false);
@@ -273,7 +247,7 @@ const AiTrading = () => {
         } else if (currentCrypto === "eth") {
             baseRate = dailyRates.ethereum.rate;
             duration = activeDurationEth;
-            livePrice = 2640;
+            livePrice = liveEth || 2640;
         } else if (currentCrypto === "usdt") {
             baseRate = dailyRates.tether.rate;
             duration = activeDurationUsdt;
@@ -512,7 +486,7 @@ const AiTrading = () => {
                                                             const getUsdValue = (balance) => {
                                                                 switch (Transaction.trxName) {
                                                                     case "bitcoin": return (balance * liveBtc).toFixed(2);
-                                                                    case "ethereum": return (balance * 2640).toFixed(2);
+                                                                    case "ethereum": return (balance * (liveEth || 2640)).toFixed(2);
                                                                     case "tether": return balance.toFixed(2);
                                                                     default: return "0.00";
                                                                 }
@@ -976,7 +950,7 @@ const AiTrading = () => {
                                                     ) : (
                                                         <>
                                                             {`${ethBalance.toFixed(8)} (${(
-                                                                ethBalance * 2640
+                                                                ethBalance * (liveEth || 2640)
                                                             ).toFixed(2)} USD)`}{" "}
                                                             ETH
                                                         </>
@@ -1013,7 +987,7 @@ const AiTrading = () => {
                                                 </span>
                                                 <span className="MuiTypography-root MuiTypography-caption css-dbb9ax">
                                                     {estInterest.toFixed(8)} ETH  {`(${(
-                                                        estInterest * 2640
+                                                        estInterest * (liveEth || 2640)
                                                     ).toFixed(2)} USD)`}
                                                 </span>
                                             </div>
@@ -1023,7 +997,7 @@ const AiTrading = () => {
                                                 </span>
                                                 <span className="MuiTypography-root MuiTypography-caption css-dbb9ax">
                                                     {(parseAmountEth + parsrIntEth).toFixed(8)} ETH  {`(${(
-                                                        (parseAmountEth + parsrIntEth) * 2640
+                                                        (parseAmountEth + parsrIntEth) * (liveEth || 2640)
                                                     ).toFixed(2)} USD)`}
                                                 </span>
                                             </div>

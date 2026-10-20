@@ -13,6 +13,7 @@ import avatar from "../../../assets/images/avatar/1.jpg";
 import { ThemeContext } from "../../../context/ThemeContext";
 import  Logout  from "../nav/Logout";
 import { SVGICON } from "../../constant/theme";
+import CryptoNewsTicker from "../../elements/dashboard/CryptoNewsTicker";
 
 const listBlog = [
   { icon:SVGICON.LtcSvgIcon, name:'LTC in DexignLab'},
@@ -57,16 +58,98 @@ const Header = ({ onNote }) => {
     }
   };
   let authUser = useAuthUser();
-  const [Admin, setAdmin] = useState("");useEffect(() => {
+  const [Admin, setAdmin] = useState("");
+  useEffect(() => {
     if (authUser().user.role === "user") {
-      setAdmin(authUser().user); 
-
+      setAdmin(authUser().user);
+      getsignUser();
       return;
     } else if (authUser().user.role === "admin") {
       setAdmin(authUser().user);
       return;
     }
   }, []);
+
+  const getKycStatus = () => {
+    if (authUser().user.role !== "user" || !isUser._id) {
+      return null;
+    }
+    if (isUser.kyc === true) {
+      return "approved";
+    }
+    if (isUser.submitDoc?.status === "completed") {
+      return "under_review";
+    }
+    return "not_started";
+  };
+
+  const kycStatus = getKycStatus();
+
+  const kycBadgeStyles = {
+    approved: {
+      background: "rgba(16, 185, 129, 0.2)",
+      border: "1px solid rgba(16, 185, 129, 0.5)",
+      color: "#6ee7b7",
+    },
+    under_review: {
+      background: "rgba(245, 158, 11, 0.2)",
+      border: "1px solid rgba(245, 158, 11, 0.5)",
+      color: "#fcd34d",
+    },
+    not_started: {
+      background: "rgba(59, 130, 246, 0.2)",
+      border: "1px solid rgba(59, 130, 246, 0.5)",
+      color: "#93c5fd",
+    },
+  };
+
+  const renderKycHeaderBadge = () => {
+    if (!kycStatus) {
+      return null;
+    }
+
+    const baseStyle = {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "6px",
+      padding: "5px 12px",
+      borderRadius: "20px",
+      fontSize: "12px",
+      fontWeight: 600,
+      lineHeight: 1.2,
+      whiteSpace: "nowrap",
+      textDecoration: "none",
+      ...kycBadgeStyles[kycStatus],
+    };
+
+    if (kycStatus === "approved") {
+      return (
+        <li className="nav-item d-flex align-items-center me-2">
+          <span style={baseStyle} title="KYC verified">
+            <span style={{ fontSize: "10px" }}>●</span> KYC Verified
+          </span>
+        </li>
+      );
+    }
+
+    if (kycStatus === "under_review") {
+      return (
+        <li className="nav-item d-flex align-items-center me-2">
+          <span style={baseStyle} title="Documents under review">
+            <span style={{ fontSize: "10px" }}>●</span> KYC Pending
+          </span>
+        </li>
+      );
+    }
+
+    return (
+      <li className="nav-item d-flex align-items-center me-2">
+        <Link to="/flows/kyc" style={baseStyle} title="Complete identity verification">
+          <span style={{ fontSize: "10px" }}>●</span> Verify KYC
+        </Link>
+      </li>
+    );
+  };
   const [headerFix, setheaderFix] = useState(false);
   
   function CommanScroll(){
@@ -81,8 +164,7 @@ const Header = ({ onNote }) => {
   }, [])
   
 
-  const {background, changeBackground, 
-    headWallet,setHeadWallet } = useContext(ThemeContext);
+  const {background, changeBackground } = useContext(ThemeContext);
     const handleThemeMode = () => {
       if(background.value === 'dark'){
         changeBackground({ value: "light", label: "Light" });
@@ -95,8 +177,16 @@ const Header = ({ onNote }) => {
     path = path.split("/");
     path = path[path.length - 1];
 
-    const pathtitle = window.location.pathname.split("/");
-    const name = pathtitle[pathtitle.length - 1].split("-");
+    const isRouteParamId = (segment = "") =>
+      /^[a-f0-9]{24}$/i.test(segment) || /^[0-9]+$/.test(segment);
+
+    const pathSegments = window.location.pathname.split("/").filter(Boolean);
+    let titleSegment = pathSegments[pathSegments.length - 1] || "dashboard";
+    if (isRouteParamId(titleSegment) && pathSegments.length > 1) {
+      titleSegment = pathSegments[pathSegments.length - 2];
+    }
+
+    const name = titleSegment.split("-");
     const filterName = name.length >= 3 ? name.filter((n, i) => i > 0) : name;
     const finalName = filterName.includes("app")
       ? filterName.filter((f) => f !== "app")
@@ -122,17 +212,6 @@ const Header = ({ onNote }) => {
       ? filterName.filter((f) => f !== "editor")
       : filterName;
 
-      function handleActiveWallet(){
-        setHeadWallet(!headWallet)        
-      }      
-      const walletActive = window.matchMedia("(max-width:100rem)").matches
-      useEffect(()=>{
-        if(walletActive){
-          setHeadWallet(true)
-        }else{
-          setHeadWallet(false)
-        }
-      },[walletActive])
   
   return (
     <>
@@ -145,42 +224,7 @@ const Header = ({ onNote }) => {
               </div>
               <ul className="navbar-nav header-right ">	
                   {/* on mobile size */}
-                  <Dropdown as="li" className="nav-item notification_dropdown sm-search">
-                      <Dropdown.Toggle to={"#"} className="nav-link i-false" as="div">
-                        {SVGICON.SearchIconSvg}
-                      </Dropdown.Toggle>
-                      <Dropdown.Menu  className="dropdown-menu-end of-visible mt-4">
-                        <div className="input-group search-area-2">
-                            <input type="text" className="form-control" placeholder="Search Dashboard" autoFocus />
-                            <span className="input-group-text">
-                              <Link to={"#"}>                              
-                                {SVGICON.SearchIconSvg}
-                              </Link>
-                            </span>
-                        </div>
-                        <div className="px-3">
-                            <h5>Recently Searched:</h5>
-                        </div>
-                        <div  className="widget-media dlab-scroll p-3" style={{height:"380px"}}>
-                          <ul className="timeline">
-                            {listBlog.map((data, i)=>(
-                                <li key={i}>
-                                  <div className="timeline-panel">
-                                    <div className="me-2 search-p">
-                                      {data.icon}
-                                    </div>
-                                    <div className="media-body ms-2">
-                                      <h6 className="mb-1">{data.name}</h6>
-                                      <small className="d-block">#0001</small>
-                                    </div>
-                                  </div>
-                                </li>
-                            ))}
-                          </ul>
-                        </div>
-                        <Link to={"#"} className="all-notification">See all notifications <i className="ti-arrow-end" /></Link>
-                      </Dropdown.Menu>
-                  </Dropdown>
+                 
                   {/* end on mobile size */}
                   {/* <li className="nav-item dropdown notification_dropdown">
                       <Link to={"#"} 
@@ -192,18 +236,7 @@ const Header = ({ onNote }) => {
                       </Link>
                   </li>	 */}
                   
-                  <li className={`nav-item dropdown notification_dropdown ${path === "dashboard" || path ===  "index-2" ? '' : 'd-none'}`}>
-                      <Link to={"#"} className="nav-link  menu-wallet"
-                        // onClick={()=>setHeadWallet(!headWallet)}
-                        onClick={handleActiveWallet}
-                      >
-                        {SVGICON.WalletSvgIcon}
-                      </Link>
-                  </li>		                    
-                 
-              
-            
-             
+                    {renderKycHeaderBadge()}
                 <Dropdown as="li" className="nav-item header-profile2">              
                   <Dropdown.Toggle to={"#"} className="nav-link i-false  noap" as="div">
                     <div className="header-info2 d-flex align-items-center">
@@ -233,7 +266,7 @@ const Header = ({ onNote }) => {
             </div>
           </nav>
         </div>
-         {path === "dashboard" || path=== "index-2" ? 
+         {path === "dashboard" || path=== "index-2" ?  
             <div className="page-titles">
               <div className="sub-dz-head">
                   <div className="d-flex align-items-center dz-head-title">
@@ -267,6 +300,7 @@ const Header = ({ onNote }) => {
                 </ol>
             </div>
           }
+        <CryptoNewsTicker />
       </div>
      
     </>    

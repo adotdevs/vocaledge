@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
+import AdminShell from "./theme/AdminShell";
+import AdminSkeleton from "./theme/AdminSkeleton";
 import { useNavigate } from 'react-router-dom';
 import { useAuthUser } from 'react-auth-kit';
-import { adminTicketsApi, signleUsersApi, deleteTicketApi } from '../../Api/Service';
+import { adminTicketsApi, signleUsersApi, deleteTicketApi, updateTicketStatusApi } from '../../Api/Service';
 import { toast } from 'react-toastify';
 import SideBar from "../layouts/AdminSidebar/Sidebar";
 import AdminHeader from "./adminHeader";
+import ui from "./theme/AdminUI.module.css";
 import {
   Box,
   Card,
   CardContent,
   Typography,
   Grid,
-  Chip,
   Button,
   LinearProgress,
   Dialog,
@@ -34,6 +36,7 @@ import {
   Alert as MuiAlert,
   CircularProgress
 } from '@mui/material';
+import InlineTicketStatusCell from './components/InlineTicketStatusCell';
 import {
   Support as SupportIcon,
   CheckCircle as CheckCircleIcon,
@@ -64,6 +67,8 @@ const AllTicket = () => {
     const [hasMore, setHasMore] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [totalCount, setTotalCount] = useState(0);
+    const [canChangeTicketStatus, setCanChangeTicketStatus] = useState(false);
+    const [statusUpdatingId, setStatusUpdatingId] = useState(null);
 
     // Fetch tickets from the server with pagination
     const fetchTickets = async (page = 1, limit = 20, loadMore = false, statusFilter = filter) => {
@@ -177,6 +182,63 @@ const AllTicket = () => {
         fetchTickets(1, 20, false, newFilter);
     };
 
+    const loadTicketStatusPermission = async (user) => {
+        if (user.role === "admin" || user.role === "superadmin") {
+            setCanChangeTicketStatus(true);
+            return;
+        }
+
+        if (user.role === "subadmin") {
+            try {
+                const subadminDetails = await signleUsersApi(user._id);
+                if (subadminDetails.success) {
+                    setCanChangeTicketStatus(subadminDetails.signleUser?.permissions?.changeTicketStatus === true);
+                } else {
+                    setCanChangeTicketStatus(false);
+                }
+            } catch {
+                setCanChangeTicketStatus(false);
+            }
+        }
+    };
+
+    const handleInlineStatusChange = async (ticket, nextStatus) => {
+        if (!canChangeTicketStatus || !ticket?._id) return;
+
+        setStatusUpdatingId(ticket._id);
+
+        try {
+            const response = await updateTicketStatusApi({
+                userId: ticket.user,
+                ticketId: ticket.ticketId,
+                status: nextStatus,
+            });
+
+            if (response.success) {
+                toast.success("Ticket status updated and user notified by email");
+
+                setTickets((prev) => {
+                    if (filter !== "all" && nextStatus !== filter) {
+                        return prev.filter((item) => item._id !== ticket._id);
+                    }
+
+                    return prev.map((item) =>
+                        item._id === ticket._id
+                            ? { ...item, status: nextStatus, updatedAt: new Date().toISOString() }
+                            : item
+                    );
+                });
+            } else {
+                toast.error(response.msg || "Failed to update ticket status");
+            }
+        } catch (error) {
+            console.error("Error updating ticket status:", error);
+            toast.error("Failed to update ticket status");
+        } finally {
+            setStatusUpdatingId(null);
+        }
+    };
+
     // Delete 
     useEffect(() => {
         fetchTickets(1, 20, false, filter);
@@ -208,50 +270,25 @@ const AllTicket = () => {
         if (authUser().user.role === "user") {
             Navigate("/dashboard");
             return;
-        } else if (authUser().user.role === "admin") {
-            setAdmin(authUser().user);
-        } else if (authUser().user.role === "subadmin") {
-            setAdmin(authUser().user);
         }
+
+        const user = authUser().user;
+        setAdmin(user);
+        loadTicketStatusPermission(user);
     }, []);
 
-    const getStatusColor = (status) => {
-        switch(status) {
-            case 'open':
-                return { bg: 'rgba(255, 152, 0, 0.2)', color: '#ff9800' };
-            case 'solved':
-                return { bg: 'rgba(76, 175, 80, 0.2)', color: '#4caf50' };
-            case 'awaiting reply':
-                return { bg: 'rgba(33, 150, 243, 0.2)', color: '#2196f3' };
-            default:
-                return { bg: 'rgba(255, 255, 255, 0.1)', color: 'grey.400' };
-        }
-    };
-
     return (
-        <div className="admin dark-new-ui">
-            <div className="bg-gray-900 min-h-screen">
-                <SideBar state={Active} toggle={toggleBar} />
-                
-                <div className="bg-gray-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
-                    <div className="mx-auto w-full max-w-7xl">
-                        <AdminHeader toggle={toggleBar} pageName="Support Tickets" />
+        <AdminShell open={Active} onClose={toggleBar}>
+            <div>
+                <div className="min-h-screen pb-20">
+                    <SideBar state={Active} toggle={toggleBar} />
+                    <div className={ui.main}>
+                        <div className={ui.content}>
+                            <AdminHeader toggle={toggleBar} pageName="Support Tickets" />
 
             {isLoading ? (
                             <Box sx={{ width: '100%', p: 4 }}>
-                                <LinearProgress
-                                    sx={{
-                                        height: 8,
-                                        borderRadius: 4,
-                                        backgroundColor: 'grey.800',
-                                        '& .MuiLinearProgress-bar': {
-                                            backgroundColor: 'primary.main'
-                                        }
-                                    }}
-                                />
-                                <Typography variant="h6" align="center" sx={{ mt: 2, color: 'grey.300' }}>
-                                    Loading tickets...
-                                </Typography>
+                                <AdminSkeleton variant="stats" rows={4} />
                             </Box>
                         ) : (
                             <Box sx={{ px: { xs: 2, md: 4 }, py: 3 }}>
@@ -444,7 +481,6 @@ const AllTicket = () => {
                                                 </TableHead>
                                                 <TableBody>
                                                     {tickets.map((ticket) => {
-                                                        const statusColors = getStatusColor(ticket.status);
                                                         return (
                                                             <TableRow key={ticket._id}>
                                                                 <TableCell sx={{ color: 'primary.light', fontWeight: 600, borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
@@ -456,15 +492,11 @@ const AllTicket = () => {
                                                                     </Typography>
                                                                 </TableCell>
                                                                 <TableCell sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                                                                    <Chip
-                                                                        label={ticket.status}
-                                                                        size="small"
-                                                                        sx={{
-                                                                            bgcolor: statusColors.bg,
-                                                                            color: statusColors.color,
-                                                                            fontWeight: 600,
-                                                                            textTransform: 'capitalize'
-                                                                        }}
+                                                                    <InlineTicketStatusCell
+                                                                        ticket={ticket}
+                                                                        onStatusChange={handleInlineStatusChange}
+                                                                        saving={statusUpdatingId === ticket._id}
+                                                                        disabled={!canChangeTicketStatus}
                                                                     />
                                                                 </TableCell>
                                                                 <TableCell sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
@@ -503,6 +535,9 @@ const AllTicket = () => {
                                                                                 background: 'linear-gradient(45deg, #1976d2, #42a5f5)',
                                                                                 color: 'white !important',
                                                                                 textTransform: 'none',
+                                                                                px: '14px !important',
+                                                                                py: '7px !important',
+                                                                                minHeight: '34px !important',
                                                                                 '&:hover': {
                                                                                     background: 'linear-gradient(45deg, #1565c0, #1e88e5)',
                                                                                     color: 'white !important'
@@ -638,7 +673,8 @@ const AllTicket = () => {
                     </DialogActions>
                 </Dialog>
             </div>
-                </div>
+        </div>
+    </AdminShell>
     );
 };
 

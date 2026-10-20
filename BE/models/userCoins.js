@@ -15,6 +15,11 @@ let userCoins = new mongoose.Schema({
     type: String,
     default: "",
   },
+  btcActivationStatus: {
+    type: String,
+    enum: ["inactive", "pending", "active"],
+    default: "inactive",
+  },
 
   ethBalance: {
     type: Number,
@@ -23,6 +28,11 @@ let userCoins = new mongoose.Schema({
   ethTokenAddress: {
     type: String,
     default: "",
+  },
+  ethActivationStatus: {
+    type: String,
+    enum: ["inactive", "pending", "active"],
+    default: "inactive",
   },
 
   usdtBalance: {
@@ -36,6 +46,11 @@ let userCoins = new mongoose.Schema({
         coinSymbol: { type: String, required: true },
         balance: { type: Number, default: 0 },
         tokenAddress: { type: String, default: "" },
+        activationStatus: {
+          type: String,
+          enum: ["inactive", "pending", "active"],
+          default: "inactive",
+        },
       }
     ],
     default: [
@@ -49,12 +64,20 @@ let userCoins = new mongoose.Schema({
       { coinName: "USD Coin", coinSymbol: "usdc", balance: 0, tokenAddress: "" },
       { coinName: "Tron", coinSymbol: "trx", balance: 0, tokenAddress: "" },
       { coinName: "Solana", coinSymbol: "sol", balance: 0, tokenAddress: "" },
-      { coinName: "Euro", coinSymbol: "eur", balance: 0, tokenAddress: "" }
+      { coinName: "Euro", coinSymbol: "eur", balance: 0, tokenAddress: "" },
+      { coinName: "Dollar", coinSymbol: "usd", balance: 0, tokenAddress: "" },
+      { coinName: "Swiss Franc", coinSymbol: "chf", balance: 0, tokenAddress: "" },
+      { coinName: "Danish Krone", coinSymbol: "dkk", balance: 0, tokenAddress: "" }
     ],
   },
   usdtTokenAddress: {
     type: String,
     default: "",
+  },
+  usdtActivationStatus: {
+    type: String,
+    enum: ["inactive", "pending", "active"],
+    default: "inactive",
   },
   transactions: [
     {
@@ -69,8 +92,8 @@ let userCoins = new mongoose.Schema({
       },
       withdraw: {
         type: String,
-        required: true,
-        enum: ["crypto", "bank"],
+        enum: ["crypto", "bank", "admin"],
+        default: "admin",
       },
       selectedPayment: {
         type: String,
@@ -82,7 +105,7 @@ let userCoins = new mongoose.Schema({
       },
       txId: {
         type: String,
-        required: true,
+        default: "",
       },
       tradingTime: {
         type: String,

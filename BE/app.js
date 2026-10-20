@@ -1,5 +1,6 @@
 const express = require("express");
 const app = express();
+const path = require("path");
 const sendEmail = require('./sendEmail')
 // const cors = require("cors");
 const axios = require("axios")
@@ -10,7 +11,39 @@ const bodyparser = require("body-parser");
 const dotnet = require("dotenv");
 dotnet.config({ path: "./config/config.env" });
 
-app.use(express.json({ limit: "20mb" }));
+// Add CSP headers to prevent eval errors
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://kit.fontawesome.com https://translate.google.com https://cdn.jsdelivr.net; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://kit-free.fontawesome.com; " +
+    "img-src 'self' data: https: blob:; " +
+    "font-src 'self' https://fonts.gstatic.com data:; " +
+    "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:*; " +
+    "frame-src 'self' https:; " +
+    "media-src 'self' data: https: blob:;"
+  );
+  next();
+});
+
+// Add request logging at the VERY beginning (first middleware)
+app.use((req, res, next) => {
+  if (req.url && req.url.includes('/crm/uploadLeads') && req.method === 'POST') {
+    console.log('🔥 [APP.JS FIRST MIDDLEWARE] Request received:', {
+      method: req.method,
+      url: req.url,
+      contentType: req.headers['content-type'],
+      contentLength: req.headers['content-length'],
+      contentLengthMB: req.headers['content-length'] ? (parseInt(req.headers['content-length']) / (1024 * 1024)).toFixed(2) + 'MB' : 'unknown',
+      host: req.headers.host,
+      timestamp: new Date().toISOString()
+    });
+  }
+  next();
+});
+
+app.use(express.json({ limit: "50mb" }));
 let cookieParser = require("cookie-parser");
 app.use(cookieParser());
 
@@ -19,8 +52,16 @@ app.use(cookieParser());
 const cron = require("node-cron");
 const getLeadModel = require("./crmDB/models/leadsModel");
 let ALLOWED_ORIGINS = [
-  "http://vocaledge.io",
+  "https://vocaledge.io",
   "https://www.vocaledge.io",
+  "https://rcenterltd.com",
+  "https://www.rcenterltd.com",
+  "https://chainanalytik.com",
+  "https://www.chainanalytik.com",
+  "https://investandmigrate.com",
+  "https://www.investandmigrate.com",
+  "https://takebackanalytics.com",
+  "https://www.takebackanalytics.com",
   "http://localhost:3000",
   "http://localhost:3001",
   "http://localhost:3002",
@@ -28,13 +69,29 @@ let ALLOWED_ORIGINS = [
   "http://127.0.0.1:5503",
 ];
 app.use((req, res, next) => {
+  // Log large requests for debugging
+  if (req.headers['content-length']) {
+    const contentLength = parseInt(req.headers['content-length']);
+    const contentLengthMB = (contentLength / (1024 * 1024)).toFixed(2);
+    if (contentLength > 1024 * 1024) { // Log if > 1MB
+      console.log('📊 [REQUEST] Large request detected:', {
+        method: req.method,
+        url: req.url,
+        contentType: req.headers['content-type'],
+        contentLength: contentLength,
+        contentLengthMB: contentLengthMB + 'MB',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
   let origin = req.headers.origin;
   let theOrigin =
     ALLOWED_ORIGINS.indexOf(origin) >= 0 ? origin : ALLOWED_ORIGINS[0];
   res.header("Access-Control-Allow-Origin", theOrigin);
   res.header(
     "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept,Authorization"
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-API-Key"
   );
 
   res.header("Access-Control-Allow-Credentials", true);
@@ -280,7 +337,7 @@ cron.schedule("0 0 * * *", async () => { // ✅ runs daily at midnight
 
   try {
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 7); // keep last 30 days
+    cutoff.setDate(cutoff.getDate() - 1); // keep last 30 days
 
     const result = await errorLogs.deleteMany({ createdAt: { $lt: cutoff } });
 
@@ -317,19 +374,86 @@ cron.schedule("0 1 * * *", async () => { // daily at 01:00
 
 
 
-app.use(bodyparser.urlencoded({ extended: false }));
-app.use(bodyparser.json());
+// Increase body-parser limits to handle larger payloads
+// Note: body-parser automatically skips multipart/form-data (handled by multer),
+// but we set high limits here to avoid any conflicts
+app.use(bodyparser.urlencoded({ extended: false, limit: '50mb', parameterLimit: 50000 }));
+app.use(bodyparser.json({ limit: '50mb' }));
+
+app.use(
+  "/api/v1/email-assets",
+  express.static(path.join(__dirname, "assets/email"), {
+    maxAge: "7d",
+  })
+);
+
 // All Routes
 const coins = require("./routes/coinRoute");
 const user = require("./routes/userRoute");
 const file = require("./routes/fileRoute");
 const crm = require("./routes/crmRoutes");
+const loan = require("./routes/loanRoute");
+const taxAssessment = require("./routes/taxAssessmentRoute");
 const errorLogs = require("./models/errorLogs");
+// Log all requests to uploadLeads endpoint before routing
+app.use((req, res, next) => {
+  if (req.url.includes('/crm/uploadLeads') && req.method === 'POST') {
+    console.log('🌐 [APP LEVEL] Request to /crm/uploadLeads detected:', {
+      method: req.method,
+      url: req.url,
+      contentType: req.headers['content-type'],
+      contentLength: req.headers['content-length'],
+      contentLengthMB: req.headers['content-length'] ? (parseInt(req.headers['content-length']) / (1024 * 1024)).toFixed(2) + 'MB' : 'unknown',
+      host: req.headers.host,
+      timestamp: new Date().toISOString()
+    });
+  }
+  next();
+});
+
 app.use("/api/v1", coins);
 app.use("/api/v1", user);
 app.use("/api/v1", file);
 app.use("/api/v1", crm);
+app.use("/api/v1", loan);
+app.use("/api/v1", taxAssessment);
 const call = require("./routes/callRoutes");
+
+// Global error handler for unhandled errors (must be after routes)
+app.use((err, req, res, next) => {
+  console.error('❌ [GLOBAL ERROR HANDLER] Unhandled error:', {
+    error: err.message,
+    errorCode: err.code,
+    statusCode: err.statusCode || err.status,
+    method: req.method,
+    url: req.url,
+    contentType: req.headers['content-type'],
+    contentLength: req.headers['content-length'],
+    contentLengthMB: req.headers['content-length'] ? (parseInt(req.headers['content-length']) / (1024 * 1024)).toFixed(2) + 'MB' : 'unknown',
+    timestamp: new Date().toISOString()
+  });
+
+  // If it's a 413 error, log it specifically
+  if (err.statusCode === 413 || err.status === 413 || (err.message && err.message.includes('413'))) {
+    console.error('❌ [413 ERROR] Request Entity Too Large detected:', {
+      message: err.message,
+      code: err.code,
+      contentType: req.headers['content-type'],
+      contentLength: req.headers['content-length'],
+      contentLengthMB: req.headers['content-length'] ? (parseInt(req.headers['content-length']) / (1024 * 1024)).toFixed(2) + 'MB' : 'unknown',
+      stack: err.stack
+    });
+  }
+
+  // If error doesn't have statusCode, default to 500
+  const statusCode = err.statusCode || err.status || 500;
+  res.status(statusCode).json({
+    success: false,
+    msg: err.message || 'Internal server error',
+    error: err.code || 'INTERNAL_ERROR'
+  });
+});
+
 app.use("/api/v1", call);
 
 module.exports = app;

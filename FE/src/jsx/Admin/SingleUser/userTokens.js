@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
+import AdminSkeleton from "../theme/AdminSkeleton";
+import skel from "../theme/AdminSkeleton.module.css";
 import SideBar from "../../layouts/AdminSidebar/Sidebar";
 import UserSideBar from "./UserSideBar";
 import Log from "../../../assets/images/img/log.jpg";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
 import { useAuthUser } from "react-auth-kit";
-import { Table, Form, Spinner } from 'react-bootstrap';
+import { Table, Form } from 'react-bootstrap';
 import {
     createUserStocksApi,
     getCoinsApi,
@@ -20,7 +22,9 @@ import {
 } from "../../../Api/Service";
 import axios from "axios";
 import './userStocks.css'
+import su from "./SingleUserLayout.module.css";
 import AdminHeader from "../adminHeader";
+import MemberShell from "./hub/MemberShell";
 
 const EditTokenModal = ({ show, onClose, token, onDelete, onUpdate }) => {
     const [tokenData, settokenData] = useState({
@@ -417,7 +421,7 @@ const AddTokenModal = ({ show, onClose, onAdd }) => {
         </div>
     );
 };
-const UserTokens = () => {
+const UserTokens = ({ embedded = false }) => {
 
     let { id } = useParams();
 
@@ -559,13 +563,13 @@ const UserTokens = () => {
     return (
         <>
 
-            <div className="admin">
+            <MemberShell embedded={embedded}><div className={embedded ? undefined : "admin"}>
                 <div>
-                    <div className="bg-muted-100 dark:bg-muted-900 pb-20">
-                        <SideBar state={Active} toggle={toggleBar} />
-                        <div className="bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
-                            <div className="mx-auto w-full max-w-7xl">
-                                <AdminHeader toggle={toggleBar} pageName="User Management" />
+                    <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 pb-20"}>
+                        {!embedded && <SideBar state={Active} toggle={toggleBar} />}
+                        <div className={embedded ? undefined : "bg-muted-100 dark:bg-muted-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]"}>
+                            <div className={embedded ? undefined : "mx-auto w-full max-w-7xl"}>
+                                {!embedded && <AdminHeader toggle={toggleBar} pageName="User Management" />}
                                 <div
                                     className="nuxt-loading-indicator"
                                     style={{
@@ -586,32 +590,25 @@ const UserTokens = () => {
                                     }}
                                 />
                                 <seokit />
-                                <div className="min-h-screen overflow-hidden">
-                                    <div className="grid gap-8 sm:grid-cols-12">
-                                        <UserSideBar userid={id} />
-                                        <div className="col-span-12 sm:col-span-8 ">
-                                            <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white duration-300 rounded-md">
-                                                <div className="flex items-center justify-between p-4">
+                                <div className={embedded ? undefined : "min-h-screen overflow-hidden"}>
+                                    <div className={su.frame}>
+                                        {!embedded && <UserSideBar userid={id} />}
+                                        <div className={su.main}>
+                                            <div className={`${su.panel} border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white duration-300 rounded-md`}>
+                                                <div className={su.panelHead}>
                                                     <div>
-                                                        <p
-                                                            className="font-heading text-sm font-medium leading-normal leading-normal uppercase tracking-wider"
-                                                            tag="h2"
-                                                        >
-                                                            {" "}
-                                                            Add New Token
-                                                        </p>
+                                                        <p className={su.kicker}>Tokens</p>
+                                                        <h2 className={su.title}>Add New Token</h2>
                                                     </div>
                                                 </div>
 
-                                                <div className="pb-4">
+                                                <div className={su.box}>
                                                     <button
                                                         type="button"
                                                         onClick={() => setShowAddTokenModal(true)}
-                                                        className="relative font-sans font-normal text-sm inline-flex items-center justify-center leading-5 no-underline h-8 px-3 py-2 space-x-1 border nui-focus transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed hover:enabled:shadow-none border-info-500 text-info-50 bg-info-500 dark:bg-info-500 dark:border-info-500 text-white hover:enabled:bg-info-400 dark:hover:enabled:bg-info-400 hover:enabled:shadow-lg hover:enabled:shadow-info-500/50 dark:hover:enabled:shadow-info-800/20 focus-visible:outline-info-400/70 focus-within:outline-info-400/70 focus-visible:bg-info-500 active:enabled:bg-info-500 dark:focus-visible:outline-info-400/70 dark:focus-within:outline-info-400/70 dark:focus-visible:bg-info-500 dark:active:enabled:bg-info-500 rounded-md mr-2"
-
-                                                        style={{ marginLeft: '10px' }}
+                                                        className={su.saveBtn}
                                                     >
-                                                        Add  Token
+                                                        Add Token
                                                     </button>
                                                     {/* <button
                                                         type="button"
@@ -667,11 +664,9 @@ const UserTokens = () => {
                                                                     />
                                                                 </td>
                                                                 <td>
-                                                                    {apiLoading ? <div className="loader-container">
-                                                                        <Spinner animation="border" role="status">
-                                                                            <span className="visually-hidden">Loading...</span>
-                                                                        </Spinner>
-                                                                    </div> :
+                                                                    {apiLoading ? (
+                                                                        <span className={`${skel.bone} ${skel.formField}`} aria-hidden="true" />
+                                                                    ) : (
                                                                         <Form.Control
                                                                             type="number"
                                                                             placeholder="Enter amount"
@@ -680,7 +675,7 @@ const UserTokens = () => {
                                                                             readOnly={true}
                                                                             onChange={handleChange}
                                                                         />
-                                                                    }
+                                                                    )}
 
                                                                 </td>
                                                             </tr>
@@ -706,20 +701,15 @@ const UserTokens = () => {
 
                                             </div>
                                             <br />
-                                            <div className="border-muted-200 dark:border-muted-700 dark:bg-muted-800 relative w-full border bg-white duration-300 rounded-md">
-                                                <div className="flex items-center justify-between p-4">
+                                            <div className={su.panel}>
+                                                <div className={su.panelHead}>
                                                     <div>
-                                                        <p
-                                                            className="font-heading text-sm font-medium leading-normal leading-normal uppercase tracking-wider"
-                                                            tag="h2"
-                                                        >
-                                                            {" "}
-                                                            All Tokens
-                                                        </p>
+                                                        <p className={su.kicker}>Holdings</p>
+                                                        <h2 className={su.title}>All Tokens</h2>
                                                     </div>
                                                 </div>
                                                 {isLoading && (
-                                                    <div className="  p-5">Loading Tokens...</div>
+                                                    <AdminSkeleton variant="list" rows={5} />
                                                 )}
                                                 {!isLoading && (
                                                     <div className="pt-6 asm">
@@ -774,9 +764,11 @@ const UserTokens = () => {
                                                                     </tbody>
                                                                 ))
                                                             ) : (
+                                                                <tbody>
                                                                 <tr>
-                                                                    <td colSpan="5" className="text-center">No tokens available</td>
+                                                                    <td colSpan="7" className="text-center">No tokens available</td>
                                                                 </tr>
+                                                                </tbody>
 
                                                             )}
                                                         </Table>
@@ -810,6 +802,7 @@ const UserTokens = () => {
                 />
                 {/* Modal 1 */}
             </div>
+    </MemberShell>
         </>
     );
 };

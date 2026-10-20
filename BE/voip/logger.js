@@ -75,6 +75,19 @@ class Logger {
 }
 
 // Export singleton instance
-module.exports = new Logger();
+const loggerInstance = new Logger();
+
+// Ensure all methods exist (defensive programming)
+if (typeof loggerInstance.log !== 'function') {
+    loggerInstance.log = console.log.bind(console);
+}
+if (typeof loggerInstance.error !== 'function') {
+    loggerInstance.error = console.error.bind(console);
+}
+if (typeof loggerInstance.warn !== 'function') {
+    loggerInstance.warn = console.warn.bind(console);
+}
+
+module.exports = loggerInstance;
 
 

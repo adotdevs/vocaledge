@@ -2,24 +2,50 @@ const getActivityModel = require('../crmDB/models/activityModel');
 const getLeadModel = require('../crmDB/models/leadsModel');
 const User = require('../models/userModel'); // Main database User model
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
+const { createNotificationsForActivity } = require('../utils/crmNotificationService');
 
 // Helper function to log activity
 async function logActivity({ leadId, type, createdBy, comment = '', changes = null, metadata = {}, isSystemGenerated = false }) {
     try {
         const Activity = await getActivityModel();
-        const activity = await Activity.create({
-            leadId,
-            type,
-            createdBy: {
+        
+        // Handle system-generated activities (no valid userId)
+        let createdByData;
+        if (isSystemGenerated && (!createdBy._id || createdBy._id === 'system' || typeof createdBy._id === 'string')) {
+            // For system activities, don't set userId (or set to null if schema allows)
+            createdByData = {
+                userName: `${createdBy.firstName || 'System'} ${createdBy.lastName || ''}`.trim() || 'System',
+                userRole: createdBy.role || 'system'
+            };
+        } else {
+            // For regular activities, use the provided user data
+            createdByData = {
                 userId: createdBy._id,
                 userName: `${createdBy.firstName} ${createdBy.lastName}`,
                 userRole: createdBy.role
-            },
+            };
+        }
+        
+        const activity = await Activity.create({
+            leadId,
+            type,
+            createdBy: createdByData,
             comment,
             changes,
             metadata,
             isSystemGenerated
         });
+
+        if (activity && !isSystemGenerated) {
+            const activityObj = activity.toObject ? activity.toObject() : activity;
+            if (metadata && typeof metadata === 'object' && !(metadata instanceof Map)) {
+                activityObj.metadata = metadata;
+            }
+            createNotificationsForActivity(activityObj).catch((err) => {
+                console.error('CRM notification fan-out failed:', err);
+            });
+        }
+
         return activity;
     } catch (error) {
         console.error('Error logging activity:', error);
@@ -650,6 +676,10 @@ exports.addQuoteReply = catchAsyncErrors(async (req, res) => {
         mentions
     });
 
+    createNotificationsForActivity(reply.toObject()).catch((err) => {
+        console.error('CRM notification fan-out failed:', err);
+    });
+
     res.json({
         success: true,
         message: 'Quote reply added successfully',
@@ -735,6 +765,10 @@ exports.addNestedReply = catchAsyncErrors(async (req, res) => {
             await topLevelParent.save();
         }
     }
+
+    createNotificationsForActivity(reply.toObject()).catch((err) => {
+        console.error('CRM notification fan-out failed:', err);
+    });
 
     res.json({
         success: true,

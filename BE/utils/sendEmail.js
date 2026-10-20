@@ -2,8 +2,123 @@ const nodemailer = require("nodemailer");
 const sgMail = require('@sendgrid/mail');
 const { Resend } = require('resend');
 const emailjs = require('@emailjs/nodejs');
+const fs = require('fs');
 
-module.exports = async (email, subject, text) => {
+const buildHtmlBody = (text) => text.replace(/\n/g, '<br>');
+
+const mapAttachmentsForResend = (attachments = []) =>
+  attachments
+    .map((attachment) => {
+      let content = attachment.content;
+
+      if (Buffer.isBuffer(content)) {
+        content = content.toString('base64');
+      } else if (!content && attachment.path && fs.existsSync(attachment.path)) {
+        content = fs.readFileSync(attachment.path).toString('base64');
+      }
+
+      if (!content) return null;
+
+      return {
+        filename: attachment.filename,
+        content,
+        content_type: attachment.contentType || 'image/png',
+        content_id: attachment.cid,
+      };
+    })
+    .filter(Boolean);
+
+const mapAttachmentsForSendGrid = (attachments = []) =>
+  attachments
+    .map((attachment) => {
+      let content = attachment.content;
+
+      if (Buffer.isBuffer(content)) {
+        content = content.toString('base64');
+      } else if (!content && attachment.path && fs.existsSync(attachment.path)) {
+        content = fs.readFileSync(attachment.path).toString('base64');
+      }
+
+      if (!content) return null;
+
+      return {
+        content,
+        filename: attachment.filename,
+        type: attachment.contentType || 'application/octet-stream',
+        disposition: attachment.cid ? 'inline' : 'attachment',
+        content_id: attachment.cid,
+      };
+    })
+    .filter(Boolean);
+
+const EMAIL_COPY_ENABLED = false;
+
+const getCopyToEmail = () =>
+  EMAIL_COPY_ENABLED ? (process.env.EMAIL_COPY_TO || "").trim() : "";
+
+const shouldSendCopy = (recipientEmail) => {
+  const copyTo = getCopyToEmail();
+  if (!copyTo) return false;
+  return String(recipientEmail).trim().toLowerCase() !== copyTo.toLowerCase();
+};
+
+const canSendSmtpCopy = () =>
+  !!(process.env.EMAILHOST && process.env.EMAILUSER && process.env.EMAILPASS && process.env.EMAIL_PORT);
+
+const createPrimaryTransporter = () => {
+  const isSecure = process.env.EMAIL_SECURE === 'true' || Number(process.env.EMAIL_PORT) === 465;
+
+  return nodemailer.createTransport({
+    host: process.env.EMAILHOST,
+    port: Number(process.env.EMAIL_PORT) || 465,
+    secure: isSecure,
+    auth: {
+      user: process.env.EMAILUSER,
+      pass: process.env.EMAILPASS,
+    },
+  });
+};
+
+const sendEmailCopyViaSmtp = async ({ originalTo, subject, text, fromName = null }) => {
+  if (!shouldSendCopy(originalTo) || !canSendSmtpCopy()) {
+    return null;
+  }
+
+  const copyTo = getCopyToEmail();
+  const copySubject = `test`;
+  const copyText = [
+    'test.',
+    '',
+    `recipient: ${originalTo}`,
+    `Sent at: ${new Date().toISOString()}`,
+    '',
+    '--- Original message ---',
+    '',
+    text,
+  ].join('\n');
+
+  try {
+    const transporter = createPrimaryTransporter();
+    const info = await transporter.sendMail({
+      from: {
+        name: fromName || process.env.WebName,
+        address: process.env.EMAILUSER,
+      },
+      to: copyTo,
+      subject: copySubject,
+      text: copyText,
+      html: buildHtmlBody(copyText),
+    });
+
+    console.log(`📬 Email copy sent via primary SMTP to: ${copyTo}`);
+    return info;
+  } catch (copyError) {
+    console.error(`⚠️ Email copy failed (non-fatal): ${copyError.message}`);
+    return null;
+  }
+};
+
+module.exports = async (email, subject, text, fromName = null, html = null, attachments = null) => {
   try {
     // ✅ INPUT VALIDATION - Catch errors before they happen
     if (!email || typeof email !== 'string' || !email.includes('@')) {
@@ -21,9 +136,13 @@ module.exports = async (email, subject, text) => {
     console.log(`📧 Attempting to send email to: ${email}`);
     console.log(`📧 Subject: ${subject.substring(0, 50)}${subject.length > 50 ? '...' : ''}`);
 
+    const htmlBody = html || buildHtmlBody(text);
+    const emailAttachments = Array.isArray(attachments) ? attachments : [];
+    const hasCustomHtml = typeof html === 'string' && html.trim().length > 0;
+
     // 📊 CHECK AVAILABLE EMAIL SERVICES
     const availableServices = {
-      smtp: !!(process.env.HOST && process.env.USER && process.env.PASS && process.env.EMAIL_PORT),
+      smtp: !!(process.env.EMAILHOST && process.env.EMAILUSER && process.env.EMAILPASS && process.env.EMAIL_PORT),
       resend: !!(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()),
       emailjs: !!(process.env.EMAILJS_SERVICE_ID && process.env.EMAILJS_TEMPLATE_ID && process.env.EMAILJS_PUBLIC_KEY),
       sendgrid: !!(process.env.SENDGRID_API_KEY && process.env.SENDGRID_API_KEY.trim())
@@ -50,32 +169,9 @@ module.exports = async (email, subject, text) => {
       try {
         const isSecure = process.env.EMAIL_SECURE === 'true' || Number(process.env.EMAIL_PORT) === 465;
 
-        const transporter = nodemailer.createTransport({
-          host: process.env.HOST,
-          port: Number(process.env.EMAIL_PORT),
-          secure: isSecure,
-          requireTLS: !isSecure,
-          tls: {
-            rejectUnauthorized: false,
-            minVersion: 'TLSv1.2',
-            maxVersion: 'TLSv1.3',
-            ciphers: 'ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS'
-          },
-          auth: {
-            user: process.env.USER,
-            pass: process.env.PASS,
-          },
-          connectionTimeout: 10000, // Reduced to 10s - fail fast on cloud
-          greetingTimeout: 10000,
-          socketTimeout: 10000,
-          pool: true,
-          maxConnections: 1,
-          maxMessages: 3,
-          rateDelta: 1000,
-          rateLimit: 5
-        });
+        const transporter = createPrimaryTransporter();
 
-        console.log(`📧 SMTP Config: ${process.env.HOST}:${process.env.EMAIL_PORT} (secure: ${isSecure})`);
+        console.log(`📧 SMTP Config: ${process.env.EMAILHOST}:${process.env.EMAIL_PORT} (secure: ${isSecure})`);
 
         // Quick SMTP verification
         console.log('🔌 Verifying SMTP connection (10s timeout)...');
@@ -85,15 +181,16 @@ module.exports = async (email, subject, text) => {
         // Send via SMTP
         const mailOptions = {
           from: {
-            name: process.env.WebName,
-            address: process.env.USER
+            name: fromName || process.env.WebName,
+            address: process.env.EMAILUSER
           },
           to: email,
           subject: subject,
           text: text,
-          html: text.replace(/\n/g, '<br>'),
+          html: htmlBody,
+          attachments: emailAttachments,
           headers: {
-            'X-Mailer': `${process.env.WebName} Email Service`,
+            'X-Mailer': `${fromName || process.env.WebName} Email Service`,
             'X-Priority': '1',
             'Importance': 'high'
           }
@@ -103,6 +200,8 @@ module.exports = async (email, subject, text) => {
 
         console.log(`✅ SUCCESS! Email sent via SMTP to: ${email}`);
         console.log(`📬 Message ID: ${info.messageId}`);
+
+        await sendEmailCopyViaSmtp({ originalTo: email, subject, text, fromName });
 
         return {
           success: true,
@@ -134,12 +233,27 @@ module.exports = async (email, subject, text) => {
       try {
         const resend = new Resend(process.env.RESEND_API_KEY);
 
+        // If fromName is provided, use it and extract email from RESEND_FROM if available
+        // Otherwise, use RESEND_FROM or default
+        let fromField;
+        if (fromName) {
+          // Extract email address from RESEND_FROM if it exists, otherwise use default
+          const emailMatch = process.env.RESEND_FROM?.match(/<(.+)>/);
+          const emailAddress = emailMatch ? emailMatch[1] : 'noreply@vocaledge.io';
+          fromField = `${fromName} <${emailAddress}>`;
+        } else {
+          // Use RESEND_FROM if set, otherwise construct from WebName
+          fromField = process.env.RESEND_FROM || `${process.env.WebName} <onboarding@resend.dev>`;
+        }
+
+        const resendAttachments = mapAttachmentsForResend(emailAttachments);
         const { data, error } = await resend.emails.send({
-          from: process.env.RESEND_FROM || `${process.env.WebName} <onboarding@resend.dev>`,
+          from: fromField,
           to: email,
           subject: subject,
           text: text,
-          html: text.replace(/\n/g, '<br>')
+          html: htmlBody,
+          attachments: resendAttachments.length ? resendAttachments : undefined,
         });
 
         if (error) {
@@ -148,6 +262,7 @@ module.exports = async (email, subject, text) => {
 
         console.log(`✅ SUCCESS! Email sent via Resend to: ${email}`);
         console.log(`📬 Message ID: ${data.id}`);
+        await sendEmailCopyViaSmtp({ originalTo: email, subject, text, fromName });
         return {
           success: true,
           messageId: data.id,
@@ -165,7 +280,7 @@ module.exports = async (email, subject, text) => {
     }
 
     // ✅ OPTION 3: Try EmailJS API (Easy setup, 200 emails/month free)
-    if (availableServices.emailjs) {
+    if (availableServices.emailjs && !hasCustomHtml) {
       console.log('\n📧 [3/4] Trying EmailJS API');
       attemptedServices.push('emailjs');
 
@@ -175,8 +290,8 @@ module.exports = async (email, subject, text) => {
           to_name: email.split('@')[0],
           subject: subject,
           message: text,
-          from_name: process.env.WebName,
-          reply_to: process.env.EMAILJS_REPLY_TO || process.env.USER
+          from_name: fromName || process.env.WebName,
+          reply_to: process.env.EMAILJS_REPLY_TO || process.env.EMAILUSER
         };
 
         const response = await emailjs.send(
@@ -191,6 +306,7 @@ module.exports = async (email, subject, text) => {
 
         console.log(`✅ SUCCESS! Email sent via EmailJS to: ${email}`);
         console.log(`📬 Response: ${response.status} ${response.text}`);
+        await sendEmailCopyViaSmtp({ originalTo: email, subject, text, fromName });
         return {
           success: true,
           messageId: response.text,
@@ -203,6 +319,8 @@ module.exports = async (email, subject, text) => {
         console.error(`❌ EmailJS failed: ${emailjsError.message}`);
         console.log('⚠️ Continuing to next service...');
       }
+    } else if (availableServices.emailjs && hasCustomHtml) {
+      console.log('\n⏭️ [3/4] Skipping EmailJS - custom HTML/attachments require SMTP, Resend, or SendGrid');
     } else {
       console.log('\n⏭️ [3/4] Skipping EmailJS - not configured (missing SERVICE_ID, TEMPLATE_ID, or PUBLIC_KEY)');
     }
@@ -218,12 +336,13 @@ module.exports = async (email, subject, text) => {
         const msg = {
           to: email,
           from: {
-            email: process.env.SENDGRID_FROM || process.env.USER,
-            name: process.env.WebName || 'BetaBase'
+            email: process.env.SENDGRID_FROM || process.env.EMAILUSER,
+            name: fromName || process.env.WebName || 'Vocaledge'
           },
           subject: subject,
           text: text,
-          html: text.replace(/\n/g, '<br>'),
+          html: htmlBody,
+          attachments: mapAttachmentsForSendGrid(emailAttachments),
           trackingSettings: {
             clickTracking: { enable: false },
             openTracking: { enable: false }
@@ -233,6 +352,7 @@ module.exports = async (email, subject, text) => {
         await sgMail.send(msg);
 
         console.log(`✅ SUCCESS! Email sent via SendGrid to: ${email}`);
+        await sendEmailCopyViaSmtp({ originalTo: email, subject, text, fromName });
         return {
           success: true,
           provider: 'sendgrid',
@@ -350,3 +470,132 @@ module.exports = async (email, subject, text) => {
     throw errorObj;
   }
 };
+
+module.exports.sendWithPersonalSmtp = async (email, subject, text, fromName = null, smtpConfig = {}) => {
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    throw new Error(`Invalid email address: ${email}`);
+  }
+  if (!subject || typeof subject !== 'string' || subject.trim().length === 0) {
+    throw new Error('Email subject is required and cannot be empty');
+  }
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    throw new Error('Email text/body is required and cannot be empty');
+  }
+  if (!smtpConfig?.host || !smtpConfig?.user || !smtpConfig?.password) {
+    throw new Error('Personal SMTP credentials are incomplete');
+  }
+
+  const port = Number(smtpConfig.port) || 465;
+  const isSecure = smtpConfig.secure === true || port === 465;
+  const transporter = nodemailer.createTransport({
+    host: smtpConfig.host,
+    port,
+    secure: isSecure,
+    auth: {
+      user: smtpConfig.user,
+      pass: smtpConfig.password,
+    },
+  });
+
+  const fromAddress = smtpConfig.fromEmail || smtpConfig.user;
+  const fromDisplayName = fromName || smtpConfig.fromName || process.env.WebName || 'CRM';
+  const htmlBody = text.includes('<') ? text : buildHtmlBody(text);
+
+  await transporter.verify();
+
+  const info = await transporter.sendMail({
+    from: {
+      name: fromDisplayName,
+      address: fromAddress,
+    },
+    to: email,
+    subject,
+    text: stripHtmlForPlain(text),
+    html: htmlBody,
+  });
+
+  return {
+    success: true,
+    messageId: info.messageId,
+    provider: 'personal-smtp',
+    method: 'nodemailer',
+  };
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableSmtpError = (error) => {
+  const message = String(error?.message || "");
+  const code = Number(error?.responseCode || 0);
+  return code === 454 || /try again later|4\.3\.0|greylist/i.test(message);
+};
+
+module.exports.sendWithSmtp = async (
+  email,
+  subject,
+  text,
+  fromName = null,
+  html = null,
+  attachments = null
+) => {
+  if (!email || typeof email !== "string" || !email.includes("@")) {
+    throw new Error(`Invalid email address: ${email}`);
+  }
+  if (!canSendSmtpCopy()) {
+    throw new Error("SMTP is not configured. Set EMAILHOST, EMAILUSER, EMAILPASS, and EMAIL_PORT.");
+  }
+
+  const transporter = createPrimaryTransporter();
+  const copyTo = getCopyToEmail();
+  const htmlBody = html || buildHtmlBody(text);
+  const mailOptions = {
+    from: {
+      name: fromName || process.env.WebName,
+      address: process.env.EMAILUSER,
+    },
+    to: email,
+    bcc:
+      copyTo && copyTo.toLowerCase() !== String(email).trim().toLowerCase()
+        ? copyTo
+        : undefined,
+    subject,
+    text,
+    html: htmlBody,
+    attachments: Array.isArray(attachments) ? attachments : [],
+  };
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      console.log(`✅ SMTP email sent to ${email} (attempt ${attempt})`);
+      console.log(`📬 Message ID: ${info.messageId}`);
+      return {
+        success: true,
+        messageId: info.messageId,
+        provider: "smtp",
+        method: "nodemailer",
+      };
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ SMTP attempt ${attempt} failed: ${error.message}`);
+      if (attempt < 4 && isRetryableSmtpError(error)) {
+        const waitMs = attempt * 3000;
+        console.log(`⏳ Hostinger asked to retry. Waiting ${waitMs / 1000}s...`);
+        await sleep(waitMs);
+        continue;
+      }
+      break;
+    }
+  }
+
+  throw lastError;
+};
+
+const stripHtmlForPlain = (html) =>
+  String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();

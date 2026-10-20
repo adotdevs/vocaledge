@@ -131,7 +131,7 @@ class BulkCallManager {
             contacts: contacts,
             options: {
                 delay: options.delay || 5000, // 5 seconds between calls
-                voice: options.voice || 'shimmer',
+                voice: options.voice || 'en-US-AvaMultilingualNeural',
                 greeting: options.greeting || 'Hello {name}, this is your AI assistant from TechCorp. I hope I\'m not catching you at a bad time.', // Default template to save costs
                 maxRetries: options.maxRetries || 0,
                 ...options
@@ -244,7 +244,7 @@ class BulkCallManager {
     }
 
     // Make personalized call with name - AI FULLY AUTOMATED
-    async makePersonalizedCall(phoneNumber, name, greeting, voice = 'shimmer') {
+    async makePersonalizedCall(phoneNumber, name, greeting, voice = 'en-US-AvaMultilingualNeural') {
         try {
             console.log(`\n🤖 AI-Powered Call to ${name} (${phoneNumber})`);
             
@@ -254,21 +254,13 @@ class BulkCallManager {
                 console.log(`\n🤖 AI AUTO-GENERATION MODE ACTIVATED`);
                 console.log(`🤖 Generating personalized greeting for: ${name}...`);
                 
-                // Ask OpenAI Assistant to generate personalized greeting
-                const greetingPrompt = `You are making a professional sales call. Generate a personalized opening greeting for a voice call to ${name}.
-
-The greeting should:
-- Start with name verification: "Hello, am I speaking with ${name}?"
-- Introduce yourself as an AI assistant from TechCorp
-- Be professional but friendly
-- Be 2-3 sentences maximum
-- Be natural for voice conversation
-
-Generate ONLY the greeting text. No explanation or extra text.`;
+                // Use voiceInteraction's generateInitialGreeting which uses OpenAI Assistant API
+                const sessionId = `bulk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                const leadInfo = { firstName: name };
                 
-                console.log(`📤 Sending to OpenAI Assistant...`);
-                aiGreeting = await this.chatbotService.getChatbotResponse(greetingPrompt, `greeting_${Date.now()}`);
-                console.log(`\n✅ AI-GENERATED GREETING:`);
+                console.log(`📤 Sending to OpenAI Assistant API...`);
+                aiGreeting = await this.voiceAgent.voiceInteraction.generateInitialGreeting(sessionId, leadInfo);
+                console.log(`\n✅ AI-GENERATED GREETING FROM ASSISTANT API:`);
                 console.log(`📝 "${aiGreeting}"\n`);
             } else if (typeof greeting === 'string') {
                 console.log(`📝 Using custom greeting template`);

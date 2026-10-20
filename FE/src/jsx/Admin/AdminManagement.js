@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import AdminShell from "./theme/AdminShell";
+import AdminSkeleton from "./theme/AdminSkeleton";
 import SideBar from "../layouts/AdminSidebar/Sidebar";
 import Log from "../../assets/images/img/log.jpg";
 import {
@@ -51,6 +53,7 @@ import {
 import "react-responsive-modal/styles.css";
 import { Modal } from "react-responsive-modal";
 import AdminHeader from "./adminHeader";
+import AdminSmtpConfigCardSection from "./components/AdminSmtpConfigCardSection";
 
 const AdminManagement = () => {
   const [Users, setUsers] = useState([]);
@@ -192,6 +195,8 @@ const AdminManagement = () => {
 
   // Permission Management
   const [permLoad, setPermLoad] = useState(null);
+  const [expandedAccordions, setExpandedAccordions] = useState({}); // Track expanded state per user+category
+  
   const handlePermissionChange = async (userId, key, value) => {
     setPermLoad({ userId, key });
     try {
@@ -203,7 +208,19 @@ const AdminManagement = () => {
 
       if (response.success) {
         toast.success("Permission updated successfully!");
-        getAllUsers(); // Refresh the users list
+        // ✅ Update local state instead of refetching to keep accordion open
+        setUsers(prevUsers => prevUsers.map(user => {
+          if (user._id === userId) {
+            return {
+              ...user,
+              adminPermissions: {
+                ...user.adminPermissions,
+                [key]: value
+              }
+            };
+          }
+          return user;
+        }));
       } else {
         toast.error(response.msg);
       }
@@ -212,6 +229,21 @@ const AdminManagement = () => {
     } finally {
       setPermLoad(null);
     }
+  };
+  
+  const handleAccordionChange = (userId, categoryIndex) => (event, isExpanded) => {
+    setExpandedAccordions(prev => ({
+      ...prev,
+      [`${userId}-${categoryIndex}`]: isExpanded
+    }));
+  };
+
+  const handleSmtpUpdated = (userId, smtpConfig) => {
+    const applyUpdate = (list) =>
+      list.map((user) => (user._id === userId ? { ...user, smtpConfig } : user));
+
+    setUsers(applyUpdate);
+    setunVerified(applyUpdate);
   };
 
   // Permission definitions with categories
@@ -225,7 +257,7 @@ const AdminManagement = () => {
       ]
     },
     {
-      name: 'Sub-Admin Management',
+      name: 'Sub-Admin Management', 
       icon: <PeopleIcon />,
       color: '#f59e0b',
       permissions: [
@@ -240,7 +272,11 @@ const AdminManagement = () => {
       color: '#10b981',
       permissions: [
         { key: 'accessCrm', label: 'CRM Access', desc: "Allow administrator to access CRM dashboard and features." },
-        { key: 'canManageCrmLeads', label: 'Manage Leads', desc: "Allow administrator to upload leads CSV and assign leads to Subadmins. Also view their own and subadmins' leads." }
+        { key: 'canManageCrmLeads', label: 'Manage Leads', desc: "Allow administrator to assign leads to Subadmins and manage their own and subadmins' leads." },
+        { key: 'canUploadLeads', label: 'Upload Leads (CSV)', desc: "Allow administrator to upload leads using CSV import." },
+        { key: 'canMakeCalls', label: 'Make Calls', desc: "Allow administrator to initiate, cancel, retry, and bulk call leads." },
+        { key: 'canAccessCallDashboard', label: 'Call Dashboard Access', desc: "Allow administrator to view the Call Dashboard and call statistics." },
+        { key: 'canAccessAiInstructions', label: 'AI Instructions Access', desc: "Allow administrator to view and edit the AI Instructions page." }
       ]
     },
     {
@@ -250,6 +286,15 @@ const AdminManagement = () => {
       permissions: [
         { key: 'isTokenManagement', label: 'User Tokens Access', desc: "Allow administrator to see or edit user tokens of all users 'My Token' page." },
         { key: 'canManageReferrals', label: 'Referral Management', desc: "Allow administrator to access and manage the referral program, view referral statistics, activate users, and set commissions." }
+      ]
+    },
+    {
+      name: 'Wallet Access',
+      icon: <PeopleIcon />,
+      color: '#f59e0b',
+      permissions: [
+        { key: 'accessWallet', label: 'Wallet Access', desc: "Allow access to wallet platform and all wallet features." },
+        { key: 'editWalletAddress', label: 'Wallet Addresses', desc: "Allow administrator to view and edit user wallet deposit addresses." }
       ]
     }
   ];
@@ -396,6 +441,8 @@ const AdminManagement = () => {
             {permissionCategories.map((category, index) => (
               <Accordion
                 key={index}
+                expanded={expandedAccordions[`${user._id}-${index}`] || false}
+                onChange={handleAccordionChange(user._id, index)}
                 sx={{
                   background: 'rgba(255, 255, 255, 0.03)',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -415,7 +462,7 @@ const AdminManagement = () => {
                     }
                   }}
                 >
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
                     <Box sx={{ 
                       display: 'flex', 
                       alignItems: 'center', 
@@ -478,13 +525,15 @@ const AdminManagement = () => {
               </Accordion>
             ))}
           </Box>
+
+          <AdminSmtpConfigCardSection user={user} onUpdated={handleSmtpUpdated} />
         </Stack>
       </CardContent>
     </Card>
   );
 
   return (
-    <div className="admin dark-theme dark-new-ui">
+    <AdminShell><div className="admin dark-theme dark-new-ui">
       <div className="bg-gray-900 min-h-screen">
         <SideBar state={Active} toggle={toggleBar} />
         <div className="bg-gray-900 relative min-h-screen w-full overflow-x-hidden px-4 transition-all duration-300 xl:px-10 lg:max-w-[calc(100%_-_280px)] lg:ms-[280px]">
@@ -492,20 +541,8 @@ const AdminManagement = () => {
             <AdminHeader toggle={toggleBar} pageName="Admin Management" />
 
             {isLoading ? (
-              <Box sx={{ width: '100%', p: 4, textAlign: 'center' }}>
-                <LinearProgress 
-                  sx={{ 
-                    height: 8, 
-                    borderRadius: 4,
-                    backgroundColor: 'grey.800',
-                    '& .MuiLinearProgress-bar': {
-                      backgroundColor: 'primary.main'
-                    }
-                  }} 
-                />
-                <Typography variant="h6" sx={{ mt: 2, color: 'grey.300' }}>
-                  Loading Admins...
-                </Typography>
+              <Box sx={{ width: '100%', p: 4 }}>
+                <AdminSkeleton variant="cards" rows={3} />
               </Box>
             ) : (
               <Box sx={{ p: 3 }}>
@@ -615,6 +652,7 @@ const AdminManagement = () => {
         </Box>
       </Modal>
     </div>
+    </AdminShell>
   );
 };
 

@@ -17,7 +17,10 @@ const activitySchema = new mongoose.Schema({
     createdBy: {
         userId: {
             type: mongoose.Schema.Types.ObjectId,
-            required: true
+            required: function() {
+                // userId is required unless it's a system-generated activity
+                return !this.isSystemGenerated;
+            }
         },
         userName: {
             type: String,
@@ -180,6 +183,16 @@ activitySchema.methods.formatForDisplay = function() {
 
 // ✅ NEW: Helper method to check if user can delete this activity
 activitySchema.methods.canUserDelete = function(userId, userRole) {
+    // System-generated activities can be deleted by superadmin and admin
+    if (this.isSystemGenerated) {
+        return userRole === 'superadmin' || userRole === 'admin';
+    }
+    
+    // If no userId (shouldn't happen for non-system, but handle gracefully)
+    if (!this.createdBy.userId) {
+        return userRole === 'superadmin' || userRole === 'admin';
+    }
+    
     const authorId = this.createdBy.userId.toString();
     const authorRole = this.createdBy.userRole;
     const currentUserId = userId.toString();
@@ -204,6 +217,11 @@ activitySchema.methods.canUserDelete = function(userId, userRole) {
 
 // ✅ NEW: Helper method to check if user can edit this activity
 activitySchema.methods.canUserEdit = function(userId) {
+    // System-generated activities cannot be edited
+    if (this.isSystemGenerated || !this.createdBy.userId) {
+        return false;
+    }
+    
     const authorId = this.createdBy.userId.toString();
     const currentUserId = userId.toString();
     
