@@ -42,7 +42,7 @@ import {
   Search,
   Visibility,
 } from '@mui/icons-material';
-import { useAuthUser } from 'react-auth-kit';
+import useLiveCrmUser from './useLiveCrmUser';
 import { toast } from 'react-toastify';
 import Sidebar from './Sidebar';
 import CrmAppBarActions from './components/CrmAppBarActions';
@@ -72,9 +72,8 @@ const formatDate = (value) => {
 };
 
 const DocumentLibrary = () => {
-  const authUser = useAuthUser();
-  const user = authUser()?.user;
-  const canManage = user?.role === 'superadmin' || user?.role === 'admin';
+  const { can, ready } = useLiveCrmUser();
+  const canManage = can('canManageDocuments');
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenu, setIsMobileMenu] = useState(false);
@@ -143,15 +142,17 @@ const DocumentLibrary = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, search, categoryFilter, typeFilter]);
+  }, [page, search, categoryFilter, typeFilter, canManage]);
 
   useEffect(() => {
+    if (!canManage) return;
     fetchCategories();
-  }, [fetchCategories]);
+  }, [fetchCategories, canManage]);
 
   useEffect(() => {
+    if (!canManage) return;
     fetchDocuments();
-  }, [fetchDocuments]);
+  }, [fetchDocuments, canManage]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -312,6 +313,11 @@ const DocumentLibrary = () => {
       />
 
       <Box component="main" sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {ready && !canManage && (
+          <Typography sx={{ p: 3 }} color="text.secondary">
+            Documents are turned off for your account.
+          </Typography>
+        )}
         <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
           <Toolbar sx={{ gap: 1, flexWrap: 'wrap', py: { xs: 1, sm: 0 } }}>
             <FolderOpen sx={{ color: 'primary.main' }} />

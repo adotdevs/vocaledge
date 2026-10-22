@@ -48,8 +48,9 @@ import {
     initiateCallApi,
     bulkCallLeadsApi,
 } from '../../../Api/Service';
-import { allUsersApi, deleteLeadApi } from '../../../Api/Service';
+import { deleteLeadApi } from '../../../Api/Service';
 import { useAuthUser } from 'react-auth-kit';
+import useLiveCrmUser from './useLiveCrmUser';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar.js';
 import CrmAppBarActions from './components/CrmAppBarActions';
@@ -57,6 +58,7 @@ import CallLogsModal from './components/CallLogsModal';
 
 const NoAnswerCalls = () => {
     const authUser = useAuthUser();
+    const { can, role, ready } = useLiveCrmUser();
     const navigate = useNavigate();
     const [noAnswerCalls, setNoAnswerCalls] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -87,43 +89,16 @@ const NoAnswerCalls = () => {
     });
 
     // Permission check: can view call logs
-    const [canViewCallLogs, setCanViewCallLogs] = useState(true); // Default true for superadmin
-    const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+    const isSuperAdmin = role === 'superadmin';
+    const canViewCallLogs = can('canViewCallLogs');
 
-    // Permission gate: restrict admin without Call Dashboard access
     useEffect(() => {
-        const checkPermissions = async () => {
-            try {
-                const me = authUser && authUser();
-                const superAdmin = me?.user?.role === 'superadmin';
-                setIsSuperAdmin(superAdmin);
-                
-                if (me?.user?.role === 'admin') {
-                    const resp = await allUsersApi({ search: me.user._id, limit: 1 });
-                    const updated = resp?.success && resp?.allUsers?.length ? resp.allUsers[0] : me.user;
-                    if (!updated?.adminPermissions?.canAccessCallDashboard) {
-                        toast.error('Access denied to No Answer Calls');
-                        navigate('/admin/dashboard');
-                        return;
-                    }
-                    // Check call logs permission
-                    setCanViewCallLogs(updated?.adminPermissions?.canViewCallLogs === true);
-                } else if (superAdmin) {
-                    // Superadmin always has permission
-                    setCanViewCallLogs(true);
-                } else {
-                    // Subadmin or others - check their permissions
-                    const resp = await allUsersApi({ search: me.user._id, limit: 1 });
-                    const updated = resp?.success && resp?.allUsers?.length ? resp.allUsers[0] : me.user;
-                    setCanViewCallLogs(updated?.permissions?.canViewCallLogs === true || false);
-                }
-            } catch (e) {
-                // If check fails, default to false for safety
-                setCanViewCallLogs(false);
-            }
-        };
-        checkPermissions();
-    }, []);
+        if (!ready || role === 'superadmin') return;
+        if (!can('canAccessCallDashboard')) {
+            toast.error('Access denied to No Answer Calls');
+            navigate('/admin/dashboard');
+        }
+    }, [ready, role, can, navigate]);
 
     // OPTIMIZED: Fetch no-answer calls - removed unnecessary statistics fetch
     const fetchNoAnswerCalls = useCallback(async () => {

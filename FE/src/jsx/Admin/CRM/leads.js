@@ -125,6 +125,7 @@ import {
 } from "../../../Api/Service";
 import { toast } from "react-toastify";
 import Sidebar from "./Sidebar.js";
+import CrmAccessDenied from "./components/CrmAccessDenied";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthUser } from "react-auth-kit";
 import { debounce } from "../../../utils/debounce";
@@ -140,7 +141,8 @@ import {
     getCachedLeadStatuses,
     subscribeLeadStatuses,
 } from './components/leadStatusCache';
-import { getLeadStatusChipProps } from './components/leadStatusStyles';
+import { getStatusChipSx, getStatusColor } from './components/leadStatusStyles';
+import useLiveCrmUser from './useLiveCrmUser';
 import SendLeadEmailDialog from './components/SendLeadEmailDialog';
 import LeadRemindersSection from './components/LeadRemindersSection';
 import ReminderModal from './components/ReminderModal';
@@ -153,13 +155,17 @@ const AVAILABLE_FIELDS = [
     { key: 'email', label: 'Email', required: false, description: 'Email address' },
     { key: 'phone', label: 'Phone', required: false, description: 'Phone number' },
     { key: 'country', label: 'Country', required: false, description: 'Country name' },
-    { key: 'Brand', label: 'Brand', required: false, description: 'Company brand' },
+    { key: 'Brand', label: 'Brand', required: false, description: 'Map a column, or type one brand for every lead', allowText: true },
+    { key: 'source', label: 'Source', required: false, description: 'Type a source to assign to every lead', inputOnly: true },
     { key: 'Address', label: 'Address', required: false, description: 'Physical address' },
     { key: 'status', label: 'Status', required: false, description: 'Lead status (uses your configured statuses)' },
 ];
 
 // Enhanced Create Lead Dialog Component - Memoized for performance
-const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUser, allowCsvUpload, allowManageStatuses }) => {
+const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUser, allowCsvUpload, allowManageStatuses, allowViewSource = false }) => {
+    const leadFields = allowViewSource
+        ? AVAILABLE_FIELDS
+        : AVAILABLE_FIELDS.filter((field) => field.key !== 'source');
 
     const [activeStep, setActiveStep] = useState(0);
     const [tabValue, setTabValue] = useState(0);
@@ -170,9 +176,12 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
         phone: "",
         country: "",
         Brand: "",
+        source: "",
         Address: "",
         status: "New",
     });
+    const [overrideBrand, setOverrideBrand] = useState("");
+    const [overrideSource, setOverrideSource] = useState("");
     const [csvFile, setCsvFile] = useState(null);
     const [csvHeaders, setCsvHeaders] = useState([]);
     const [csvPreview, setCsvPreview] = useState([]);
@@ -225,7 +234,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
     // Initialize selected fields
     useEffect(() => {
         const initialSelectedFields = {};
-        AVAILABLE_FIELDS.forEach(field => {
+        leadFields.forEach(field => {
             initialSelectedFields[field.key] = field.required;
         });
         setSelectedFields(initialSelectedFields);
@@ -272,7 +281,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
             // Auto-map fields based on header names
             const autoMapping = {};
             headers.forEach(header => {
-                const matchedField = AVAILABLE_FIELDS.find(field =>
+                const matchedField = leadFields.find(field =>
                     header.toLowerCase().includes(field.key.toLowerCase()) ||
                     field.key.toLowerCase().includes(header.toLowerCase()) ||
                     header.toLowerCase().includes(field.label.toLowerCase())
@@ -299,19 +308,21 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
             [fieldKey]: isSelected
         }));
 
-        // If deselecting a field, remove from mapping
+        // If deselecting a field, remove from mapping and clear typed overrides
         if (!isSelected) {
             setFieldMapping(prev => {
                 const newMapping = { ...prev };
                 delete newMapping[fieldKey];
                 return newMapping;
             });
+            if (fieldKey === 'Brand') setOverrideBrand("");
+            if (fieldKey === 'source') setOverrideSource("");
         }
     };
 
     const validateFieldMapping = () => {
         // Check if all required fields are mapped
-        const requiredFields = AVAILABLE_FIELDS.filter(field => field.required);
+        const requiredFields = leadFields.filter(field => field.required);
         const missingRequired = requiredFields.some(field =>
             selectedFields[field.key] && !fieldMapping[field.key]
         );
@@ -431,6 +442,8 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
             formData.append('selectedFields', JSON.stringify(selectedFields));
             formData.append('enableProgress', 'true'); // Enable SSE progress
             formData.append('addPhonePlusPrefix', addPhonePlusPrefix ? 'true' : 'false');
+            formData.append('overrideBrand', selectedFields.Brand ? overrideBrand.trim() : '');
+            formData.append('source', selectedFields.source ? overrideSource.trim() : '');
             // Superadmin and manager can select agent for bulk upload
             if ((currentUser?.user?.role === 'superadmin' || currentUser?.user?.role === 'manager') && selectedAgentId) {
                 formData.append('agentId', selectedAgentId);
@@ -566,9 +579,12 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
             phone: "",
             country: "",
             Brand: "",
+            source: "",
             Address: "",
             status: "New",
         });
+        setOverrideBrand("");
+        setOverrideSource("");
         setCsvFile(null);
         setCsvHeaders([]);
         setCsvPreview([]);
@@ -588,7 +604,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
 
         // Reset selected fields to defaults
         const initialSelectedFields = {};
-        AVAILABLE_FIELDS.forEach(field => {
+        leadFields.forEach(field => {
             initialSelectedFields[field.key] = field.required;
         });
         setSelectedFields(initialSelectedFields);
@@ -790,8 +806,20 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                             label="Brand"
                                             value={manualForm.Brand}
                                             onChange={(e) => handleManualFormChange('Brand', e.target.value)}
+                                            placeholder="Brand assigned to this lead"
                                         />
                                     </Grid>
+                                    {allowViewSource && (
+                                    <Grid item xs={12} sm={6}>
+                                        <TextField
+                                            fullWidth
+                                            label="Source"
+                                            value={manualForm.source}
+                                            onChange={(e) => handleManualFormChange('source', e.target.value)}
+                                            placeholder="Where this lead came from"
+                                        />
+                                    </Grid>
+                                    )}
                                     <Grid item xs={12}>
                                         <TextField
                                             fullWidth
@@ -872,11 +900,11 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                         Field Mapping:
                                     </Typography>
                                     <Grid container spacing={2}>
-                                        {AVAILABLE_FIELDS.map(field => (
+                                        {leadFields.map(field => (
                                             <Grid item xs={12} key={field.key}>
                                                 <Card variant="outlined">
                                                     <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
-                                                        <Box display="flex" alignItems="center" justifyContent="space-between">
+                                                        <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
                                                             <Box display="flex" alignItems="center" gap={2} flex={1}>
                                                                 <FormControlLabel
                                                                     control={
@@ -899,7 +927,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                                 />
                                                             </Box>
 
-                                                            {selectedFields[field.key] && (
+                                                            {selectedFields[field.key] && !field.inputOnly && (
                                                                 <Box display="flex" alignItems="center" gap={1} flex={1}>
                                                                     <SwapHoriz fontSize="small" color="action" />
                                                                     <FormControl size="small" fullWidth>
@@ -920,6 +948,26 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                                         </Select>
                                                                     </FormControl>
                                                                 </Box>
+                                                            )}
+                                                            {selectedFields[field.key] && field.allowText && (
+                                                                <TextField
+                                                                    size="small"
+                                                                    label="Or type brand for all leads"
+                                                                    placeholder="Assigned to every lead"
+                                                                    value={overrideBrand}
+                                                                    onChange={(e) => setOverrideBrand(e.target.value)}
+                                                                    sx={{ flex: '1 1 240px' }}
+                                                                />
+                                                            )}
+                                                            {selectedFields[field.key] && field.inputOnly && (
+                                                                <TextField
+                                                                    size="small"
+                                                                    label="Type source for all leads"
+                                                                    placeholder="Assigned to every lead"
+                                                                    value={overrideSource}
+                                                                    onChange={(e) => setOverrideSource(e.target.value)}
+                                                                    sx={{ flex: '1 1 240px' }}
+                                                                />
                                                             )}
                                                         </Box>
                                                     </CardContent>
@@ -980,6 +1028,12 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                         <Grid item xs={6}>{manualForm.country}</Grid>
                                         <Grid item xs={6}><strong>Brand:</strong></Grid>
                                         <Grid item xs={6}>{manualForm.Brand}</Grid>
+                                        {allowViewSource && (
+                                            <>
+                                                <Grid item xs={6}><strong>Source:</strong></Grid>
+                                                <Grid item xs={6}>{manualForm.source}</Grid>
+                                            </>
+                                        )}
                                         <Grid item xs={6}><strong>Address:</strong></Grid>
                                         <Grid item xs={6}>{manualForm.Address}</Grid>
                                         <Grid item xs={6}><strong>Status:</strong></Grid>
@@ -1021,10 +1075,29 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                 You are about to upload <strong>{csvFile?.name}</strong> with the following mapping:
                                             </Typography>
 
+                                            {(overrideBrand.trim() || overrideSource.trim()) && (
+                                                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                                                    <Typography variant="body2" sx={{ mb: 1 }}>
+                                                        <strong>Applied to every lead</strong>
+                                                    </Typography>
+                                                    {overrideBrand.trim() && (
+                                                        <Typography variant="body2" sx={{ mb: 1 }}>
+                                                            <strong>Brand:</strong> {overrideBrand.trim()}
+                                                        </Typography>
+                                                    )}
+                                                    {overrideSource.trim() && (
+                                                        <Typography variant="body2">
+                                                            <strong>Source:</strong> {overrideSource.trim()}
+                                                        </Typography>
+                                                    )}
+                                                </Box>
+                                            )}
+
                                             <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-                                                {AVAILABLE_FIELDS.filter(field => selectedFields[field.key] && fieldMapping[field.key]).map(field => (
+                                                {leadFields.filter(field => selectedFields[field.key] && fieldMapping[field.key]).map(field => (
                                                     <Typography key={field.key} variant="body2" sx={{ mb: 1 }}>
                                                         <strong>{field.label}:</strong> {fieldMapping[field.key]}
+                                                        {field.key === 'Brand' && overrideBrand.trim() ? ' (overridden by brand text)' : ''}
                                                     </Typography>
                                                 ))}
                                             </Box>
@@ -1206,7 +1279,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
 });
 
 // View Details Component - Memoized for performance
-const LeadDetails = memo(({ lead, open, onClose, navigate }) => {
+const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false }) => {
     if (!lead) return null;
 
     const handleViewStream = () => {
@@ -1290,6 +1363,12 @@ const LeadDetails = memo(({ lead, open, onClose, navigate }) => {
                         <Typography variant="subtitle2" color="text.secondary">Brand</Typography>
                         <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>{lead.Brand || 'Not provided'}</Typography>
                     </Grid>
+                    {showSource && (
+                    <Grid item xs={12} sm={6}>
+                        <Typography variant="subtitle2" color="text.secondary">Source</Typography>
+                        <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>{lead.source || 'Not provided'}</Typography>
+                    </Grid>
+                    )}
                     {lead.remarks && (
                         <Grid item xs={12}>
                             <Typography variant="subtitle2" color="text.secondary">Remarks (Source)</Typography>
@@ -1317,11 +1396,7 @@ const LeadDetails = memo(({ lead, open, onClose, navigate }) => {
                         <Typography variant="subtitle2" color="text.secondary">Status</Typography>
                         <Chip
                             label={lead.status}
-                            color={
-                                lead.status === 'Active' ? 'success' :
-                                    lead.status === 'Call Back' ? 'warning' :
-                                        lead.status === 'Not Active' ? 'error' : 'primary'
-                            }
+                            sx={getStatusChipSx(getStatusColor(lead.status, getCachedLeadStatuses() || []))}
                         />
                     </Grid>
                     <Grid item xs={12} sm={6}>
@@ -1611,6 +1686,7 @@ const LeadsPage = () => {
 
     }, []);
     const [leads, setLeads] = useState([]);
+    const [crmAccessDenied, setCrmAccessDenied] = useState(false);
     const [allLeadsForFiltering, setAllLeadsForFiltering] = useState([]); // Store all leads when filtering by call status
     const [filteredLeads, setFilteredLeads] = useState([]); // Filtered leads for display
     const [loading, setLoading] = useState(false);
@@ -2337,6 +2413,7 @@ const LeadsPage = () => {
 
     // Toggle sidebar
     const currentAuthUser = authUser();
+    const { can } = useLiveCrmUser();
     const getAllUsers = useCallback(async () => {
         try {
             const currentUser = authUser().user;// Fetch current user's latest data (with their own role to get permissions)// ✅ SECURITY: Fetch current user's latest data BY ID (not email to avoid duplicates)
@@ -2355,41 +2432,18 @@ const LeadsPage = () => {
             // ✅ CRITICAL: Check CRM access permissions in real-time and redirect if false
             // Superadmin always has access
             // Manager must have explicit accessCrm permission (same as admin)
-            if (updatedCurrentUser.role === "superadmin") {
-                // Superadmin always has access
-            } else if (updatedCurrentUser.role === "manager") {
-                // Manager must have explicit accessCrm permission (strict check)
-                const hasAccess = updatedCurrentUser.adminPermissions?.accessCrm === true ||
-                    updatedCurrentUser.adminPermissions?.accessCrm === 'true';
-                if (!hasAccess) {
-                    toast.error("Access denied: No CRM permissions");
-                    navigate("/admin/dashboard/crm");
-                    return;
-                }
-            } else if (updatedCurrentUser.role === "admin") {
-                // Admin must have explicit accessCrm permission (strict check)
-                const hasAccess = updatedCurrentUser.adminPermissions?.accessCrm === true ||
-                    updatedCurrentUser.adminPermissions?.accessCrm === 'true';
-                if (!hasAccess) {
-                    toast.error("Access denied: No CRM permissions");
-                    navigate("/admin/dashboard");
-                    return;
-                }
-            } else if (updatedCurrentUser.role === "subadmin") {
-                // Subadmin must have explicit accessCrm permission (strict check)
-                const hasAccess = updatedCurrentUser.permissions?.accessCrm === true ||
-                    updatedCurrentUser.permissions?.accessCrm === 'true';
-                if (!hasAccess) {
-                    toast.error("Access denied: No CRM permissions");
-                    navigate("/admin/dashboard");
-                    return;
-                }
-            } else {
-                // Unknown role - deny access
-                toast.error("Access denied: Invalid role");
-                navigate("/admin/dashboard");
+            const crmAllowed = updatedCurrentUser.role === "superadmin" || (
+                (updatedCurrentUser.role === "admin" || updatedCurrentUser.role === "manager")
+                    ? (updatedCurrentUser.adminPermissions?.accessCrm === true || updatedCurrentUser.adminPermissions?.accessCrm === "true")
+                    : updatedCurrentUser.role === "subadmin"
+                        ? (updatedCurrentUser.permissions?.accessCrm === true || updatedCurrentUser.permissions?.accessCrm === "true")
+                        : false
+            );
+            if (!crmAllowed) {
+                setCrmAccessDenied(true);
                 return;
             }
+            setCrmAccessDenied(false);
 
             let agents = []; // Initialize agents array
 
@@ -2415,12 +2469,15 @@ const LeadsPage = () => {
 
             } else if (updatedCurrentUser.role === "admin") {
                 // Admin: can assign only if allowed, and targets restricted to subadmins
-                if (updatedCurrentUser.adminPermissions?.canManageCrmLeads) {
+                if (updatedCurrentUser.adminPermissions?.canAssignLeads === true) {
                     const subadminsResponse = await allUsersApi({ role: 'subadmin', limit: 1000 });
                     agents = subadminsResponse.success ? subadminsResponse.allUsers : [];
                 } else {
                     agents = [];
                 }
+            } else if (updatedCurrentUser.role === "subadmin" && updatedCurrentUser.permissions?.canAssignLeads === true) {
+                const subadminsResponse = await allUsersApi({ role: 'subadmin', limit: 1000 });
+                agents = subadminsResponse.success ? subadminsResponse.allUsers : [];
             } else if (updatedCurrentUser.role === "manager") {
                 // Manager: can only see admins assigned to them
                 const adminsResponse = await allUsersApi({ role: 'admin', limit: 1000 });
@@ -2458,10 +2515,9 @@ const LeadsPage = () => {
     }, []); // ✅ EMPTY dependencies - only call getAllUsers on mount and cleanup on unmount
     const [agents, setAgents] = useState([]);
     const [currentUserLatest, setCurrentUserLatest] = useState(null);
-    const canManageStatuses = useMemo(() => (
-        currentUserLatest?.role === 'superadmin'
-        || (currentUserLatest?.role === 'admin' && currentUserLatest?.adminPermissions?.canManageCrmLeads)
-    ), [currentUserLatest]);
+    const canManageStatuses = can('canManageLeadStatuses');
+    const canViewLeadSource = can('canViewLeadSource');
+    const leadColumnCount = canViewLeadSource ? 13 : 12;
     const [filterLeadStatuses, setFilterLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
 
     useEffect(() => {
@@ -2472,15 +2528,8 @@ const LeadsPage = () => {
         fetchLeadStatuses().catch(() => {});
     }, []);
     const isSuperAdmin = currentUserLatest?.role === 'superadmin';
-    const canSendLeadEmail = useMemo(() => (
-        ['superadmin', 'admin', 'subadmin', 'manager'].includes(currentUserLatest?.role)
-    ), [currentUserLatest]);
-    const canMakeCalls = useMemo(() => {
-        if (!currentUserLatest) return true; // fallback; backend will enforce if needed
-        if (currentUserLatest.role === 'superadmin') return true;
-        if (currentUserLatest.role === 'admin') return !!currentUserLatest.adminPermissions?.canMakeCalls;
-        return true; // subadmin unchanged
-    }, [currentUserLatest]);
+    const canSendLeadEmail = can('canSendLeadEmail');
+    const canMakeCalls = can('canMakeCalls');
 
     // OPTIMIZED: Fetch leads with filters and pagination - backend now handles callStatus filtering
     const fetchLeads = async (page = 1, limit = pagination.limit) => {
@@ -3455,6 +3504,10 @@ const LeadsPage = () => {
         }
     };
 
+    if (crmAccessDenied) {
+        return <CrmAccessDenied />;
+    }
+
     return (
         <Box sx={{ display: "block", height: "100vh", bgcolor: "background.default", position: "relative" }}>
             {/* Sidebar */}
@@ -3589,7 +3642,7 @@ const LeadsPage = () => {
                                     flexWrap: 'wrap',
                                     width: { xs: '100%', sm: 'auto' }
                                 }}>
-                                    {((authUser().user.role === 'superadmin') || (authUser().user.role === 'admin' && (currentUserLatest?.adminPermissions?.canManageCrmLeads))) && (
+                                    {can('canAssignLeads') && (
                                         <Button
                                             variant="contained"
                                             color="success"
@@ -3604,25 +3657,7 @@ const LeadsPage = () => {
                                             Assign
                                         </Button>
                                     )}
-                                    {(authUser().user.role === 'superadmin' || authUser().user.role === 'admin') && (
-                                        <Button
-                                            variant="contained"
-                                            sx={{
-                                                flex: { xs: '1 1 auto', sm: '0 0 auto' },
-                                                fontWeight: 'bold',
-                                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                                '&:hover': {
-                                                    background: 'linear-gradient(135deg, #764ba2 0%, #667eea 100%)',
-                                                }
-                                            }}
-                                            startIcon={<PersonAddIcon />}
-                                            onClick={() => setActivateConfirmOpen(true)}
-                                            disabled={activating}
-                                            size="small"
-                                        >
-                                            {activating ? 'Activating...' : `Activate (${selectedLeads.size})`}
-                                        </Button>
-                                    )}
+                                    {can('canChangeLeadStatus') && (
                                     <Button
                                         variant="contained"
                                         color="secondary"
@@ -3636,6 +3671,8 @@ const LeadsPage = () => {
                                     >
                                         Change Status ({selectedLeads.size})
                                     </Button>
+                                    )}
+                                    {canMakeCalls && (
                                     <Button
                                         variant="contained"
                                         color="primary"
@@ -3646,10 +3683,10 @@ const LeadsPage = () => {
                                             flex: { xs: '1 1 auto', sm: '0 0 auto' },
                                             fontWeight: 'bold',
                                         }}
-                                        disabled={!canMakeCalls}
                                     >
                                         Call Selected ({selectedLeads.size})
                                     </Button>
+                                    )}
                                     <Button
                                         variant="outlined"
                                         startIcon={<Close sx={{ display: { xs: 'none', sm: 'block' } }} />}
@@ -3735,6 +3772,7 @@ const LeadsPage = () => {
                                         ? 'Clear Selection'
                                         : `Select All (${pagination.totalFiltered.toLocaleString()})`}
                             </Button>
+                            {can('canExportLeads') && (
                             <Button
                                 variant="outlined"
                                 startIcon={<Download sx={{ display: { xs: 'none', sm: 'block' } }} />}
@@ -3748,6 +3786,7 @@ const LeadsPage = () => {
                             >
                                 Export
                             </Button>
+                            )}
                             {isSuperAdmin && leads.length > 0 && (
                                 <Button
                                     variant="outlined"
@@ -3763,6 +3802,7 @@ const LeadsPage = () => {
                                     Delete All
                                 </Button>
                             )}
+                            {can('canCreateLeads') && (
                             <Button
                                 variant="contained"
                                 startIcon={<Add />}
@@ -3775,6 +3815,7 @@ const LeadsPage = () => {
                             >
                                 Create Lead
                             </Button>
+                            )}
                         </Box>
                     </Box>
 
@@ -3909,7 +3950,7 @@ const LeadsPage = () => {
                                         )}
                                     />
                                 </Grid>
-                                {(authUser().user.role === 'superadmin' || authUser().user.role === 'manager' || (authUser().user.role === 'admin' && currentUserLatest?.adminPermissions?.canManageCrmLeads)) ? <Grid item xs={12} sm={6} md={3}>
+                                {(can('canAssignLeads') || authUser().user.role === 'manager') ? <Grid item xs={12} sm={6} md={3}>
                                     <FormControl fullWidth size="small">
                                         <InputLabel>Agent</InputLabel>
                                         <Select
@@ -3969,8 +4010,7 @@ const LeadsPage = () => {
                                         />
                                         {filterLeadStatuses.map((status) => {
                                             const isSelected = filters.status === status.label;
-                                            const chipProps = getLeadStatusChipProps(status.label);
-                                            const chipColor = chipProps.color === 'default' ? 'primary' : chipProps.color;
+                                            const statusColor = getStatusColor(status);
 
                                             return (
                                                 <Chip
@@ -3979,12 +4019,11 @@ const LeadsPage = () => {
                                                     clickable
                                                     size="medium"
                                                     onClick={() => handleFilterChange('status', status.label)}
-                                                    color={isSelected ? chipColor : chipProps.color}
-                                                    variant={isSelected ? 'filled' : 'outlined'}
                                                     sx={{
                                                         height: 36,
                                                         fontWeight: isSelected ? 700 : 500,
                                                         '& .MuiChip-label': { fontSize: '0.9375rem', px: 1.5 },
+                                                        ...getStatusChipSx(statusColor, { filled: isSelected }),
                                                         ...(isSelected && {
                                                             boxShadow: 3,
                                                             transform: 'scale(1.05)',
@@ -4220,6 +4259,11 @@ const LeadsPage = () => {
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 120 }}>
                                                     Brand
                                                 </TableCell>
+                                                {canViewLeadSource && (
+                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 140 }}>
+                                                    Source
+                                                </TableCell>
+                                                )}
                                                  <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 160 }}>
                                                     Remarks
                                                 </TableCell>
@@ -4328,11 +4372,15 @@ const LeadsPage = () => {
                                                             </Box>
                                                         </TableCell>
                                                         <TableCell onClick={(e) => e.stopPropagation()}>
+                                                            {can('canChangeLeadStatus') ? (
                                                             <InlineLeadStatusCell
                                                                 lead={lead}
                                                                 onStatusChange={handleInlineStatusChange}
                                                                 saving={updatingStatusLeadId === lead._id}
                                                             />
+                                                            ) : (
+                                                                <Chip label={lead.status || 'New'} size="small" sx={getStatusChipSx(getStatusColor(lead.status, filterLeadStatuses))} />
+                                                            )}
                                                         </TableCell>
                                                         <TableCell>
                                                             <Typography variant="body2">{lead.country}</Typography>
@@ -4342,6 +4390,13 @@ const LeadsPage = () => {
                                                                 {lead.Brand}
                                                             </Typography>
                                                         </TableCell>
+                                                        {canViewLeadSource && (
+                                                        <TableCell>
+                                                            <Typography variant="body2" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.source || ''}>
+                                                                {lead.source || '—'}
+                                                            </Typography>
+                                                        </TableCell>
+                                                        )}
                                                         <TableCell>
                                                             <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.remarks || ''}>
                                                                 {lead.remarks || '—'}
@@ -4552,7 +4607,7 @@ const LeadsPage = () => {
                                                         </TableCell>
                                                         <TableCell>
                                                             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                                                                {lead.phone && (
+                                                                {lead.phone && canMakeCalls && (
                                                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                                         <IconButton
                                                                             size="small"
@@ -4598,7 +4653,7 @@ const LeadsPage = () => {
                                                         </TableCell>
                                                     </TableRow>
                                                     <TableRow sx={removingRowSx}>
-                                                        <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={12}>
+                                                        <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={leadColumnCount}>
                                                             <Collapse in={expandedLead === lead._id && !isRemoving} timeout="auto" unmountOnExit>
                                                                 <Box sx={{ margin: 1, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
                                                                     <Grid container spacing={2}>
@@ -4646,6 +4701,12 @@ const LeadsPage = () => {
                                                                             <Typography variant="subtitle2" color="text.secondary">Brand</Typography>
                                                                             <Typography variant="body2">{lead.Brand || 'Not provided'}</Typography>
                                                                         </Grid>
+                                                                        {canViewLeadSource && (
+                                                                        <Grid item xs={12} sm={6} md={3}>
+                                                                            <Typography variant="subtitle2" color="text.secondary">Source</Typography>
+                                                                            <Typography variant="body2">{lead.source || 'Not provided'}</Typography>
+                                                                        </Grid>
+                                                                        )}
                                                                          {lead.remarks && (
                                                                             <Grid item xs={12}>
                                                                                 <Typography variant="subtitle2" color="text.secondary">Remarks (Source)</Typography>
@@ -4665,6 +4726,7 @@ const LeadsPage = () => {
                                                                                 refreshTrigger={reminderListRefresh[lead._id] || 0}
                                                                             />
                                                                         </Grid>
+                                                                        {can('canCommentOnLeads') && (
                                                                         <Grid item xs={12}>
                                                                             <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                                                                 <Comment sx={{ fontSize: 18 }} /> Add comment to stream
@@ -4733,6 +4795,7 @@ const LeadsPage = () => {
                                                                                 </Typography>
                                                                             )}
                                                                         </Grid>
+                                                                        )}
                                                                         <Grid item xs={12}>
                                                                             <Box sx={{
                                                                                 display: 'flex',
@@ -4764,6 +4827,7 @@ const LeadsPage = () => {
                                                                                         Send Email
                                                                                     </Button>
                                                                                 )}
+                                                                                {can('canManageReminders') && (
                                                                                 <Button
                                                                                     size="small"
                                                                                     variant="outlined"
@@ -4776,6 +4840,8 @@ const LeadsPage = () => {
                                                                                 >
                                                                                     Reminder
                                                                                 </Button>
+                                                                                )}
+                                                                                {can('canEditLeads') && (
                                                                                 <Button
                                                                                     size="small"
                                                                                     variant="outlined"
@@ -4788,6 +4854,7 @@ const LeadsPage = () => {
                                                                                 >
                                                                                     Edit
                                                                                 </Button>
+                                                                                )}
                                                                                 <Button
                                                                                     size="small"
                                                                                     variant="outlined"
@@ -4824,7 +4891,7 @@ const LeadsPage = () => {
                                             })}
                                             {leads.length === 0 && !loading && (
                                                 <TableRow>
-                                                    <TableCell colSpan={12} align="center" sx={{ py: 8 }}>
+                                                    <TableCell colSpan={leadColumnCount} align="center" sx={{ py: 8 }}>
                                                         <Search sx={{ fontSize: 48, color: "grey.300", mb: 2 }} />
                                                         <Typography variant="h6" color="text.secondary" gutterBottom>
                                                             {filters.callStatus ? `No leads with ${filters.callStatus === 'completed' ? 'completed' : filters.callStatus === 'failed' ? 'failed' : filters.callStatus === 'cancelled' ? 'cancelled' : filters.callStatus === 'no-answer' ? 'no answer' : filters.callStatus === 'in-progress' ? 'in-progress' : filters.callStatus === 'ringing' ? 'ringing' : 'no'} call status` : 'No leads found'}
@@ -4832,6 +4899,7 @@ const LeadsPage = () => {
                                                         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                                                             {filters.callStatus ? 'Try adjusting your call status filter or other filters' : 'Try adjusting your filters or create a new lead'}
                                                         </Typography>
+                                                        {can('canCreateLeads') && (
                                                         <Button
                                                             variant="contained"
                                                             startIcon={<Add />}
@@ -4839,6 +4907,7 @@ const LeadsPage = () => {
                                                         >
                                                             Create Your First Lead
                                                         </Button>
+                                                        )}
                                                     </TableCell>
                                                 </TableRow>
                                             )}
@@ -4867,15 +4936,11 @@ const LeadsPage = () => {
                     <Visibility sx={{ mr: 1, fontSize: 20 }} />
                     View Details
                 </MenuItem>
+                {can('canEditLeads') && (
                 <MenuItem onClick={handleEditLead}>
                     <Edit sx={{ mr: 1, fontSize: 20 }} />
                     Edit Lead
                 </MenuItem>
-                {(authUser()?.user?.role === 'superadmin' || authUser()?.user?.role === 'admin') && (
-                    <MenuItem onClick={handleActivateLead} sx={{ color: "success.main" }}>
-                        <PersonAddIcon sx={{ mr: 1, fontSize: 20 }} />
-                        Activate User
-                    </MenuItem>
                 )}
                 {isSuperAdmin && (
                     <MenuItem onClick={handleDeleteLead} sx={{ color: "error.main" }}>
@@ -4892,8 +4957,9 @@ const LeadsPage = () => {
                 onLeadCreated={handleLeadCreated}
                 agents={agents}
                 currentUser={currentAuthUser}
-                allowCsvUpload={currentUserLatest?.role === 'superadmin' || (currentUserLatest?.role === 'admin' && currentUserLatest?.adminPermissions?.canUploadLeads) || currentUserLatest?.role === 'manager'}
+                allowCsvUpload={can('canUploadLeads')}
                 allowManageStatuses={canManageStatuses}
+                allowViewSource={canViewLeadSource}
             />
 
             {/* View Details Dialog */}
@@ -4902,6 +4968,7 @@ const LeadsPage = () => {
                 open={viewDetailsOpen}
                 onClose={() => setViewDetailsOpen(false)}
                 navigate={navigate}
+                showSource={canViewLeadSource}
             />
 
             {/* Edit Lead Dialog */}

@@ -476,6 +476,14 @@ export const getPendingReminderNotificationsApi = () => getApi(`/crm/reminders/n
 export const dismissReminderNotificationApi = (id) => patchApi(`/crm/reminders/notifications/${id}/dismiss`);
 export const markReminderNotificationReadApi = (id) => patchApi(`/crm/reminders/notifications/${id}/read`);
 
+export const getStaffMessagesApi = () => getApi(`/crm/staff-messages`);
+export const createStaffMessageApi = (data) => postApi(`/crm/staff-messages`, data);
+export const updateStaffMessageApi = (id, data) => patchApi(`/crm/staff-messages/${id}`, data);
+export const resendStaffMessageApi = (id) => postApi(`/crm/staff-messages/${id}/resend`);
+export const deleteStaffMessageApi = (id) => deleteApi(`/crm/staff-messages/${id}`);
+export const getPendingStaffMessagesApi = () => getApi(`/crm/staff-messages/pending`);
+export const dismissStaffMessageApi = (id) => postApi(`/crm/staff-messages/${id}/dismiss`);
+
 export const getCrmNotificationsApi = (params = {}) => {
   const queryString = new URLSearchParams(
     Object.fromEntries(

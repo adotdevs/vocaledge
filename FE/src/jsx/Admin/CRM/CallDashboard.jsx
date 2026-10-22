@@ -88,8 +88,9 @@ import {
     getCallLogsApi,
     deleteCallsBulkApi,
 } from '../../../Api/Service';
-import { allUsersApi, deleteLeadApi } from '../../../Api/Service';
+import { deleteLeadApi } from '../../../Api/Service';
 import { useAuthUser } from 'react-auth-kit';
+import useLiveCrmUser from './useLiveCrmUser';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar.js';
 import { mapSipEventsToStatus } from '../../../utils/callStatus';
@@ -100,6 +101,7 @@ import { getBackendUrl } from '../../../config/appConfig';
 
 const CallDashboard = () => {
     const authUser = useAuthUser();
+    const { can, role, ready } = useLiveCrmUser();
     const navigate = useNavigate();
     const finalizedSessionsRef = useRef({});
     const [statistics, setStatistics] = useState(null);
@@ -163,46 +165,20 @@ const CallDashboard = () => {
     const [callBackFilter, setCallBackFilter] = useState(null); // null = all, true = call back, false = non call back
 
     // Permission check: can view call logs
-    const [canViewCallLogs, setCanViewCallLogs] = useState(true); // Default true for superadmin
-    const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+    const isSuperAdmin = role === 'superadmin';
+    const canViewCallLogs = can('canViewCallLogs');
 
     // Cache of ended reasons resolved from logs endpoint (per callId)
     const [logsEndedReasons, setLogsEndedReasons] = useState({});
 
     // Permission gate: restrict admin without Call Dashboard access
     useEffect(() => {
-        const checkPermissions = async () => {
-            try {
-                const me = authUser && authUser();
-                const superAdmin = me?.user?.role === 'superadmin';
-                setIsSuperAdmin(superAdmin);
-
-                if (me?.user?.role === 'admin') {
-                    const resp = await allUsersApi({ search: me.user._id, limit: 1 });
-                    const updated = resp?.success && resp?.allUsers?.length ? resp.allUsers[0] : me.user;
-                    if (!updated?.adminPermissions?.canAccessCallDashboard) {
-                        toast.error('Access denied to Call Dashboard');
-                        navigate('/admin/dashboard');
-                        return;
-                    }
-                    // Check call logs permission
-                    setCanViewCallLogs(updated?.adminPermissions?.canViewCallLogs === true);
-                } else if (superAdmin) {
-                    // Superadmin always has permission
-                    setCanViewCallLogs(true);
-                } else {
-                    // Subadmin or others - check their permissions
-                    const resp = await allUsersApi({ search: me.user._id, limit: 1 });
-                    const updated = resp?.success && resp?.allUsers?.length ? resp.allUsers[0] : me.user;
-                    setCanViewCallLogs(updated?.permissions?.canViewCallLogs === true || false);
-                }
-            } catch (e) {
-                // If check fails, default to false for safety
-                setCanViewCallLogs(false);
-            }
-        };
-        checkPermissions();
-    }, []);
+        if (!ready || role === 'superadmin') return;
+        if (!can('canAccessCallDashboard')) {
+            toast.error('Access denied to Call Dashboard');
+            navigate('/admin/dashboard');
+        }
+    }, [ready, role, can, navigate]);
 
     // SSE connection for real-time updates
     useEffect(() => {

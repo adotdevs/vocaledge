@@ -22,22 +22,25 @@ const {
     getCallLogs
 } = require('../controllers/callController');
 const { handleVapiWebhook } = require('../controllers/vapiWebhookController');
-const { isAuthorizedUser, authorizedRoles, checkCrmAccess } = require('../middlewares/auth');
+const { isAuthorizedUser, authorizedRoles, checkCrmAccess, requireCrmPermission } = require('../middlewares/auth');
+const canMakeCalls = requireCrmPermission('canMakeCalls');
+const canAccessCallDashboard = requireCrmPermission('canAccessCallDashboard');
+const canViewCallLogs = requireCrmPermission('canViewCallLogs');
 
 // Manual call initiation
-router.post('/crm/call/initiate', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, initiateCall);
+router.post('/crm/call/initiate', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canMakeCalls, initiateCall);
 
 // Bulk automatic calls
-router.post('/crm/call/bulk', isAuthorizedUser, authorizedRoles('superadmin', 'admin'), checkCrmAccess, bulkCallLeads);
+router.post('/crm/call/bulk', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canMakeCalls, bulkCallLeads);
 
 // Schedule call
-router.post('/crm/call/schedule', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, scheduleCall);
+router.post('/crm/call/schedule', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canMakeCalls, scheduleCall);
 
 // Get call status
 router.get('/crm/call/status/:sessionId', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, getCallStatus);
 
 // Get call history for a lead
-router.get('/crm/call/history/:leadId', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, getCallHistory);
+router.get('/crm/call/history/:leadId', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canViewCallLogs, getCallHistory);
 
 // Cancel call
 router.post('/crm/call/cancel/:sessionId', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, cancelCall);
@@ -51,17 +54,17 @@ router.post('/crm/call/summary', receiveCallSummary);
 router.post('/webhooks/vapi', handleVapiWebhook);
 
 // Get call statistics
-router.get('/crm/call/statistics', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, getCallStatistics);
+router.get('/crm/call/statistics', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canAccessCallDashboard, getCallStatistics);
 
 // Get active calls
-router.get('/crm/call/active', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, getActiveCalls);
+router.get('/crm/call/active', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canAccessCallDashboard, getActiveCalls);
 
 // Server-Sent Events for real-time call updates
 // Note: SSE endpoint uses origin-based security since EventSource doesn't support auth headers
 router.get('/crm/call/updates/sse', callUpdatesSSE);
 
 // Get call queue status
-router.get('/crm/call/queue/status', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, getCallQueueStatus);
+router.get('/crm/call/queue/status', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canAccessCallDashboard, getCallQueueStatus);
 
 // Update call status (internal use by VoIP agent)
 router.post('/crm/call/update-status', updateCallStatus);
@@ -71,17 +74,17 @@ router.post('/crm/call/queue/pause', isAuthorizedUser, authorizedRoles('superadm
 router.post('/crm/call/queue/resume', isAuthorizedUser, authorizedRoles('superadmin', 'admin'), checkCrmAccess, resumeCallQueue);
 
 // Retry failed call
-router.post('/crm/call/retry', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, retryFailedCall);
+router.post('/crm/call/retry', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canMakeCalls, retryFailedCall);
 
 // Get completed calls
-router.get('/crm/call/completed', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, getCompletedCalls);
+router.get('/crm/call/completed', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canAccessCallDashboard, getCompletedCalls);
 
 // Delete call(s)
 router.delete('/crm/call/:callId', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, deleteCall);
 router.delete('/crm/call', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, deleteCall);
 
 // Get Vapi call logs
-router.get('/crm/call/:callId/logs', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, getCallLogs);
+router.get('/crm/call/:callId/logs', isAuthorizedUser, authorizedRoles('superadmin', 'admin', 'subadmin'), checkCrmAccess, canViewCallLogs, getCallLogs);
 
 module.exports = router;
 

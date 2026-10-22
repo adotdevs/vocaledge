@@ -107,7 +107,7 @@ const CrmProfile = () => {
       // For admin/subadmin, check profile edit permission
       if (
         (currentUser.role === "admin" || currentUser.role === "subadmin") &&
-        profile.adminPermissions?.isProfileUpdate === false
+        profile.adminPermissions?.isProfileUpdate !== true
       ) {
         toast.error("Profile editing is disabled by superadmin");
         navigate("/admin/dashboard/crm");
@@ -175,7 +175,7 @@ const CrmProfile = () => {
         const resp = await signleUsersApi(currentUser._id);
         if (
           resp.success &&
-          resp.signleUser.adminPermissions?.isProfileUpdate === false
+          resp.signleUser.adminPermissions?.isProfileUpdate !== true
         ) {
           toast.error("Profile editing is disabled by superadmin");
           return;
@@ -227,7 +227,7 @@ const CrmProfile = () => {
         const resp = await signleUsersApi(currentUser._id);
         if (
           resp.success &&
-          resp.signleUser.adminPermissions?.isProfileUpdate === false
+          resp.signleUser.adminPermissions?.isProfileUpdate !== true
         ) {
           toast.error("Profile editing is disabled by superadmin");
           return;
@@ -283,7 +283,7 @@ const CrmProfile = () => {
         const resp = await signleUsersApi(currentUser._id);
         if (
           resp.success &&
-          resp.signleUser.adminPermissions?.isProfileUpdate === false
+          resp.signleUser.adminPermissions?.isProfileUpdate !== true
         ) {
           toast.error("Profile editing is disabled by superadmin");
           return;
@@ -645,7 +645,7 @@ const CrmProfile = () => {
                       setVapiConfigOpen(true);
                     }}
                     disabled={authUser()?.user?.role === "admin" || authUser()?.user?.role === "subadmin" 
-                      ? userData?.adminPermissions?.isProfileUpdate === false 
+                      ? userData?.adminPermissions?.isProfileUpdate !== true 
                       : false}
                   >
                     {vapiConfig.apiKey ? "Edit Vapi Config" : "Configure Vapi"}
@@ -658,8 +658,7 @@ const CrmProfile = () => {
             {(() => {
               const currentUser = authUser()?.user;
               const canEditProfile = currentUser?.role === "superadmin" || 
-                (currentUser?.role === "admin" && userData?.adminPermissions?.isProfileUpdate !== false) ||
-                (currentUser?.role === "subadmin" && userData?.adminPermissions?.isProfileUpdate !== false);
+                (currentUser?.role === "admin" && userData?.adminPermissions?.isProfileUpdate === true);
               
               if (!canEditProfile) return null;
               

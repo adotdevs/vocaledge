@@ -36,11 +36,12 @@ import {
   NotificationsActive,
   FolderOpen,
   FilterList,
+  Campaign,
 } from '@mui/icons-material';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useAuthUser, useSignOut } from "react-auth-kit";
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { logoutApi, getEmailQueueStatusApi, allUsersApi, getCallQueueStatusApi, getCallStatisticsApi, getReminderBadgeCountApi } from '../../../Api/Service';
+import { logoutApi, getEmailQueueStatusApi, getCallQueueStatusApi, getCallStatisticsApi, getReminderBadgeCountApi } from '../../../Api/Service';
 import { toast } from 'react-toastify';
 import io from 'socket.io-client';
 import { getBackendUrl } from '../../../config/appConfig';
@@ -49,6 +50,8 @@ import {
   getCachedLeadStatuses,
   subscribeLeadStatuses,
 } from './components/leadStatusCache';
+import { getStatusColor } from './components/leadStatusStyles';
+import useLiveCrmUser from './useLiveCrmUser';
 
 const LEADS_LINK = '/admin/dashboard/crm';
 
@@ -71,32 +74,12 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [leadStatuses, setLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
   const [internalMobileMenu, setInternalMobileMenu] = useState(false);
-  const [currentUserLatest, setCurrentUserLatest] = useState(null);
   const previousPathRef = useRef(location.pathname);
+  const { can, role } = useLiveCrmUser();
 
   // Use internal state if setisMobileMenu not provided
   const mobileMenuState = isMobileMenu ?? internalMobileMenu;
   const setMobileMenuState = setisMobileMenu ?? setInternalMobileMenu;
-
-  // Fetch latest user with permissions to gate menu items accurately
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const u = user()?.user;
-        if (!u?._id) return;
-        const resp = await allUsersApi({ search: u._id, limit: 1 });
-        if (resp.success && resp.allUsers?.length) {
-          setCurrentUserLatest(resp.allUsers[0]);
-        } else {
-          setCurrentUserLatest(u);
-        }
-      } catch (e) {
-        // Non-blocking; fall back to token payload
-        setCurrentUserLatest(user()?.user || null);
-      }
-    };
-    fetchUser();
-  }, []);
 
   useEffect(() => {
     const fetchReminderBadge = async () => {
@@ -110,14 +93,14 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
       }
     };
 
-    if (user()?.user?.role) {
+    if (can('canManageReminders')) {
       fetchReminderBadge();
       const interval = setInterval(fetchReminderBadge, 60000);
       return () => clearInterval(interval);
     }
 
     return undefined;
-  }, [user]);
+  }, [can]);
 
   // ✅ Socket.io for real-time email queue updates
   useEffect(() => {
@@ -158,20 +141,9 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
     };
   }, [user]);
 
-  // Build menu based on permissions (focus: restricting admins)
-  const effectiveUser = currentUserLatest || user()?.user;
-  const role = effectiveUser?.role;
   const isSuperadmin = role === 'superadmin';
-  const isAdmin = role === 'admin';
-  const isSubadmin = role === 'subadmin';
-
-  const hasCrmAccess =
-    isSuperadmin ||
-    (isAdmin && effectiveUser?.adminPermissions?.accessCrm === true) ||
-    (isSubadmin && effectiveUser?.permissions?.accessCrm === true);
-
-  const canAccessCallDashboard =
-    isSuperadmin || (isAdmin && effectiveUser?.adminPermissions?.canAccessCallDashboard === true);
+  const hasCrmAccess = can('accessCrm');
+  const canAccessCallDashboard = can('canAccessCallDashboard');
 
   // ✅ Fetch pending and failed calls counts for badges
   useEffect(() => {
@@ -211,27 +183,27 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
     // Refresh every 10 seconds
     const interval = setInterval(fetchCallCounts, 10000);
     return () => clearInterval(interval);
-  }, [canAccessCallDashboard, currentUserLatest]);
-
-  const canAccessAiInstructions =
-    isSuperadmin || (isAdmin && effectiveUser?.adminPermissions?.canAccessAiInstructions === true);
+  }, [canAccessCallDashboard]);
 
   const menuItems = [];
   if (hasCrmAccess) {
-
     menuItems.push({ icon: <People />, label: 'Leads', link: "/admin/dashboard/crm" });
-    menuItems.push({
-      icon: <NotificationsActive />,
-      label: 'Reminders',
-      link: '/admin/crm/reminders',
-      badge: true,
-      badgeCount: reminderBadgeCount,
-    });
-    menuItems.push({
-      icon: <FolderOpen />,
-      label: 'Document Library',
-      link: '/admin/crm/documents',
-    });
+    if (can('canManageReminders')) {
+      menuItems.push({
+        icon: <NotificationsActive />,
+        label: 'Reminders',
+        link: '/admin/crm/reminders',
+        badge: true,
+        badgeCount: reminderBadgeCount,
+      });
+    }
+    if (can('canManageDocuments')) {
+      menuItems.push({
+        icon: <FolderOpen />,
+        label: 'Document Library',
+        link: '/admin/crm/documents',
+      });
+    }
   }
 
   // Call-related menu items (will be in dropdown)
@@ -271,6 +243,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
 
   // Admin Management (CRM) - superadmin only
   if (isSuperadmin) {
+    menuItems.push({ icon: <Campaign />, label: 'Messages', link: "/admin/crm/messages" });
     menuItems.push({ icon: <AdminPanelSettings />, label: 'Admin Management', link: "/admin/crm/admin-management" });
   }
 
@@ -281,7 +254,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   }
 
   // Add Profile link for all admins and superadmin
-  if (user()?.user?.role === 'admin' || user()?.user?.role === 'subadmin' || user()?.user?.role === 'superadmin') {
+  if (can('isProfileUpdate')) {
     menuItems.push({ icon: <Settings />, label: 'My Profile', link: "/admin/crm/profile" });
   }
 
@@ -575,6 +548,16 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                                   py: 1.25,
                                 }}
                               >
+                                <Box
+                                  sx={{
+                                    width: 8,
+                                    height: 8,
+                                    borderRadius: '50%',
+                                    bgcolor: getStatusColor(status),
+                                    mr: 1,
+                                    flexShrink: 0,
+                                  }}
+                                />
                                 <ListItemText
                                   primary={status.label}
                                   primaryTypographyProps={{

@@ -10,6 +10,7 @@ const {
   parseReminderDateTimeInUk,
   getUkDayBounds,
 } = require('../utils/reminderTimezone');
+const { hasCrmPermission, denyCrmPermission } = require('../utils/crmPermissions');
 
 const canUserAccessLead = async (lead, user) => {
   if (!lead || lead.isDeleted) return false;
@@ -99,6 +100,9 @@ const formatReminderList = async (reminders) => {
 };
 
 exports.createReminder = catchAsyncErrors(async (req, res, next) => {
+  if (!hasCrmPermission(req.user, 'canManageReminders')) {
+    return denyCrmPermission(res, 'Reminders are turned off for your account');
+  }
   const { leadId, title, description, reminderDateTime, notifyBeforeMinutes, date, time } = req.body;
 
   if (!leadId) {
@@ -159,6 +163,9 @@ exports.createReminder = catchAsyncErrors(async (req, res, next) => {
 });
 
 exports.getReminders = catchAsyncErrors(async (req, res) => {
+  if (!hasCrmPermission(req.user, 'canManageReminders')) {
+    return denyCrmPermission(res, 'Reminders are turned off for your account');
+  }
   const Reminder = await getReminderModel();
   const { status, filter, leadId } = req.query;
 
@@ -213,6 +220,9 @@ exports.getReminderById = catchAsyncErrors(async (req, res, next) => {
 });
 
 exports.updateReminder = catchAsyncErrors(async (req, res, next) => {
+  if (!hasCrmPermission(req.user, 'canManageReminders')) {
+    return denyCrmPermission(res, 'Reminders are turned off for your account');
+  }
   const Reminder = await getReminderModel();
   const reminder = await Reminder.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
 
@@ -267,6 +277,9 @@ exports.updateReminder = catchAsyncErrors(async (req, res, next) => {
 });
 
 exports.deleteReminder = catchAsyncErrors(async (req, res, next) => {
+  if (!hasCrmPermission(req.user, 'canManageReminders')) {
+    return denyCrmPermission(res, 'Reminders are turned off for your account');
+  }
   const Reminder = await getReminderModel();
   const ReminderNotification = await getReminderNotificationModel();
   const reminder = await Reminder.findOne({ _id: req.params.id, isDeleted: { $ne: true } });

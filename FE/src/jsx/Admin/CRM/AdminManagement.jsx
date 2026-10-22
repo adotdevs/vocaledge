@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Sidebar from "./Sidebar.js";
 import CrmAppBarActions from './components/CrmAppBarActions';
 import {
@@ -32,9 +32,6 @@ import {
   LinearProgress,
   Stack,
   Switch,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   Divider,
   CircularProgress,
   FormControlLabel,
@@ -50,10 +47,8 @@ import {
   Delete as DeleteIcon,
   VerifiedUser as VerifiedIcon,
   Warning as WarningIcon,
-  ExpandMore as ExpandMoreIcon,
   Security as SecurityIcon,
   People as PeopleIcon,
-  Business as CrmIcon,
   Settings as SettingsIcon,
   RestartAlt as RestartIcon
 } from '@mui/icons-material';
@@ -65,6 +60,7 @@ import {
    
 } from '@mui/material';
 import AdminSmtpConfigCardSection from "../components/AdminSmtpConfigCardSection";
+import CrmPermissionsDialog from "./components/CrmPermissionsDialog";
 
 const AdminManagementCRM = () => {
   const [users, setUsers] = useState([]);
@@ -313,7 +309,7 @@ const AdminManagementCRM = () => {
 
   // CRM-only permission categories
   const [permLoad, setPermLoad] = useState(null);
-  const [expandedAccordions, setExpandedAccordions] = useState({}); // Track expanded state per user+category
+  const [permUserId, setPermUserId] = useState(null);
   
   const handlePermissionChange = async (userId, key, value) => {
     setPermLoad({ userId, key });
@@ -387,13 +383,19 @@ const AdminManagementCRM = () => {
     }
   };
   
-  const handleAccordionChange = (userId, categoryIndex) => (event, isExpanded) => {
-    setExpandedAccordions(prev => ({
-      ...prev,
-      [`${userId}-${categoryIndex}`]: isExpanded
-    }));
+  const permUser = useMemo(() => {
+    if (!permUserId) return null;
+    return [...users, ...unVerified, ...subAdmins, ...unVerifiedSubAdmins]
+      .find((person) => person._id === permUserId) || null;
+  }, [permUserId, users, unVerified, subAdmins, unVerifiedSubAdmins]);
+
+  const handlePermissionToggle = (userId, key, value) => {
+    if (permUser?.role === "subadmin") {
+      return handleSubAdminPermissionChange(userId, key, value);
+    }
+    return handlePermissionChange(userId, key, value);
   };
-  
+
   // Handle Vapi Config update
   const handleVapiConfigChange = async () => {
     if (!vapiConfig.apiKey && vapiConfig.enabled) {
@@ -545,69 +547,6 @@ const AdminManagementCRM = () => {
     }
   };
 
-  const permissionCategories = [
-    {
-      name: 'Profile',
-      icon: <SettingsIcon />,
-      color: '#667eea',
-      permissions: [
-        { key: 'isProfileUpdate', label: 'Edit Profile', desc: "Allow administrator to edit their own profile information, Vapi configuration settings, and SIP configuration settings." }
-      ]
-    },
-    {
-      name: 'CRM Access',
-      icon: <CrmIcon />,
-      color: '#10b981',
-      permissions: [
-        { key: 'accessCrm', label: 'CRM Access', desc: "Allow access to CRM dashboard and features." },
-        { key: 'canManageCrmLeads', label: 'Manage Leads', desc: "Upload leads CSV and assign leads (admins only)." },
-        { key: 'canUploadLeads', label: 'Upload Leads CSV', desc: "Allow uploading leads via CSV in CRM." },
-        { key: 'canMakeCalls', label: 'Make Calls', desc: "Allow initiating calls from CRM." },
-        { key: 'canAccessCallDashboard', label: 'Call Dashboard', desc: "Allow access to Call Dashboard." },
-        { key: 'canAccessAiInstructions', label: 'AI Instructions', desc: "Allow access to AI Instructions editor." }
-      ]
-    },
-    {
-      name: 'Wallet Access',
-      icon: <PeopleIcon />,
-      color: '#f59e0b',
-      permissions: [
-        { key: 'accessWallet', label: 'Wallet Access', desc: "Allow access to wallet platform and all wallet features." },
-        { key: 'editWalletAddress', label: 'Wallet Addresses', desc: "Allow administrator to view and edit user wallet deposit addresses." }
-      ]
-    }
-  ];
-
-  const subadminPermissionCategories = [
-    {
-      name: 'Client Management',
-      icon: <PeopleIcon />,
-      color: '#667eea',
-      permissions: [
-        { key: 'viewClientDetails', label: 'View Client Details', desc: "Allow sub-admin to view personal details of assigned clients." },
-        { key: 'editUserProfile', label: 'Edit Client Profiles', desc: "Allow sub-admin to edit personal details of assigned clients." }
-      ]
-    },
-    {
-      name: 'CRM Access',
-      icon: <CrmIcon />,
-      color: '#10b981',
-      permissions: [
-        { key: 'accessCrm', label: 'CRM Access', desc: "Allow sub-admin to access CRM dashboard and features." }
-      ]
-    },
-    {
-      name: 'Wallet Access',
-      icon: <PeopleIcon />,
-      color: '#f59e0b',
-      permissions: [
-        { key: 'accessWallet', label: 'Wallet Access', desc: "Allow access to wallet platform and all wallet features." },
-        { key: 'editUserWallet', label: 'Edit Wallets', desc: "Allow sub-admin to edit user wallet balances and top-ups." },
-        { key: 'editWalletAddress', label: 'Wallet Addresses', desc: "Allow sub-admin to view and edit user wallet deposit addresses." }
-      ]
-    }
-  ];
-
   const darkCardStyles = {
     background: 'linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%)',
     border: '1px solid #333',
@@ -748,102 +687,14 @@ const AdminManagementCRM = () => {
 
           <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)', my: 2 }} />
 
-          {/* CRM Permissions */}
-          <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <SecurityIcon sx={{ color: 'primary.main', mr: 1, fontSize: 20 }} />
-              <Typography variant="subtitle2" fontWeight={600} sx={{ color: 'grey.100' }}>
-                CRM Permissions
-              </Typography>
-            </Box>
-
-            {permissionCategories.map((category, index) => (
-              <Accordion
-                key={index}
-                expanded={expandedAccordions[`${user._id}-${index}`] || false}
-                onChange={handleAccordionChange(user._id, index)}
-                sx={{
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '8px !important',
-                  mb: 1,
-                  '&:before': { display: 'none' },
-                  boxShadow: 'none'
-                }}
-              >
-                <AccordionSummary
-                  expandIcon={<ExpandMoreIcon sx={{ color: 'grey.400' }} />}
-                  sx={{
-                    minHeight: '48px',
-                    '& .MuiAccordionSummary-content': {
-                      my: 1,
-                      alignItems: 'center'
-                    }
-                  }}
-                >
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                    <Box sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 32,
-                      height: 32,
-                      borderRadius: '50%',
-                      bgcolor: `${category.color}20`,
-                      color: category.color,
-                      mr: 1.5
-                    }}>
-                      {category.icon}
-                    </Box>
-                    <Typography variant="body2" fontWeight={600} sx={{ color: 'grey.200' }}>
-                      {category.name}
-                    </Typography>
-                  </Box>
-                </AccordionSummary>
-                <AccordionDetails sx={{ pt: 0 }}>
-                  <Stack spacing={1.5}>
-                    {category.permissions.map((permission) => (
-                      <Box
-                        key={permission.key}
-                        sx={{
-                          p: 1.5,
-                          borderRadius: 1,
-                          bgcolor: 'rgba(255, 255, 255, 0.02)',
-                          border: '1px solid rgba(255, 255, 255, 0.05)'
-                        }}
-                      >
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                          <Typography variant="body2" fontWeight={500} sx={{ color: 'grey.100' }}>
-                            {permission.label}
-                          </Typography>
-                          {permLoad?.userId === user._id && permLoad?.key === permission.key ? (
-                            <CircularProgress size={20} />
-                          ) : (
-                            <Switch
-                              size="small"
-                              checked={user.adminPermissions?.[permission.key] || false}
-                              onChange={(e) => handlePermissionChange(user._id, permission.key, e.target.checked)}
-                              sx={{
-                                '& .MuiSwitch-switchBase.Mui-checked': {
-                                  color: category.color
-                                },
-                                '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
-                                  backgroundColor: category.color
-                                }
-                              }}
-                            />
-                          )}
-                        </Box>
-                        <Typography variant="caption" sx={{ color: 'grey.500', display: 'block' }}>
-                          {permission.desc}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </AccordionDetails>
-              </Accordion>
-            ))}
-          </Box>
+          <Button
+            onClick={() => setPermUserId(user._id)}
+            variant="outlined"
+            fullWidth
+            startIcon={<SecurityIcon />}
+          >
+            Permissions
+          </Button>
 
           <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)', my: 2 }} />
 
@@ -1104,102 +955,14 @@ const AdminManagementCRM = () => {
 
           <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)', my: 2 }} />
 
-          {/* CRM Permissions for Sub Admin */}
-          <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <SecurityIcon sx={{ color: 'secondary.main', mr: 1, fontSize: 20 }} />
-              <Typography variant="subtitle2" fontWeight={600} sx={{ color: 'grey.100' }}>
-                Permissions
-              </Typography>
-            </Box>
-
-            {subadminPermissionCategories.map((category, index) => (
-              <Accordion
-                key={index}
-                expanded={expandedAccordions[`${user._id}-${index}`] || false}
-                onChange={handleAccordionChange(user._id, index)}
-                sx={{
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '8px !important',
-                  mb: 1,
-                  '&:before': { display: 'none' },
-                  boxShadow: 'none'
-                }}
-              >
-                <AccordionSummary
-                  expandIcon={<ExpandMoreIcon sx={{ color: 'grey.400' }} />}
-                  sx={{
-                    minHeight: '48px',
-                    '& .MuiAccordionSummary-content': {
-                      my: 1,
-                      alignItems: 'center'
-                    }
-                  }}
-                >
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                    <Box sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 32,
-                      height: 32,
-                      borderRadius: '50%',
-                      bgcolor: `${category.color}20`,
-                      color: category.color,
-                      mr: 1.5
-                    }}>
-                      {category.icon}
-                    </Box>
-                    <Typography variant="body2" fontWeight={600} sx={{ color: 'grey.200' }}>
-                      {category.name}
-                    </Typography>
-                  </Box>
-                </AccordionSummary>
-                <AccordionDetails sx={{ pt: 0 }}>
-                  <Stack spacing={1.5}>
-                    {category.permissions.map((permission) => (
-                      <Box
-                        key={permission.key}
-                        sx={{
-                          p: 1.5,
-                          borderRadius: 1,
-                          bgcolor: 'rgba(255, 255, 255, 0.02)',
-                          border: '1px solid rgba(255, 255, 255, 0.05)'
-                        }}
-                      >
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                          <Typography variant="body2" fontWeight={500} sx={{ color: 'grey.100' }}>
-                            {permission.label}
-                          </Typography>
-                          {permLoad?.userId === user._id && permLoad?.key === permission.key ? (
-                            <CircularProgress size={20} />
-                          ) : (
-                            <Switch
-                              size="small"
-                              checked={user.permissions?.[permission.key] || false}
-                              onChange={(e) => handleSubAdminPermissionChange(user._id, permission.key, e.target.checked)}
-                              sx={{
-                                '& .MuiSwitch-switchBase.Mui-checked': {
-                                  color: category.color
-                                },
-                                '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
-                                  backgroundColor: category.color
-                                }
-                              }}
-                            />
-                          )}
-                        </Box>
-                        <Typography variant="caption" sx={{ color: 'grey.500', display: 'block' }}>
-                          {permission.desc}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </AccordionDetails>
-              </Accordion>
-            ))}
-          </Box>
+          <Button
+            onClick={() => setPermUserId(user._id)}
+            variant="outlined"
+            fullWidth
+            startIcon={<SecurityIcon />}
+          >
+            Permissions
+          </Button>
 
           <AdminSmtpConfigCardSection
             user={user}
@@ -1995,6 +1758,13 @@ const AdminManagementCRM = () => {
           </Box>
         )}
       </Box>
+      <CrmPermissionsDialog
+        user={permUser}
+        open={Boolean(permUser)}
+        onClose={() => setPermUserId(null)}
+        onToggle={handlePermissionToggle}
+        savingKey={permLoad && permUser && permLoad.userId === permUser._id ? permLoad.key : null}
+      />
     </Box>
   );
 };

@@ -30,6 +30,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuthUser } from 'react-auth-kit';
+import useLiveCrmUser from './useLiveCrmUser';
 import Sidebar from './Sidebar';
 import CrmAppBarActions from './components/CrmAppBarActions';
 import {
@@ -52,6 +53,8 @@ const statusColor = {
 const Reminders = () => {
   const navigate = useNavigate();
   const authUser = useAuthUser();
+  const { can, ready } = useLiveCrmUser();
+  const canManage = can('canManageReminders');
   const isSuperAdmin = authUser()?.user?.role === 'superadmin';
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenu, setIsMobileMenu] = useState(false);
@@ -104,8 +107,9 @@ const Reminders = () => {
       setTabValue(0);
       return;
     }
+    if (!canManage) return;
     fetchReminders();
-  }, [fetchReminders, isSuperAdmin, tabValue]);
+  }, [fetchReminders, isSuperAdmin, tabValue, canManage]);
 
   const handleComplete = async (reminder) => {
     try {
@@ -219,6 +223,10 @@ const Reminders = () => {
         </AppBar>
 
         <Box sx={{ p: { xs: 2, sm: 3 }, flex: 1 }}>
+          {!ready ? null : !canManage ? (
+            <Typography color="text.secondary">Reminders are turned off for your account.</Typography>
+          ) : (
+          <>
           <Card elevation={2} sx={{ mb: 3, borderRadius: 3 }}>
             <CardContent>
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }}>
@@ -401,6 +409,8 @@ const Reminders = () => {
                 </Grid>
               ))}
             </Grid>
+          )}
+          </>
           )}
         </Box>
       </Box>

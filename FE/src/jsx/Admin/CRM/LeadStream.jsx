@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import sseClient from '../../../utils/sseClient';
+import { getCachedLeadStatuses } from './components/leadStatusCache';
+import { getStatusChipSx, getStatusColor } from './components/leadStatusStyles';
 import {
     Box,
     Paper,
@@ -136,6 +138,8 @@ import { useAuthUser } from 'react-auth-kit';
 import { mapSipEventsToStatus } from '../../../utils/callStatus';
 import { formatReminderDateTime } from '../../../utils/reminderTimezone';
 import LeadEditableField from './components/LeadEditableField';
+import useLiveCrmUser from './useLiveCrmUser';
+import CrmAccessDenied from './components/CrmAccessDenied';
 
 const resolveCallMetadata = (call) => {
     const metadata = call?.metadata || {};
@@ -279,6 +283,18 @@ const LeadStream = () => {
     const { leadId } = useParams();
     const navigate = useNavigate();
     const authUser = useAuthUser();
+    const { can, ready } = useLiveCrmUser();
+    const [crmAccessDenied, setCrmAccessDenied] = useState(false);
+    const canEdit = can('canEditLeads');
+    const canAssign = can('canAssignLeads');
+    const canComment = can('canCommentOnLeads');
+    const canChangeStatus = can('canChangeLeadStatus');
+    const canManageStatuses = can('canManageLeadStatuses');
+    const canMakeCalls = can('canMakeCalls');
+    const canViewCallLogs = can('canViewCallLogs');
+    const canViewCallRecordings = can('canViewCallRecordings');
+    const canManageReminders = can('canManageReminders');
+    const canViewLeadSource = can('canViewLeadSource');
     const [loading, setLoading] = useState(true);
     const [lead, setLead] = useState(null);
     const [activities, setActivities] = useState([]);
@@ -317,34 +333,6 @@ const LeadStream = () => {
     const [assignDialogOpen, setAssignDialogOpen] = useState(false);
     const [selectedAgentId, setSelectedAgentId] = useState('');
     const [assigning, setAssigning] = useState(false);
-    const [canEdit, setCanEdit] = useState(false);
-    const [canAssign, setCanAssign] = useState(false);
-    const canManageStatuses = useMemo(() => (
-        currentUserLatest?.role === 'superadmin'
-        || (currentUserLatest?.role === 'admin' && currentUserLatest?.adminPermissions?.canManageCrmLeads)
-    ), [currentUserLatest]);
-    const canMakeCalls = useMemo(() => {
-        if (!currentUserLatest) return true; // fallback; backend will enforce
-        if (currentUserLatest.role === 'superadmin') return true;
-        if (currentUserLatest.role === 'admin') return !!currentUserLatest.adminPermissions?.canMakeCalls;
-        return true;
-    }, [currentUserLatest]);
-    
-    const canViewCallLogs = useMemo(() => {
-        if (!currentUserLatest) return false; // fallback; default to false for safety
-        if (currentUserLatest.role === 'superadmin') return true;
-        if (currentUserLatest.role === 'admin') return !!currentUserLatest.adminPermissions?.canViewCallLogs;
-        if (currentUserLatest.role === 'subadmin') return !!currentUserLatest.permissions?.canViewCallLogs;
-        return false;
-    }, [currentUserLatest]);
-    
-    const canViewCallRecordings = useMemo(() => {
-        if (!currentUserLatest) return false; // fallback; default to false for safety
-        if (currentUserLatest.role === 'superadmin') return true;
-        if (currentUserLatest.role === 'admin') return !!currentUserLatest.adminPermissions?.canViewCallRecordings;
-        if (currentUserLatest.role === 'subadmin') return !!currentUserLatest.permissions?.canViewCallRecordings;
-        return false;
-    }, [currentUserLatest]);
     
     // ✅ NEW: Comment Feature States
     const [commentMenuAnchor, setCommentMenuAnchor] = useState(null);
@@ -406,34 +394,27 @@ const LeadStream = () => {
                     user: updatedCurrentUser.email
                 });
             }
-            // ✅ SECURITY: Check CRM access permissions
-            if (updatedCurrentUser.role === "admin" || authUser().user.role === "manager") {
-                if (!updatedCurrentUser.adminPermissions?.accessCrm) {
-                    toast.error("Access denied: No CRM permission");
-                    navigate("/admin/dashboard/crm");
-                    return;
-                }
-            } else if (updatedCurrentUser.role === "subadmin") {
-                if (!updatedCurrentUser.permissions?.accessCrm) {
-                    toast.error("Access denied: No CRM permission");
-                    navigate("/admin/dashboard/crm");
-                    return;
-                }
-            } else if (updatedCurrentUser.role === "user") {
+            const crmAllowed = updatedCurrentUser.role === "superadmin" || (
+                (updatedCurrentUser.role === "admin" || updatedCurrentUser.role === "manager")
+                    ? !!updatedCurrentUser.adminPermissions?.accessCrm
+                    : updatedCurrentUser.role === "subadmin"
+                        ? !!updatedCurrentUser.permissions?.accessCrm
+                        : false
+            );
+            if (!crmAllowed && updatedCurrentUser.role !== "user") {
+                setCrmAccessDenied(true);
+                return;
+            }
+            if (updatedCurrentUser.role === "user") {
                 toast.error("Access denied: This is an admin area");
                 navigate("/dashboard");
                 return;
             }
 
-            // Set edit permission
-            const canUserEdit = updatedCurrentUser.role === 'superadmin' || 
-                               (updatedCurrentUser.role === 'admin' && updatedCurrentUser.adminPermissions?.canManageCrmLeads);
-            setCanEdit(canUserEdit);
-
-            // Set assign permission
-            const canUserAssign = updatedCurrentUser.role === 'superadmin' || 
-                                 (updatedCurrentUser.role === 'admin' && updatedCurrentUser.adminPermissions?.canManageCrmLeads);
-            setCanAssign(canUserAssign);
+            const permissionBag = updatedCurrentUser.role === 'subadmin'
+                ? updatedCurrentUser.permissions
+                : updatedCurrentUser.adminPermissions;
+            const canUserAssign = updatedCurrentUser.role === 'superadmin' || permissionBag?.canAssignLeads === true;
 
             // Fetch agents if can assign
             if (canUserAssign) {
@@ -2069,6 +2050,10 @@ const LeadStream = () => {
 
     // Editable fields use LeadEditableField (stable module component — avoids remounting manage dialog)
 
+    if (crmAccessDenied) {
+        return <CrmAccessDenied />;
+    }
+
     if (loading && !lead) {
         return (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'background.default' }}>
@@ -2216,12 +2201,11 @@ const LeadStream = () => {
                         <Chip 
                             label={lead.status} 
                             size="small"
-                            color={
-                                lead.status === 'Active' ? 'success' :
-                                lead.status === 'New' ? 'primary' :
-                                lead.status === 'Call Back' ? 'warning' : 'default'
-                            }
-                                    sx={{ fontWeight: 600, display: { xs: 'none', sm: 'inline-flex' } }}
+                            sx={{
+                                fontWeight: 600,
+                                display: { xs: 'none', sm: 'inline-flex' },
+                                ...getStatusChipSx(getStatusColor(lead.status, getCachedLeadStatuses() || [])),
+                            }}
                         />
                             )}
                         </Box>
@@ -2308,9 +2292,9 @@ const LeadStream = () => {
                                             <Typography variant="caption" sx={{ opacity: 0.9 }}>
                                                 Created {new Date(lead.createdAt).toLocaleDateString()}
                                             </Typography>
-                                            {(lead.remarks || lead.source) && (
+                                            {(lead.remarks || (canViewLeadSource && lead.source)) && (
                                                 <Chip
-                                                    label={lead.source === 'takebackanalytics' ? 'From website form' : (lead.remarks || lead.source)}
+                                                    label={canViewLeadSource && lead.source === 'takebackanalytics' && !lead.remarks ? 'From website form' : (lead.remarks || lead.source)}
                                                     size="small"
                                                     sx={{ mt: 1, maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }}
                                                     color="info"
@@ -2357,7 +2341,7 @@ const LeadStream = () => {
                                                             Delete All
                                                         </Button>
                                                     )}
-                                                {lead.phone && (
+                                                {lead.phone && canMakeCalls && (
                                                         <>
                                                             {currentCallStatus && (
                                                                 <Chip 
@@ -2828,12 +2812,12 @@ const LeadStream = () => {
                                             </Box>
 
                                             {/* Form submission / Source (when lead came from website form e.g. takebackanalytics) */}
-                                            {(lead.remarks || lead.source || lead.caseNotes || lead.lossRange) && (
+                                            {(lead.remarks || (canViewLeadSource && lead.source) || lead.caseNotes || lead.lossRange) && (
                                                 <>
                                                     <Divider />
                                                     <Box>
                                                         <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 2, color: 'primary.main' }}>
-                                                            Form submission (source)
+                                                            Form submission
                                                         </Typography>
                                                         <Stack spacing={2}>
                                                             {lead.remarks && (
@@ -2866,7 +2850,7 @@ const LeadStream = () => {
                                                                     </Typography>
                                                                 </Box>
                                                             )}
-                                                            {lead.source && !lead.remarks && (
+                                                            {canViewLeadSource && lead.source && !lead.remarks && (
                                                                 <Box>
                                                                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                                                                         Source
@@ -2900,7 +2884,7 @@ const LeadStream = () => {
                                                         onEditChange={(value) => handleEditChange('status', value)}
                                                         onSave={() => handleSaveField('status')}
                                                         onCancel={() => handleCancelEdit('status')}
-                                                        canEdit={canEdit}
+                                                        canEdit={canChangeStatus}
                                                         allowManageStatuses={canManageStatuses}
                                                     />
                                                     {lead.agent && (
@@ -3018,8 +3002,10 @@ const LeadStream = () => {
                                                     lead={lead}
                                                     onStatusChange={handleInlineStatusChange}
                                                     saving={updatingLeadStatus}
+                                                    disabled={!canChangeStatus}
                                                 />
                                             )}
+                                            {canManageReminders && (
                                             <Button
                                                 size="small"
                                                 variant="outlined"
@@ -3029,6 +3015,7 @@ const LeadStream = () => {
                                             >
                                                 Set Reminder
                                             </Button>
+                                            )}
                                             <FormControl size="small" sx={{ minWidth: 150 }}>
                                                 <InputLabel>Filter Type</InputLabel>
                                                 <Select
@@ -3117,7 +3104,7 @@ const LeadStream = () => {
                                 </Box>
 
                                 {/* Comment Input - Professional Design - Only show when not on Call History tab */}
-                                {currentTab !== 0 && (
+                                {currentTab !== 0 && ready && canComment && (
                                 <Box sx={{ p: 3, bgcolor: 'background.paper', borderBottom: 2, borderColor: 'divider', flexShrink: 0 }}>
                                     <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
                                         <Avatar 
@@ -3973,7 +3960,7 @@ const LeadStream = () => {
                                             </Typography>
                                             {(activityFilter === 'reminder' || activityFilter !== 'all') && (
                                                 <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
-                                                    {activityFilter === 'reminder' && (
+                                                    {activityFilter === 'reminder' && canManageReminders && (
                                                         <Button
                                                             variant="contained"
                                                             size="small"
@@ -4104,6 +4091,7 @@ const LeadStream = () => {
                                                                             variant="outlined"
                                                                         />
                                                                     </Stack>
+                                                                    {canManageReminders && (
                                                                     <Stack direction="row" spacing={1} flexWrap="wrap">
                                                                         {reminder.status === 'pending' && (
                                                                             <Button
@@ -4137,6 +4125,7 @@ const LeadStream = () => {
                                                                             Delete
                                                                         </Button>
                                                                     </Stack>
+                                                                    )}
                                                                 </Paper>
                                                             </Box>
                                                         </Box>

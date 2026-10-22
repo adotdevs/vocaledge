@@ -1,11 +1,11 @@
 const getLeadStatusModel = require("../crmDB/models/leadStatusModel");
 
 const DEFAULT_LEAD_STATUSES = [
-  "New",
-  "Call Back",
-  "Not Active",
-  "Active",
-  "Not Interested",
+  { label: "New", color: "#1976d2" },
+  { label: "Call Back", color: "#ef6c00" },
+  { label: "Not Active", color: "#d32f2f" },
+  { label: "Active", color: "#2e7d32" },
+  { label: "Not Interested", color: "#757575" },
 ];
 
 const ensureDefaultLeadStatuses = async () => {
@@ -14,10 +14,11 @@ const ensureDefaultLeadStatuses = async () => {
   if (count > 0) return;
 
   await LeadStatus.insertMany(
-    DEFAULT_LEAD_STATUSES.map((label, index) => ({
-      label,
+    DEFAULT_LEAD_STATUSES.map((status, index) => ({
+      label: status.label,
+      color: status.color,
       sortOrder: index,
-      isDefault: label === "New",
+      isDefault: status.label === "New",
     }))
   );
 };

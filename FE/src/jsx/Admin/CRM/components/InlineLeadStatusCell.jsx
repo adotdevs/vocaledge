@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useState } from "react";
 import {
+    Box,
     Chip,
     CircularProgress,
     FormControl,
@@ -12,9 +13,9 @@ import {
     getCachedLeadStatuses,
     subscribeLeadStatuses,
 } from "./leadStatusCache";
-import { getLeadStatusChipProps } from "./leadStatusStyles";
+import { getStatusChipSx, getStatusColor } from "./leadStatusStyles";
 
-const InlineLeadStatusCell = memo(({ lead, onStatusChange, saving = false }) => {
+const InlineLeadStatusCell = memo(({ lead, onStatusChange, saving = false, disabled = false }) => {
     const [statuses, setStatuses] = useState(() => getCachedLeadStatuses() || []);
     const [open, setOpen] = useState(false);
 
@@ -35,7 +36,7 @@ const InlineLeadStatusCell = memo(({ lead, onStatusChange, saving = false }) => 
         onStatusChange?.(lead, nextStatus);
     };
 
-    const chipProps = getLeadStatusChipProps(currentStatus);
+    const statusColor = getStatusColor(currentStatus, statuses);
 
     return (
         <FormControl size="small" sx={{ minWidth: 0, maxWidth: "100%" }}>
@@ -45,7 +46,7 @@ const InlineLeadStatusCell = memo(({ lead, onStatusChange, saving = false }) => 
                 open={open}
                 onOpen={() => setOpen(true)}
                 onClose={() => setOpen(false)}
-                disabled={saving}
+                disabled={saving || disabled}
                 displayEmpty
                 renderValue={(selected) => (
                     <Chip
@@ -60,12 +61,11 @@ const InlineLeadStatusCell = memo(({ lead, onStatusChange, saving = false }) => 
                             </span>
                         }
                         size="small"
-                        color={chipProps.color}
-                        variant={chipProps.variant}
                         sx={{
                             fontWeight: 600,
                             cursor: saving ? "default" : "pointer",
                             maxWidth: "100%",
+                            ...getStatusChipSx(statusColor),
                         }}
                     />
                 )}
@@ -85,9 +85,20 @@ const InlineLeadStatusCell = memo(({ lead, onStatusChange, saving = false }) => 
                     PaperProps: { sx: { maxHeight: 280 } },
                 }}
             >
-                {labels.map((label) => (
-                    <MenuItem key={label} value={label} dense>
-                        {label}
+                {statuses.map((status) => (
+                    <MenuItem key={status._id || status.label} value={status.label} dense>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Box
+                                sx={{
+                                    width: 10,
+                                    height: 10,
+                                    borderRadius: "50%",
+                                    bgcolor: getStatusColor(status),
+                                    flexShrink: 0,
+                                }}
+                            />
+                            {status.label}
+                        </Box>
                     </MenuItem>
                 ))}
                 {currentStatus && !labels.includes(currentStatus) && (

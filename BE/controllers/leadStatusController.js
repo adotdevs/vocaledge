@@ -6,6 +6,18 @@ const {
   ensureDefaultLeadStatuses,
   getDefaultLeadStatusLabel,
 } = require("../utils/leadStatusHelpers");
+const { hasCrmPermission, denyCrmPermission } = require("../utils/crmPermissions");
+
+const normalizeHexColor = (value) => {
+  if (value === undefined || value === null || String(value).trim() === "") return "";
+  let hex = String(value).trim();
+  if (!hex.startsWith("#")) hex = `#${hex}`;
+  if (/^#[0-9a-fA-F]{3}$/.test(hex)) {
+    hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+  }
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+  return hex.toLowerCase();
+};
 
 exports.getLeadStatuses = catchAsyncErrors(async (req, res) => {
   await ensureDefaultLeadStatuses();
@@ -19,6 +31,9 @@ exports.getLeadStatuses = catchAsyncErrors(async (req, res) => {
 });
 
 exports.createLeadStatus = catchAsyncErrors(async (req, res, next) => {
+  if (!hasCrmPermission(req.user, "canManageLeadStatuses")) {
+    return denyCrmPermission(res, "You do not have permission to manage statuses");
+  }
   const label = String(req.body?.label || "").trim();
   if (!label) {
     return next(new ErrorHandler("Status label is required.", 400));
@@ -31,9 +46,15 @@ exports.createLeadStatus = catchAsyncErrors(async (req, res, next) => {
     return next(new ErrorHandler("This status already exists.", 400));
   }
 
+  const color = normalizeHexColor(req.body?.color);
+  if (color === null) {
+    return next(new ErrorHandler("Enter a valid color code like #1976d2.", 400));
+  }
+
   const maxOrder = await LeadStatus.findOne().sort({ sortOrder: -1 }).lean();
   const status = await LeadStatus.create({
     label,
+    color: color || "#1976d2",
     sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
     isDefault: false,
   });
@@ -46,6 +67,9 @@ exports.createLeadStatus = catchAsyncErrors(async (req, res, next) => {
 });
 
 exports.updateLeadStatus = catchAsyncErrors(async (req, res, next) => {
+  if (!hasCrmPermission(req.user, "canManageLeadStatuses")) {
+    return denyCrmPermission(res, "You do not have permission to manage statuses");
+  }
   const { id } = req.params;
   const LeadStatus = await getLeadStatusModel();
   const Lead = await getLeadModel();
@@ -65,6 +89,14 @@ exports.updateLeadStatus = catchAsyncErrors(async (req, res, next) => {
     return next(new ErrorHandler("Another status with this name already exists.", 400));
   }
 
+  let nextColor = null;
+  if (req.body?.color !== undefined) {
+    nextColor = normalizeHexColor(req.body.color);
+    if (!nextColor) {
+      return next(new ErrorHandler("Enter a valid color code like #1976d2.", 400));
+    }
+  }
+
   const oldLabel = current.label;
   if (oldLabel !== label) {
     await Lead.updateMany({ status: oldLabel }, { $set: { status: label } });
@@ -80,6 +112,10 @@ exports.updateLeadStatus = catchAsyncErrors(async (req, res, next) => {
     current.sortOrder = req.body.sortOrder;
   }
 
+  if (nextColor) {
+    current.color = nextColor;
+  }
+
   await current.save();
 
   res.status(200).json({
@@ -90,6 +126,9 @@ exports.updateLeadStatus = catchAsyncErrors(async (req, res, next) => {
 });
 
 exports.deleteLeadStatus = catchAsyncErrors(async (req, res, next) => {
+  if (!hasCrmPermission(req.user, "canManageLeadStatuses")) {
+    return denyCrmPermission(res, "You do not have permission to manage statuses");
+  }
   const { id } = req.params;
   const LeadStatus = await getLeadStatusModel();
   const Lead = await getLeadModel();

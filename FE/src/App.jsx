@@ -92,7 +92,7 @@ const App = () => {
     return (
         <div>
             <Router />
-            <ChatBot />
+            {/* <ChatBot /> */}
         </div>
     );
 }

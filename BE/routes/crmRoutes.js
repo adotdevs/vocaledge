@@ -48,6 +48,15 @@ const {
   deleteDocument,
   downloadDocument,
 } = require("../controllers/crmDocumentLibraryController");
+const {
+  createStaffMessage,
+  listStaffMessages,
+  updateStaffMessage,
+  resendStaffMessage,
+  getPendingStaffMessages,
+  dismissStaffMessage,
+  deleteStaffMessage,
+} = require("../controllers/staffMessageController");
 const multer = require('multer');
 
 // Configure multer for file uploads
@@ -195,9 +204,9 @@ router.route('/crm/uploadLeads').post(
 router.route('/crm/createLead').post(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, createLead);
 router.route('/crm/importUsersAsLeads').post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, importUsersAsLeads);
 router.route('/crm/lead-statuses').get(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin", "manager"), checkCrmAccess, getLeadStatuses);
-router.route('/crm/lead-statuses').post(isAuthorizedUser, authorizedRoles("superadmin", "admin"), checkCrmAccess, createLeadStatus);
-router.route('/crm/lead-statuses/:id').patch(isAuthorizedUser, authorizedRoles("superadmin", "admin"), checkCrmAccess, updateLeadStatus);
-router.route('/crm/lead-statuses/:id').delete(isAuthorizedUser, authorizedRoles("superadmin", "admin"), checkCrmAccess, deleteLeadStatus);
+router.route('/crm/lead-statuses').post(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, createLeadStatus);
+router.route('/crm/lead-statuses/:id').patch(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, updateLeadStatus);
+router.route('/crm/lead-statuses/:id').delete(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, deleteLeadStatus);
 router.route('/crm/getLeads').get(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, getLeads);
 // router.route('/crm/getLeads').get(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, getLeads);
 router.route('/crm/deleteLead/:id').delete(isAuthorizedUser,
@@ -210,7 +219,7 @@ router.route('/crm/editLead/:id').patch(isAuthorizedUser,
     authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, editLead);
 // superadmin and admin (admin limited by controller checks)
 router.route('/crm/assignLeads').post(isAuthorizedUser,
-    authorizedRoles("superadmin", "admin"), checkCrmAccess, assignLeadsToAgent);
+    authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, assignLeadsToAgent);
 router.route('/crm/bulkUpdateLeadStatus').post(isAuthorizedUser,
     authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, bulkUpdateLeadStatus);
 router.route('/exportLeads').get(isAuthorizedUser,
@@ -455,7 +464,7 @@ router.route('/crm/documents').get(
 
 router.route('/crm/documents').post(
   isAuthorizedUser,
-  authorizedRoles("superadmin", "admin"),
+  authorizedRoles("superadmin", "admin", "subadmin"),
   checkCrmAccess,
   documentUpload.single('file'),
   handleMulterError,
@@ -464,16 +473,59 @@ router.route('/crm/documents').post(
 
 router.route('/crm/documents/:id').patch(
   isAuthorizedUser,
-  authorizedRoles("superadmin", "admin"),
+  authorizedRoles("superadmin", "admin", "subadmin"),
   checkCrmAccess,
   updateDocument
 );
 
 router.route('/crm/documents/:id').delete(
   isAuthorizedUser,
-  authorizedRoles("superadmin", "admin"),
+  authorizedRoles("superadmin", "admin", "subadmin"),
   checkCrmAccess,
   deleteDocument
+);
+
+router.route('/crm/staff-messages').get(
+  isAuthorizedUser,
+  requireSuperAdmin,
+  checkCrmAccess,
+  listStaffMessages
+);
+router.route('/crm/staff-messages').post(
+  isAuthorizedUser,
+  requireSuperAdmin,
+  checkCrmAccess,
+  createStaffMessage
+);
+router.route('/crm/staff-messages/pending').get(
+  isAuthorizedUser,
+  authorizedRoles("admin", "subadmin"),
+  checkCrmAccess,
+  getPendingStaffMessages
+);
+router.route('/crm/staff-messages/:id').patch(
+  isAuthorizedUser,
+  requireSuperAdmin,
+  checkCrmAccess,
+  updateStaffMessage
+);
+router.route('/crm/staff-messages/:id').delete(
+  isAuthorizedUser,
+  requireSuperAdmin,
+  checkCrmAccess,
+  deleteStaffMessage
+);
+router.route('/crm/staff-messages/:id/resend').post(
+  isAuthorizedUser,
+  requireSuperAdmin,
+  checkCrmAccess,
+  resendStaffMessage
+);
+router.route('/crm/staff-messages/:id/dismiss').post(
+  isAuthorizedUser,
+  authorizedRoles("admin", "subadmin"),
+  checkCrmAccess,
+  dismissStaffMessage
 );
 
 router.route('/crm/documents/:id/download').get(

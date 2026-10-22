@@ -5,6 +5,7 @@ const User = require('../models/userModel'); // from main DB
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const ErrorHandler = require('../utils/errorHandler');
 const { logActivity } = require('./activityController');
+const { hasCrmPermission } = require('../utils/crmPermissions');
 
 // Helper function to format phone number with + prefix
 const formatPhoneNumber = (phone) => {
@@ -1299,19 +1300,12 @@ exports.bulkCallLeads = catchAsyncErrors(async (req, res, next) => {
             return next(new ErrorHandler('Lead IDs array is required', 400));
         }
 
-        // ✅ CRITICAL: Check permissions for admin users
-        if (req.user && req.user.role === 'admin') {
-            const { getCachedUserPermissions } = require('./crmController');
-            const userPerms = await getCachedUserPermissions(req.user._id);
-            
-            // Check if admin has permission to make calls
-            if (!userPerms?.adminPermissions?.canMakeCalls) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'You do not have permission to make calls. Please contact your administrator.',
-                    msg: 'You do not have permission to make calls. Please contact your administrator.'
-                });
-            }
+        if (req.user && !hasCrmPermission(req.user, 'canMakeCalls')) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to make calls. Please contact your administrator.',
+                msg: 'You do not have permission to make calls. Please contact your administrator.'
+            });
         }
 
         // ✅ CRITICAL: All admins and superadmin MUST configure their own Vapi keys (no default fallback)
@@ -1752,9 +1746,19 @@ exports.getCallHistory = catchAsyncErrors(async (req, res, next) => {
             .sort({ createdAt: -1 })
             .limit(50);
 
+        const includeRecordings = hasCrmPermission(req.user, 'canViewCallRecordings');
+        const visibleCalls = includeRecordings
+            ? calls
+            : calls.map((call) => {
+                const plain = call.toObject();
+                delete plain.recordingUrl;
+                delete plain.stereoRecordingUrl;
+                return plain;
+            });
+
         res.status(200).json({
             success: true,
-            calls: calls
+            calls: visibleCalls
         });
 
     } catch (error) {

@@ -880,6 +880,11 @@ exports.updateSingleUser = catchAsyncErrors(async (req, res, next) => {
     currency, AiTradingPercentage,
   } = req.body;
 
+  const isSelfUpdate = req.user._id.toString() === String(id);
+  if (isSelfUpdate && req.user.role !== "superadmin" && req.user.adminPermissions?.isProfileUpdate !== true) {
+    return next(new errorHandler("Profile editing is disabled", 403));
+  }
+
   if (req.user.role === "subadmin") {
     if (req.user.permissions?.viewClientDetails !== true) {
       return next(new errorHandler("Access denied: No permission to view client details", 403));
@@ -3232,6 +3237,13 @@ exports.updateAdminVapiConfig = catchAsyncErrors(async (req, res) => {
     });
   }
 
+  if (!isSuperAdmin && req.user.adminPermissions?.isProfileUpdate !== true) {
+    return res.status(403).json({
+      success: false,
+      msg: 'Profile editing is disabled'
+    });
+  }
+
   // All admins and superadmin MUST configure their own Vapi keys (no default fallback)
   // Superadmin can also configure their own keys (no longer uses default from env)
   // The enabled field is now just for tracking, but all admins/superadmin must have apiKey configured
@@ -3397,6 +3409,13 @@ exports.updateAdminSipConfig = catchAsyncErrors(async (req, res) => {
     });
   }
 
+  if (!isSuperAdmin && req.user.adminPermissions?.isProfileUpdate !== true) {
+    return res.status(403).json({
+      success: false,
+      msg: 'Profile editing is disabled'
+    });
+  }
+
   // Prepare update object
   const updateData = {};
   if (server !== undefined) updateData['sipConfig.server'] = server || null;
@@ -3516,6 +3535,13 @@ exports.updateAdminSmtpConfig = catchAsyncErrors(async (req, res) => {
     return res.status(403).json({
       success: false,
       msg: 'You can only update your own SMTP configuration',
+    });
+  }
+
+  if (!isSuperAdmin && req.user.adminPermissions?.isProfileUpdate !== true) {
+    return res.status(403).json({
+      success: false,
+      msg: 'Profile editing is disabled',
     });
   }
 

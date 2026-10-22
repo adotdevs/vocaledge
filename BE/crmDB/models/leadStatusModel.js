@@ -4,6 +4,7 @@ const connectCRMDatabase = require("../../config/crmDatabase");
 const leadStatusSchema = new mongoose.Schema(
   {
     label: { type: String, required: true, unique: true, trim: true },
+    color: { type: String, default: "", trim: true },
     sortOrder: { type: Number, default: 0 },
     isDefault: { type: Boolean, default: false },
   },

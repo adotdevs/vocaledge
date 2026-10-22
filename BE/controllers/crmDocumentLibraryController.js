@@ -2,6 +2,7 @@ const cloudinary = require('cloudinary').v2;
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const ErrorHandler = require('../utils/errorHandler');
 const getCrmDocumentModel = require('../crmDB/models/crmDocumentModel');
+const { hasCrmPermission, denyCrmPermission } = require('../utils/crmPermissions');
 const {
   isCloudinaryPdfUrl,
   fetchCloudinaryPdfBuffer,
@@ -57,8 +58,7 @@ const uploadToCloudinary = (file) =>
       .end(file.buffer);
   });
 
-const canManageDocuments = (user) =>
-  user?.role === 'superadmin' || user?.role === 'admin';
+const canManageDocuments = (user) => hasCrmPermission(user, 'canManageDocuments');
 
 const formatDocument = (doc) => {
   const previewUrl =
@@ -73,6 +73,9 @@ const formatDocument = (doc) => {
 };
 
 exports.getDocumentCategories = catchAsyncErrors(async (req, res) => {
+  if (!canManageDocuments(req.user)) {
+    return denyCrmPermission(res, 'Documents are turned off for your account');
+  }
   const CrmDocument = await getCrmDocumentModel();
   const customCategories = await CrmDocument.distinct('category', { isDeleted: false });
   const categories = [...new Set([...DEFAULT_CATEGORIES, ...customCategories.filter(Boolean)])].sort(
@@ -86,6 +89,9 @@ exports.getDocumentCategories = catchAsyncErrors(async (req, res) => {
 });
 
 exports.listDocuments = catchAsyncErrors(async (req, res) => {
+  if (!canManageDocuments(req.user)) {
+    return denyCrmPermission(res, 'Documents are turned off for your account');
+  }
   const CrmDocument = await getCrmDocumentModel();
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 24, 1), 100);
@@ -258,6 +264,9 @@ exports.deleteDocument = catchAsyncErrors(async (req, res, next) => {
 });
 
 exports.downloadDocument = catchAsyncErrors(async (req, res, next) => {
+  if (!canManageDocuments(req.user)) {
+    return denyCrmPermission(res, 'Documents are turned off for your account');
+  }
   const CrmDocument = await getCrmDocumentModel();
   const document = await CrmDocument.findOne({ _id: req.params.id, isDeleted: false }).lean();
 

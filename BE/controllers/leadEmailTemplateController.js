@@ -4,6 +4,7 @@ const getLeadModel = require("../crmDB/models/leadsModel");
 const sendEmail = require("../utils/sendEmail");
 const UserModel = require("../models/userModel");
 const { createLeadEmailLogEntry } = require("./leadEmailLogController");
+const { hasCrmPermission, denyCrmPermission } = require("../utils/crmPermissions");
 
 const isPersonalSmtpActive = (smtpConfig) => {
   if (!smtpConfig?.enabled) return false;
@@ -21,6 +22,9 @@ const stripHtml = (html) =>
     .trim();
 
 exports.sendLeadEmail = catchAsyncErrors(async (req, res, next) => {
+  if (!hasCrmPermission(req.user, 'canSendLeadEmail')) {
+    return denyCrmPermission(res, 'Emailing leads is turned off for your account');
+  }
   const { leadId } = req.params;
   const subject = String(req.body?.subject || "").trim();
   const body = String(req.body?.body || "").trim();

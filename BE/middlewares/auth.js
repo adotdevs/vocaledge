@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const ErrorHandler = require("../utils/errorHandler");
 const User = require("../models/userModel");
 const UserRestriction = require("../models/usersRestrictions");
+const { hasCrmPermission } = require("../utils/crmPermissions");
 
 // 🔑 Check Auth (Supports Cookie OR Authorization Header for Electron)
 exports.isAuthorizedUser = async (req, res, next) => {
@@ -227,6 +228,14 @@ exports.checkWalletAccess = async (req, res, next) => {
       message: "Internal server error in access check"
     });
   }
+};
+
+exports.requireCrmPermission = (key) => (req, res, next) => {
+  if (hasCrmPermission(req.user, key)) return next();
+  return res.status(403).json({
+    success: false,
+    msg: "You do not have permission for this action",
+  });
 };
 
 exports.checkReferralManagementAccess = async (req, res, next) => {

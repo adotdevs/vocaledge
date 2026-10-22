@@ -12,6 +12,7 @@ const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const ErrorHandler = require('../utils/errorHandler');
 const { logActivity } = require('./activityController');
 const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = require('../utils/leadStatusHelpers');
+const { hasCrmPermission, denyCrmPermission, canViewLeadSource, withoutLeadSource } = require('../utils/crmPermissions');
 
 const stream = require('stream');
 
@@ -215,6 +216,9 @@ const findExistingLeadByPhone = async (Lead, phone, excludeId = null) => {
 exports.createLead = catchAsyncErrors(async (req, res, next) => {
 
     try {
+        if (!hasCrmPermission(req.user, 'canCreateLeads')) {
+            return denyCrmPermission(res, 'You do not have permission to create leads');
+        }
 
         const {
             firstName,
@@ -223,6 +227,7 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
             phone,
             country,
             Brand,
+            source,
             Address,
             status = 'New',
             agentId,
@@ -310,7 +315,8 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
             email,
             phone: formattedPhone,
             country: country ? String(country).trim() : undefined,
-            Brand,
+            Brand: Brand ? String(Brand).trim() : '',
+            source: canViewLeadSource(req.user) && source ? String(source).trim() : null,
             Address,
             status: normalizedStatus,
             agent: assignedAgent,
@@ -325,7 +331,8 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
         if (email) fieldsList.push(`email: '${email}'`);
         if (phone) fieldsList.push(`phone: '${phone}'`);
         if (country) fieldsList.push(`country: '${country}'`);
-        if (Brand) fieldsList.push(`brand: '${Brand}'`);
+        if (Brand) fieldsList.push(`brand: '${String(Brand).trim()}'`);
+        if (canViewLeadSource(req.user) && source) fieldsList.push(`source: '${String(source).trim()}'`);
         if (Address) fieldsList.push(`address: '${Address}'`);
         if (normalizedStatus) fieldsList.push(`status: '${normalizedStatus}'`);
 
@@ -341,7 +348,7 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
         res.status(201).json({
             success: true,
             msg: 'Lead created successfully',
-            data: { lead: newLead }
+            data: { lead: withoutLeadSource(newLead.toObject(), req.user) }
         });
     } catch (err) {
         console.error(err);
@@ -625,14 +632,11 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
         const enableProgress = req.body.enableProgress === 'true'; // Check if progress tracking is enabled
         const addPhonePlusPrefix =
             req.body.addPhonePlusPrefix === true || req.body.addPhonePlusPrefix === 'true';
+        const overrideBrand = String(req.body.overrideBrand || '').trim();
+        const overrideSource = canViewLeadSource(req.user) ? String(req.body.source || '').trim() : '';
 
-        // Resolve assignment agent once per upload - OPTIMIZED with cache
-        if (req.user && req.user.role === 'admin') {
-            // Admin must have permission to manage CRM leads
-            const userPerms = await getCachedUserPermissions(req.user._id);
-            if (!userPerms?.adminPermissions?.canManageCrmLeads) {
-                return res.status(403).json({ success: false, msg: 'CRM leads management not allowed for admin' });
-            }
+        if (!hasCrmPermission(req.user, 'canUploadLeads')) {
+            return denyCrmPermission(res, 'You do not have permission to upload leads');
         }
         let uploadAssignedAgent = null;
         // Check if incomingAgentId is provided and not empty
@@ -811,7 +815,8 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                             email: mappedData.email ? mappedData.email.trim().toLowerCase() : undefined, // Optional - can be undefined
                             phone: mappedData.phone ? normalizeLeadPhone(mappedData.phone, addPhonePlusPrefix) : '',
                             country: mappedData.country ? mappedData.country.trim() : '',
-                            Brand: mappedData.Brand ? mappedData.Brand.trim() : '',
+                            Brand: overrideBrand || (mappedData.Brand ? mappedData.Brand.trim() : ''),
+                            source: overrideSource || null,
                             Address: mappedData.Address ? mappedData.Address.trim() : '',
                             status: mappedData.status && statusLabels.includes(String(mappedData.status).trim())
                                 ? String(mappedData.status).trim()
@@ -1227,10 +1232,10 @@ exports.getLeads = async (req, res) => {
         }
 
         // Combine leads with agent data
-        const populatedLeads = leads.map(lead => ({
+        const populatedLeads = leads.map(lead => withoutLeadSource({
             ...lead,
             agent: lead.agent ? agentMap[lead.agent.toString()] : null
-        }));
+        }, req.user));
 
         // Get total leads count (without call status filter) - OPTIMIZED: Use same query logic
         const totalLeadsQuery = { isDeleted: false };
@@ -1318,12 +1323,10 @@ exports.assignLeadsToAgent = async (req, res) => {
             return res.status(400).json({ success: false, msg: 'Agent must be an admin, subadmin, or superadmin' });
         }
 
-        // If requester is admin, ensure they have permission and can only assign to subadmins - OPTIMIZED with cache
+        if (req.user && req.user.role !== 'superadmin' && !hasCrmPermission(req.user, 'canAssignLeads')) {
+            return denyCrmPermission(res, 'You do not have permission to assign leads');
+        }
         if (req.user && req.user.role === 'admin') {
-            const userPerms = await getCachedUserPermissions(req.user._id);
-            if (!userPerms?.adminPermissions?.canManageCrmLeads) {
-                return res.status(403).json({ success: false, msg: 'CRM leads assignment not allowed for admin' });
-            }
             if (agentUser.role !== 'subadmin') {
                 return res.status(400).json({ success: false, msg: 'Admins can assign only to subadmins' });
             }
@@ -1396,6 +1399,9 @@ const getAuthorizedLeadsForBulkAction = async (req, leads) => {
 
 exports.bulkUpdateLeadStatus = async (req, res) => {
     try {
+        if (!hasCrmPermission(req.user, 'canChangeLeadStatus')) {
+            return denyCrmPermission(res, 'You do not have permission to change lead status');
+        }
         const Lead = await getLeadModel();
         const { leadIds, status } = req.body;
 
@@ -1742,6 +1748,19 @@ exports.editLead = async (req, res) => {
             });
         }
 
+        const sameText = (left, right) => String(left ?? '').trim() === String(right ?? '').trim();
+        const detailsChanged = ['firstName', 'lastName', 'email', 'country', 'Brand', 'Address', 'remarks', 'source'].some(
+            (field) => req.body[field] !== undefined && !sameText(req.body[field], lead[field])
+        ) || (phone !== undefined && !sameText(phone, lead.phone));
+        const statusWillChange = status !== undefined && !sameText(status, lead.status);
+
+        if (detailsChanged && !hasCrmPermission(req.user, 'canEditLeads')) {
+            return denyCrmPermission(res, 'You do not have permission to edit lead details');
+        }
+        if (statusWillChange && !hasCrmPermission(req.user, 'canChangeLeadStatus')) {
+            return denyCrmPermission(res, 'You do not have permission to change lead status');
+        }
+
         // ✅ SECURITY: Check record-level authorization
         if (req.user.role === 'subadmin') {
             // Subadmin can only edit their own leads
@@ -1851,7 +1870,7 @@ exports.editLead = async (req, res) => {
         res.status(200).json({
             success: true,
             msg: 'Lead updated successfully',
-            data: { lead }
+            data: { lead: withoutLeadSource(typeof lead.toObject === 'function' ? lead.toObject() : lead, req.user) }
         });
 
     } catch (err) {
@@ -1865,6 +1884,9 @@ exports.editLead = async (req, res) => {
 };
 exports.exportLeads = async (req, res) => {
     try {
+        if (!hasCrmPermission(req.user, 'canExportLeads')) {
+            return denyCrmPermission(res, 'You do not have permission to export leads');
+        }
         console.log("an", req.query);
         const Lead = await getLeadModel();
         const { search, status, country, countrySearch, brandSearch, agent, fields } = req.query;

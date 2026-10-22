@@ -38,14 +38,15 @@ import {
     getCallQueueStatusApi,
     deleteCallApi,
 } from '../../../Api/Service';
-import { allUsersApi } from '../../../Api/Service';
 import { useAuthUser } from 'react-auth-kit';
+import useLiveCrmUser from './useLiveCrmUser';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar.js';
 import CrmAppBarActions from './components/CrmAppBarActions';
 
 const PendingCallsQueue = () => {
     const authUser = useAuthUser();
+    const { can, role, ready } = useLiveCrmUser();
     const navigate = useNavigate();
     const [queueStatus, setQueueStatus] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -66,24 +67,12 @@ const PendingCallsQueue = () => {
 
     // Permission gate: restrict admin without Call Dashboard access
     useEffect(() => {
-        const checkPermissions = async () => {
-            try {
-                const me = authUser && authUser();
-                if (me?.user?.role === 'admin') {
-                    const resp = await allUsersApi({ search: me.user._id, limit: 1 });
-                    const updated = resp?.success && resp?.allUsers?.length ? resp.allUsers[0] : me.user;
-                    if (!updated?.adminPermissions?.canAccessCallDashboard) {
-                        toast.error('Access denied to Pending Calls Queue');
-                        navigate('/admin/dashboard');
-                        return;
-                    }
-                }
-            } catch (e) {
-                // If check fails, rely on backend 403
-            }
-        };
-        checkPermissions();
-    }, []);
+        if (!ready || role === 'superadmin') return;
+        if (!can('canAccessCallDashboard')) {
+            toast.error('Access denied to Pending Calls Queue');
+            navigate('/admin/dashboard');
+        }
+    }, [ready, role, can, navigate]);
 
     // OPTIMIZED: Fetch queue status
     const fetchQueueStatus = useCallback(async () => {

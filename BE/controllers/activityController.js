@@ -3,6 +3,7 @@ const getLeadModel = require('../crmDB/models/leadsModel');
 const User = require('../models/userModel'); // Main database User model
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const { createNotificationsForActivity } = require('../utils/crmNotificationService');
+const { hasCrmPermission, withoutLeadSource, redactSourceMention } = require('../utils/crmPermissions');
 
 // Helper function to log activity
 async function logActivity({ leadId, type, createdBy, comment = '', changes = null, metadata = {}, isSystemGenerated = false }) {
@@ -155,6 +156,13 @@ exports.addLeadComment = catchAsyncErrors(async (req, res) => {
     const { leadId } = req.params;
     const { comment } = req.body;
     const user = req.user;
+
+    if (!hasCrmPermission(user, 'canCommentOnLeads')) {
+        return res.status(403).json({
+            success: false,
+            message: 'You do not have permission to comment on leads',
+        });
+    }
 
     if (!comment || comment.trim().length === 0) {
         return res.status(400).json({
@@ -347,15 +355,22 @@ exports.getLeadWithActivity = catchAsyncErrors(async (req, res) => {
             description = activity.changes.description;
         }
 
+        const safeDescription = redactSourceMention(description, currentUser);
+        const safeChanges = activity.changes?.description
+            ? { ...activity.changes, description: redactSourceMention(activity.changes.description, currentUser) }
+            : activity.changes;
+
         return {
             ...activity,
-            description
+            changes: safeChanges,
+            comment: activity.type === 'comment' ? activity.comment : redactSourceMention(activity.comment, currentUser),
+            description: safeDescription,
         };
     });
 
     res.json({
         success: true,
-        lead,
+        lead: withoutLeadSource(lead, currentUser),
         activities: formattedActivities,
         totalActivities
     });

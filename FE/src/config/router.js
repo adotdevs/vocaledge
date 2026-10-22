@@ -25,6 +25,8 @@ import AIInstructions from "../jsx/Admin/CRM/AIInstructions.jsx";
 import Reminders from "../jsx/Admin/CRM/Reminders.jsx";
 import DocumentLibrary from "../jsx/Admin/CRM/DocumentLibrary.jsx";
 import AdminReminderNotifier from "../jsx/Admin/CRM/components/AdminReminderNotifier";
+import StaffMessagePopup from "../jsx/Admin/CRM/components/StaffMessagePopup";
+import StaffMessages from "../jsx/Admin/CRM/StaffMessages";
 
 import Error404 from "../jsx/pages/error/Error404";
 
@@ -115,6 +117,7 @@ export default function Router() {
       <DarkModeProvider>
         <RouterComponent>
           <AdminReminderNotifier />
+          <StaffMessagePopup />
           <ScrollToTop />
           <UserOnlineStatus />
           <AppRouter />
@@ -185,6 +188,14 @@ export default function Router() {
               element={
                 <RequireAuth loginPath={"/auth/login/crm"}>
                   <DocumentLibrary />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/crm/messages"
+              element={
+                <RequireAuth loginPath={"/auth/login/crm"}>
+                  <StaffMessages />
                 </RequireAuth>
               }
             />
