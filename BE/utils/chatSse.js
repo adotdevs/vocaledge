@@ -4,17 +4,21 @@ const getChatConversationModel = require("../crmDB/models/chatConversationModel"
 
 const clients = new Map();
 
+const writeEvent = (res, event, payload) => {
+  res.write(`data: ${JSON.stringify({ event, payload: payload || {} })}\n\n`);
+  if (typeof res.flush === "function") res.flush();
+};
+
 const publishToUser = (userId, event, payload) => {
   const sockets = clients.get(String(userId));
   if (!sockets || !sockets.size) return;
-  const body = `event: ${event}\ndata: ${JSON.stringify(payload || {})}\n\n`;
   sockets.forEach((res) => {
     if (res.writableEnded || res.destroyed) {
       sockets.delete(res);
       return;
     }
     try {
-      res.write(body);
+      writeEvent(res, event, payload);
     } catch (error) {
       sockets.delete(res);
     }
@@ -23,7 +27,8 @@ const publishToUser = (userId, event, payload) => {
 };
 
 const publishToUsers = (userIds, event, payload) => {
-  new Set((userIds || []).map((id) => String(id)).filter(Boolean)).forEach((userId) => {
+  const list = Array.isArray(userIds) ? userIds : Array.from(userIds || []);
+  new Set(list.map((id) => String(id)).filter(Boolean)).forEach((userId) => {
     publishToUser(userId, event, payload);
   });
 };

@@ -44,8 +44,7 @@ import { useAuthUser, useSignOut } from "react-auth-kit";
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { logoutApi, getEmailQueueStatusApi, getCallQueueStatusApi, getCallStatisticsApi, getReminderBadgeCountApi } from '../../../Api/Service';
 import { toast } from 'react-toastify';
-import io from 'socket.io-client';
-import { getBackendUrl } from '../../../config/appConfig';
+import { getLiveSocket } from '../../../utils/liveSocket';
 import {
   fetchLeadStatuses,
   getCachedLeadStatuses,
@@ -104,31 +103,15 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
 
   // ✅ Socket.io for real-time email queue updates
   useEffect(() => {
-    if (user()?.user?.role !== 'superadmin') return;
+    if (!["superadmin", "admin", "subadmin", "manager"].includes(user()?.user?.role)) return undefined;
 
-    // Connect to Socket.io - Use centralized config
-    const backendUrl = getBackendUrl();
+    const socket = getLiveSocket();
 
-
-    const socket = io(backendUrl, {
-      withCredentials: true,
-      transports: ['polling', 'websocket'],
-      upgrade: true,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      timeout: 20000,
-    });
-
-    socket.on('connect', () => { });
-
-    socket.on('connect_error', (error) => {
-    });
-
-    // Listen for email queue updates
-    socket.on('emailQueueUpdate', (data) => {
+    const onEmailQueue = (data) => {
       const totalCount = (data.pending || 0) + (data.failed || 0);
       setEmailQueueCount(totalCount);
-    });
+    };
+    socket.on('emailQueueUpdate', onEmailQueue);
 
     // Fetch initial status
     getEmailQueueStatusApi().then(response => {
@@ -141,7 +124,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
     });
 
     return () => {
-      socket.disconnect();
+      socket.off('emailQueueUpdate', onEmailQueue);
     };
   }, [user]);
 

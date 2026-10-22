@@ -563,6 +563,7 @@ const chatRoles = authorizedRoles("superadmin", "admin", "subadmin", "manager");
 const attachChatSseToken = (req, res, next) => {
   if (!req.headers.authorization && req.query.token) {
     req.headers.authorization = `Bearer ${req.query.token}`;
+    delete req.query.token;
   }
   next();
 };

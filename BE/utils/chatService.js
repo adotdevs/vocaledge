@@ -323,8 +323,9 @@ const listMessages = async (actor, conversationId, { before, search, admin = fal
   if (removed) query.createdAt = { ...(before ? { $lt: new Date(before) } : {}), $gt: new Date(removed.removedAt) };
   if (before && !removed) query.createdAt = { $lt: new Date(before) };
   if (search) query.body = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
-  const messages = await ChatMessage.find(query).sort({ createdAt: -1 }).limit(40).lean();
-  const undelivered = messages
+  const messages = await ChatMessage.find(query).sort({ createdAt: -1 }).limit(admin ? 200 : 40).lean();
+  const spectator = admin && !isParticipant(conversation, actor._id);
+  const undelivered = spectator ? [] : messages
     .filter((message) => String(message.senderId) !== String(actor._id))
     .filter((message) => !(message.receipts || []).some((item) => String(item.userId) === String(actor._id) && item.deliveredAt))
     .map((message) => message._id);
@@ -599,11 +600,14 @@ const toggleFlag = async (actor, conversationId, field) => {
 
 const listAllConversations = async () => {
   const ChatConversation = await getChatConversationModel();
-  const conversations = await ChatConversation.find().sort({ lastMessageAt: -1 }).limit(200).lean();
-  const users = await loadUsers(conversations.flatMap((item) => item.participantIds));
+  const conversations = await ChatConversation.find().sort({ lastMessageAt: -1 }).limit(300).lean();
+  const users = await loadUsers(conversations.flatMap((item) => item.participantIds || []));
   return conversations.map((conversation) => ({
-    ...conversation,
+    _id: conversation._id,
     participants: (conversation.participantIds || []).map((id) => publicUser(users.get(String(id)) || { _id: id })),
+    lastMessageAt: conversation.lastMessageAt || null,
+    lastMessagePreview: conversation.lastMessagePreview || "",
+    readOnly: true,
   }));
 };
 

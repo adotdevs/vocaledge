@@ -86,9 +86,14 @@ app.use((req, res, next) => {
   }
 
   let origin = req.headers.origin;
+  const localhostOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || "");
+  const vocaledgeOrigin = /^https:\/\/([a-z0-9-]+\.)*vocaledge\.io$/i.test(origin || "");
   let theOrigin =
-    ALLOWED_ORIGINS.indexOf(origin) >= 0 ? origin : ALLOWED_ORIGINS[0];
+    (origin && (ALLOWED_ORIGINS.indexOf(origin) >= 0 || localhostOrigin || vocaledgeOrigin))
+      ? origin
+      : ALLOWED_ORIGINS[0];
   res.header("Access-Control-Allow-Origin", theOrigin);
+  res.header("Vary", "Origin");
   res.header(
     "Access-Control-Allow-Headers",
     "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-API-Key"
@@ -100,6 +105,7 @@ app.use((req, res, next) => {
     "Access-Control-Allow-Methods",
     "POST, GET, PUT, PATCH,DELETE, OPTIONS"
   );
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 // cutom message

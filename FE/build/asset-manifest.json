@@ -1,7 +1,7 @@
 {
   "files": {
-    "main.css": "/static/css/main.76121463.css",
-    "main.js": "/static/js/main.665ef68a.js",
+    "main.css": "/static/css/main.0a3ad698.css",
+    "main.js": "/static/js/main.bf553076.js",
     "static/js/38.6cfe4a55.chunk.js": "/static/js/38.6cfe4a55.chunk.js",
     "static/media/materialdesignicons-webfont.svg?v=2.4.85": "/static/media/materialdesignicons-webfont.6285372902a5d4634762.svg",
     "static/media/la-brands-400.svg": "/static/media/la-brands-400.928495fae14841a0d610.svg",
@@ -58,12 +58,12 @@
     "static/media/euro.svg": "/static/media/euro.ab85efd245c6d0d8b0114c5dd41164ec.svg",
     "static/media/check.svg": "/static/media/check.00b7ce7137636f3f980c.svg",
     "static/media/chf.svg": "/static/media/chf.3301b9bc2038e7c52ab6ff2722385aa3.svg",
-    "main.76121463.css.map": "/static/css/main.76121463.css.map",
-    "main.665ef68a.js.map": "/static/js/main.665ef68a.js.map",
+    "main.0a3ad698.css.map": "/static/css/main.0a3ad698.css.map",
+    "main.bf553076.js.map": "/static/js/main.bf553076.js.map",
     "38.6cfe4a55.chunk.js.map": "/static/js/38.6cfe4a55.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.76121463.css",
-    "static/js/main.665ef68a.js"
+    "static/css/main.0a3ad698.css",
+    "static/js/main.bf553076.js"
   ]
 }

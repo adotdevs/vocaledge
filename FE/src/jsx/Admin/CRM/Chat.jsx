@@ -6,12 +6,14 @@ import { toast } from "react-toastify";
 import Sidebar from "./Sidebar";
 import useLiveCrmUser from "./useLiveCrmUser";
 import { subscribeChatEvents } from "./chatEvents";
+import LiveStatusDot from "./components/LiveStatusDot";
 import "./Chat.css";
 import {
   deleteChatMessageApi,
   deliveredChatApi,
   editChatMessageApi,
   flagChatConversationApi,
+  getAdminChatConversationsApi,
   getChatAgentsApi,
   getChatConversationsApi,
   getChatMessagesApi,
@@ -31,7 +33,7 @@ import {
 const EMOJIS = ["😀", "😁", "😂", "😊", "😍", "😎", "🤔", "😢", "🙏", "👍", "👎", "👏", "🔥", "🎉", "✅", "❤️", "💬", "📎", "⭐", "🚀"];
 const CHAT_TABS = ["chats", "people", "unread"];
 const chatPath = (tab, conversationId) => {
-  const safeTab = CHAT_TABS.includes(tab) ? tab : "chats";
+  const safeTab = tab === "monitor" || CHAT_TABS.includes(tab) ? tab : "chats";
   return conversationId ? `/admin/crm/chat/${safeTab}/${conversationId}` : `/admin/crm/chat/${safeTab}`;
 };
 const nameOf = (user) => `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "Agent";
@@ -201,7 +203,7 @@ const FileChip = ({ file, sending, uploadProgress, onRemove }) => {
 const ChatPage = () => {
   const navigate = useNavigate();
   const { tab: tabParam, conversationId: routeConversationId } = useParams();
-  const tab = CHAT_TABS.includes(tabParam) ? tabParam : "chats";
+  const tab = tabParam === "monitor" ? "monitor" : (CHAT_TABS.includes(tabParam) ? tabParam : "chats");
   const authUser = useAuthUser();
   const signedIn = authUser()?.user || null;
   const { can, role, ready, user } = useLiveCrmUser();
@@ -212,6 +214,7 @@ const ChatPage = () => {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingThread, setLoadingThread] = useState(false);
   const [conversations, setConversations] = useState([]);
+  const [monitored, setMonitored] = useState([]);
   const [agents, setAgents] = useState([]);
   const [active, setActive] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -236,15 +239,20 @@ const ChatPage = () => {
   const [unreadChip, setUnreadChip] = useState(null);
   const inputRef = useRef(null);
   const requestRef = useRef(0);
+  const typingOut = useRef({ on: false, timer: null, ping: 0, id: "" });
+  const typingHide = useRef(null);
 
   const loadLists = useCallback(async () => {
     setError("");
-    const [chats, people] = await Promise.all([getChatConversationsApi(), getChatAgentsApi("")]);
+    const requests = [getChatConversationsApi(), getChatAgentsApi("")];
+    if (role === "superadmin") requests.push(getAdminChatConversationsApi());
+    const [chats, people, all] = await Promise.all(requests);
     if (!chats.success && !people.success) setError(chats.msg || people.msg || "Could not load chat");
     setConversations(chats.conversations || []);
     setAgents(people.agents || []);
+    if (role === "superadmin") setMonitored(all?.conversations || []);
     setLoadingList(false);
-  }, []);
+  }, [role]);
 
   const openThread = useCallback(async (conversation, person, destinationTab) => {
     const requestId = requestRef.current + 1;
@@ -260,8 +268,9 @@ const ChatPage = () => {
     setLoadingThread(true);
     setInfo(null);
     setContactOpen(false);
+    const readOnly = destinationTab === "monitor" || tab === "monitor";
     const response = conversation?._id
-      ? await getChatMessagesApi(conversation._id)
+      ? await getChatMessagesApi(conversation._id, readOnly ? { admin: "1" } : {})
       : await openChatApi(person._id);
     if (requestRef.current !== requestId) return;
     if (!response.success) {
@@ -276,7 +285,9 @@ const ChatPage = () => {
     setActive({
       _id: conversationId,
       other: response.other || conversation?.other || person,
-      messagingUnavailable: response.messagingUnavailable,
+      participants: conversation?.participants || [],
+      readOnly,
+      messagingUnavailable: readOnly ? false : response.messagingUnavailable,
       lastMessagePreview: conversation?.lastMessagePreview,
     });
     const fresh = (response.messages || []).map((message) => forViewer(message, meRef.current));
@@ -286,7 +297,7 @@ const ChatPage = () => {
     setMessages(fresh);
     setUnavailable(Boolean(response.messagingUnavailable));
     setLoadingThread(false);
-    if ((conversation?._id || response.conversationId) && document.visibilityState === "visible") seenChatApi(conversationId);
+    if (!readOnly && (conversation?._id || response.conversationId) && document.visibilityState === "visible") seenChatApi(conversationId);
     const nextPath = chatPath(destinationTab || tab, conversationId);
     if (conversationId && window.location.pathname !== nextPath) navigate(nextPath);
     loadLists();
@@ -294,8 +305,9 @@ const ChatPage = () => {
 
   useEffect(() => {
     if (!ready || !allowed) return;
-    if (!CHAT_TABS.includes(tabParam)) navigate(chatPath("chats"), { replace: true });
-  }, [ready, allowed, tabParam, navigate]);
+    if (tabParam === "monitor" && role !== "superadmin") navigate(chatPath("chats"), { replace: true });
+    else if (tabParam && tabParam !== "monitor" && !CHAT_TABS.includes(tabParam)) navigate(chatPath("chats"), { replace: true });
+  }, [ready, allowed, tabParam, navigate, role]);
 
   const routeIdRef = useRef(routeConversationId || "");
   const openingIdRef = useRef("");
@@ -314,28 +326,59 @@ const ChatPage = () => {
     if (!ready || loadingList) return;
     if (String(openingIdRef.current || "") === String(routeConversationId)) return;
     if (String(activeRef.current || "") === String(routeConversationId)) return;
-    const conversation = conversations.find((item) => String(item._id) === String(routeConversationId));
-    if (conversation) openThread(conversation);
+    const source = tab === "monitor" ? monitored : conversations;
+    const conversation = source.find((item) => String(item._id) === String(routeConversationId));
+    if (conversation) openThread(conversation, null, tab === "monitor" ? "monitor" : undefined);
     else if (!openingIdRef.current) navigate(chatPath(tab), { replace: true });
-  }, [ready, allowed, loadingList, routeConversationId, conversations, openThread, navigate, tab]);
+  }, [ready, allowed, loadingList, routeConversationId, conversations, monitored, openThread, navigate, tab]);
 
   useEffect(() => {
     if (!ready || !allowed) return undefined;
     loadLists();
+    return undefined;
+  }, [ready, allowed, loadLists]);
+
+  useEffect(() => {
+    if (tab !== "monitor" || role !== "superadmin" || !active?._id) return undefined;
+    const conversationId = String(active._id);
+    const refresh = () => {
+      getChatMessagesApi(conversationId, { admin: "1" }).then((response) => {
+        if (String(activeRef.current || "") !== conversationId || !response?.success) return;
+        setMessages((response.messages || []).map((message) => forViewer(message, meRef.current)));
+      }).catch(() => {});
+    };
+    const timer = setInterval(refresh, 4000);
+    return () => clearInterval(timer);
+  }, [tab, role, active?._id]);
+
+  useEffect(() => {
+    if (!["superadmin", "admin", "subadmin", "manager"].includes(signedIn?.role)) return undefined;
     return subscribeChatEvents({
       "chat.message.created": (payload) => {
       const message = payload?.message;
       if (!message) return;
+      if (window.location.pathname.includes("/admin/crm/chat/monitor")) {
+        const routeId = (window.location.pathname.match(/\/admin\/crm\/chat\/monitor\/([^/]+)/) || [])[1] || "";
+        if (routeId && personId(message.conversationId) === personId(routeId)) {
+          setMessages((prev) => placeMessage(prev, message, meRef.current));
+        }
+        return;
+      }
       loadLists();
       const fromMe = personId(message.senderId) === personId(meRef.current);
-      const viewing = String(message.conversationId) === String(activeRef.current || "") && document.visibilityState === "visible";
-      if (!fromMe) {
+      const routeId = (window.location.pathname.match(/\/admin\/crm\/chat\/(?:chats|people|unread)\/([^/]+)/) || [])[1] || "";
+      const openHere = personId(message.conversationId) === personId(activeRef.current)
+        || (routeId && personId(message.conversationId) === personId(routeId));
+      const onScreen = openHere && document.visibilityState === "visible";
+      if (openHere) {
+        setMessages((prev) => placeMessage(prev, message, meRef.current));
+        if (!fromMe) setTyping("");
+      }
+      if (fromMe) return;
+      if (onScreen) seenChatApi(message.conversationId);
+      else {
         deliveredChatApi([message._id]);
         window.dispatchEvent(new CustomEvent("crm-chat-incoming", { detail: message }));
-      }
-      if (viewing) {
-        setMessages((prev) => placeMessage(prev, message, meRef.current));
-        if (!fromMe) seenChatApi(message.conversationId);
       }
     },
       "chat.message.delivered": (payload) => {
@@ -354,8 +397,18 @@ const ChatPage = () => {
     },
       "chat.message.edited": () => activeRef.current && getChatMessagesApi(activeRef.current).then((response) => response.success && setMessages((response.messages || []).map((message) => forViewer(message, meRef.current)))),
       "chat.message.deleted": () => activeRef.current && getChatMessagesApi(activeRef.current).then((response) => response.success && setMessages((response.messages || []).map((message) => forViewer(message, meRef.current)))),
-      "chat.typing.started": (payload) => payload.conversationId === activeRef.current && setTyping(payload.name || "Someone"),
-      "chat.typing.stopped": (payload) => payload.conversationId === activeRef.current && setTyping(""),
+      "chat.typing.started": (payload) => {
+      if (personId(payload?.conversationId) !== personId(activeRef.current)) return;
+      const label = String(payload?.name || "Someone").trim().split(/\s+/)[0] || "Someone";
+      setTyping(label);
+      clearTimeout(typingHide.current);
+      typingHide.current = setTimeout(() => setTyping(""), 2500);
+    },
+      "chat.typing.stopped": (payload) => {
+      if (personId(payload?.conversationId) !== personId(activeRef.current)) return;
+      clearTimeout(typingHide.current);
+      setTyping("");
+    },
       "chat.presence.updated": (payload) => {
       const patch = (person) => person && String(person._id) === String(payload.userId)
         ? { ...person, online: payload.online, lastOnline: payload.lastOnline || person.lastOnline }
@@ -370,14 +423,24 @@ const ChatPage = () => {
     },
       "chat.contact.availability_changed": () => loadLists(),
     });
-  }, [ready, allowed, loadLists]);
+  }, [signedIn?.role, loadLists]);
 
-  useEffect(() => {
-    activeRef.current = active?._id || null;
-    window.__crmActiveChat = active?._id || "";
-    return () => { window.__crmActiveChat = ""; };
-  }, [active]);
+  activeRef.current = active?._id ? String(active._id) : null;
+  window.__crmActiveChat = activeRef.current || "";
   meRef.current = myId || null;
+  useEffect(() => {
+    const markSeen = () => {
+      if (document.visibilityState !== "visible" || !activeRef.current) return;
+      if (window.location.pathname.includes("/admin/crm/chat/monitor")) return;
+      seenChatApi(activeRef.current);
+    };
+    document.addEventListener("visibilitychange", markSeen);
+    window.addEventListener("focus", markSeen);
+    return () => {
+      document.removeEventListener("visibilitychange", markSeen);
+      window.removeEventListener("focus", markSeen);
+    };
+  }, []);
   useEffect(() => {
     if (!menuId && !emojiOpen) return undefined;
     const close = (event) => {
@@ -420,11 +483,17 @@ const ChatPage = () => {
         .filter((agent) => !query || nameOf(agent).toLowerCase().includes(query))
         .sort((a, b) => Number(b.online) - Number(a.online) || nameOf(a).localeCompare(nameOf(b)));
     }
+    if (tab === "monitor") {
+      return monitored.filter((item) => {
+        const names = (item.participants || []).map((person) => nameOf(person)).join(" ").toLowerCase();
+        return !query || names.includes(query) || (item.lastMessagePreview || "").toLowerCase().includes(query);
+      });
+    }
     return conversations.filter((item) => {
       const matches = !query || nameOf(item.other).toLowerCase().includes(query) || (item.lastMessagePreview || "").toLowerCase().includes(query);
       return matches && (tab !== "unread" || item.unread > 0);
     });
-  }, [tab, agents, conversations, search]);
+  }, [tab, agents, conversations, monitored, search]);
 
   const submitMessage = async ({ clientKey, body, chosen, conversationId, pendingUserId }) => {
     setSending(true);
@@ -468,6 +537,7 @@ const ChatPage = () => {
       attachments: [],
       retryFiles: chosen,
     }]);
+    stopTyping(active._id);
     setDraft("");
     setFiles([]);
     await submitMessage({
@@ -495,7 +565,7 @@ const ChatPage = () => {
     const input = inputRef.current;
     const start = input?.selectionStart ?? draft.length;
     const next = `${draft.slice(0, start)}${emoji}${draft.slice(start)}`;
-    setDraft(next);
+    onType(next);
     setEmojiOpen(false);
     requestAnimationFrame(() => input?.focus());
   };
@@ -531,13 +601,46 @@ const ChatPage = () => {
     loadLists();
   };
 
+  const stopTyping = (conversationId) => {
+    const state = typingOut.current;
+    clearTimeout(state.timer);
+    const id = conversationId || state.id;
+    if (state.on && id) typingChatApi(id, false);
+    state.on = false;
+    state.id = "";
+    state.ping = 0;
+  };
+
   const onType = (value) => {
     setDraft(value);
-    if (!active?._id) return;
-    typingChatApi(active._id, true);
-    clearTimeout(onType.timer);
-    onType.timer = setTimeout(() => typingChatApi(active._id, false), 900);
+    const id = active?._id ? String(active._id) : "";
+    if (!id) return;
+    if (!String(value || "").trim()) {
+      stopTyping(id);
+      return;
+    }
+    const state = typingOut.current;
+    const now = Date.now();
+    if (!state.on || state.id !== id || now - state.ping > 1500) {
+      state.on = true;
+      state.id = id;
+      state.ping = now;
+      typingChatApi(id, true);
+    }
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => stopTyping(id), 2000);
   };
+
+  useEffect(() => {
+    setTyping("");
+    return () => {
+      const state = typingOut.current;
+      clearTimeout(state.timer);
+      if (state.on && state.id) typingChatApi(state.id, false);
+      state.on = false;
+      state.id = "";
+    };
+  }, [active?._id]);
 
   if (ready && !allowed) {
     return (
@@ -556,26 +659,43 @@ const ChatPage = () => {
       <div className={`crm-chat-shell ${active ? "has-thread" : ""}`}>
         <aside className="crm-chat-list">
           <div className="crm-chat-list-head">
-            <h1>Chats</h1>
+            <h1>{tab === "monitor" ? "All chats" : "Chats"}</h1>
+            <LiveStatusDot variant="inline" />
             {role === "superadmin" && <button className="crm-chat-icon" title="Recycle bin" onClick={async () => { const response = await getChatRecycleApi(); setRecycle(response.messages || []); setRecycleOpen(true); }}>⌫</button>}
           </div>
-          <label className="crm-chat-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search people or chats" /></label>
+          <label className="crm-chat-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tab === "monitor" ? "Search agent chats" : "Search people or chats"} /></label>
           <div className="crm-chat-tabs">
-            {["chats", "people", "unread"].map((item) => (
-              <button key={item} className={tab === item ? "active" : ""} onClick={() => navigate(chatPath(item, active?._id))}>{item[0].toUpperCase() + item.slice(1)}</button>
+            {(role === "superadmin" ? ["chats", "people", "unread", "monitor"] : ["chats", "people", "unread"]).map((item) => (
+              <button key={item} className={tab === item ? "active" : ""} onClick={() => navigate((item === "monitor" || tab === "monitor") ? chatPath(item) : chatPath(item, active?._id))}>{item === "monitor" ? "All" : item[0].toUpperCase() + item.slice(1)}</button>
             ))}
           </div>
           <div className="crm-chat-rows">
             {(!ready || loadingList) && <ListSkeleton />}
             {ready && !loadingList && error && <div className="crm-chat-center"><p>{error}</p><button type="button" className="crm-chat-retry" onClick={loadLists}>Retry</button></div>}
-            {ready && !loadingList && !error && rows.length === 0 && <div className="crm-chat-center"><p>{tab === "unread" ? "No unread chats" : "No people available"}</p></div>}
+            {ready && !loadingList && !error && rows.length === 0 && <div className="crm-chat-center"><p>{tab === "unread" ? "No unread chats" : tab === "monitor" ? "No agent chats yet" : "No people available"}</p></div>}
             {ready && !loadingList && tab === "people" && rows.map((agent) => (
               <button className="crm-chat-row" key={agent._id} onClick={() => openThread(conversations.find((item) => String(item.other?._id) === String(agent._id)), agent, "chats")}>
                 <div className="crm-chat-avatar">{initials(agent)}{agent.online && <i className="dot" />}</div>
                 <div className="crm-chat-row-copy"><strong>{nameOf(agent)}</strong><span>{agent.role} · {lastSeenText(agent)}</span></div>
               </button>
             ))}
-            {ready && !loadingList && tab !== "people" && rows.map((item) => (
+            {ready && !loadingList && tab === "monitor" && rows.map((item) => {
+              const pair = item.participants || [];
+              const title = pair.map((person) => nameOf(person)).filter(Boolean).join(" · ") || "Chat";
+              return (
+                <div className={`crm-chat-row ${String(active?._id) === String(item._id) ? "selected" : ""}`} key={item._id} role="button" tabIndex={0} onClick={() => openThread(item, null, "monitor")} onKeyDown={(event) => { if (event.key === "Enter") openThread(item, null, "monitor"); }}>
+                  <div className="crm-chat-avatar">{initials(pair[0])}{pair[0]?.online && <i className="dot" />}</div>
+                  <div className="crm-chat-row-copy">
+                    <div className="crm-chat-row-top">
+                      <strong>{title}</strong>
+                      {item.lastMessageAt && <time className="crm-chat-row-time">{listTime(item.lastMessageAt)}</time>}
+                    </div>
+                    <span>{item.lastMessagePreview || "No messages yet"}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {ready && !loadingList && tab !== "people" && tab !== "monitor" && rows.map((item) => (
               <div className={`crm-chat-row ${active?._id === item._id ? "selected" : ""}`} key={item._id} role="button" tabIndex={0} onClick={() => openThread(item)} onKeyDown={(event) => { if (event.key === "Enter") openThread(item); }}>
                 <div className="crm-chat-avatar">{initials(item.other)}{item.other?.online && <i className="dot" />}</div>
                 <div className="crm-chat-row-copy">
@@ -583,10 +703,12 @@ const ChatPage = () => {
                     <strong>{nameOf(item.other)}</strong>
                     {item.lastMessageAt && <time className="crm-chat-row-time">{listTime(item.lastMessageAt)}</time>}
                   </div>
-                  <span>
-                    {item.lastMessagePreview
-                      ? `${personId(item.lastMessageSenderId) === myId ? "You" : (item.lastMessageSenderName || nameOf(item.other).split(" ")[0])}: ${item.lastMessagePreview}`
-                      : lastSeenText(item.other)}
+                  <span className={typing && personId(item._id) === personId(active?._id) ? "crm-chat-row-typing" : ""}>
+                    {typing && personId(item._id) === personId(active?._id)
+                      ? "typing…"
+                      : item.lastMessagePreview
+                        ? `${personId(item.lastMessageSenderId) === myId ? "You" : (item.lastMessageSenderName || nameOf(item.other).split(" ")[0])}: ${item.lastMessagePreview}`
+                        : lastSeenText(item.other)}
                   </span>
                 </div>
                 {item.unread > 0 && <span className="crm-chat-badge">{item.unread}</span>}
@@ -609,36 +731,46 @@ const ChatPage = () => {
             <>
               <header className="crm-chat-head">
                 <button className="crm-chat-icon" onClick={() => { openingIdRef.current = ""; activeRef.current = null; setActive(null); setMessages([]); setUnreadChip(null); navigate(chatPath(tab)); }}>←</button>
-                <div className="crm-chat-avatar">{initials(active.other)}{active.other?.online && <i className="dot" />}</div>
+                <div className="crm-chat-avatar">{initials(active.readOnly ? active.participants?.[0] : active.other)}{(active.readOnly ? active.participants?.[0] : active.other)?.online && <i className="dot" />}</div>
                 <div style={{ flex: 1 }}>
-                  <h2>{nameOf(active.other)}</h2>
-                  <p>{typing ? `${typing} is typing…` : `${active.other?.role || "Agent"} · ${lastSeenText(active.other)}`}</p>
+                  <h2>{active.readOnly ? ((active.participants || []).map((person) => nameOf(person)).filter(Boolean).join(" · ") || "Chat") : nameOf(active.other)}</h2>
+                  <p className={typing && !active.readOnly ? "is-typing" : ""}>
+                    {active.readOnly ? "Read only" : typing ? (
+                      <>
+                        <span className="crm-chat-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                        {typing} is typing…
+                      </>
+                    ) : `${active.other?.role || "Agent"} · ${lastSeenText(active.other)}`}
+                  </p>
                 </div>
-                <button type="button" className="crm-chat-row-delete" aria-label="Delete conversation" title="Delete conversation" onClick={() => deleteConversation(active)}><DeleteOutline /></button>
-                <button className="crm-chat-icon" title="Contact info" onClick={() => { setContactOpen(true); setInfo(null); }}>ⓘ</button>
+                {!active.readOnly && <button type="button" className="crm-chat-row-delete" aria-label="Delete conversation" title="Delete conversation" onClick={() => deleteConversation(active)}><DeleteOutline /></button>}
+                {!active.readOnly && <button className="crm-chat-icon" title="Contact info" onClick={() => { setContactOpen(true); setInfo(null); }}>ⓘ</button>}
               </header>
               <div className="crm-chat-stream" ref={streamRef}>
                 {loadingThread && <ThreadSkeleton />}
-                {!loadingThread && messages.length === 0 && <div className="crm-chat-empty"><h2>Start your conversation with {nameOf(active.other)}</h2><p>Send your first message to get started.</p></div>}
+                {!loadingThread && messages.length === 0 && <div className="crm-chat-empty"><h2>{active.readOnly ? "No messages in this chat" : `Start your conversation with ${nameOf(active.other)}`}</h2><p>{active.readOnly ? "This conversation is empty." : "Send your first message to get started."}</p></div>}
                 {!loadingThread && messages.map((message, index) => {
                   const previous = messages[index - 1];
                   const showDay = !previous || dayLabel(previous.createdAt) !== dayLabel(message.createdAt);
+                  const onRight = Boolean(active.readOnly) && personId(message.senderId) === personId(active.participants?.[1]?._id);
+                  const alignedMine = message.mine || onRight;
                   return (
                     <React.Fragment key={message._id}>
                       {showDay && <div className="crm-chat-day">{dayLabel(message.createdAt)}</div>}
-                      {unreadChip && String(unreadChip.id) === String(message._id) && (
+                      {unreadChip && !active.readOnly && String(unreadChip.id) === String(message._id) && (
                         <div className="crm-chat-unread">
                           {unreadChip.count} unread message{unreadChip.count === 1 ? "" : "s"}
                         </div>
                       )}
-                      <div className={`crm-chat-line ${message.mine ? "mine" : "theirs"} ${menuId === message._id ? "menu-open" : ""}`}>
-                      {message.mine && !message.deleted && (
+                      <div className={`crm-chat-line ${alignedMine ? "mine" : "theirs"} ${menuId === message._id ? "menu-open" : ""}`}>
+                      {message.mine && !active.readOnly && !message.deleted && (
                         <div className="crm-chat-side">
                           <button type="button" className="crm-chat-info" title="Message info" onClick={() => setInfo(message)}><InfoOutlined /></button>
                           <button type="button" className="crm-chat-dots" aria-label="Message actions" onClick={() => setMenuId(menuId === message._id ? null : message._id)}><MoreVert /></button>
                         </div>
                       )}
-                      <article className={`crm-chat-bubble ${message.deleted ? "deleted" : message.mine ? "mine" : "theirs"} ${message.state === "failed" ? "failed" : ""}`}>
+                      <article className={`crm-chat-bubble ${message.deleted ? "deleted" : alignedMine ? "mine" : "theirs"} ${message.state === "failed" ? "failed" : ""}`}>
+                        {active.readOnly && !message.deleted && <strong className="crm-chat-speaker">{(message.senderName || "Agent").trim().split(/\s+/)[0]}</strong>}
                         {!message.deleted && menuId === message._id && (
                               <div className="crm-chat-menu">
                                 <div className="crm-chat-reacts">
@@ -703,7 +835,7 @@ const ChatPage = () => {
                           {message.mine && !message.deleted && message.state !== "failed" && <WaTicks state={message.state || "sent"} />}
                         </div>
                       </article>
-                      {!message.mine && !message.deleted && (
+                      {!active.readOnly && !message.mine && !message.deleted && (
                         <div className="crm-chat-side">
                           <button type="button" className="crm-chat-dots" aria-label="Message actions" onClick={() => setMenuId(menuId === message._id ? null : message._id)}><MoreVert /></button>
                         </div>
@@ -714,7 +846,9 @@ const ChatPage = () => {
                 })}
                 <div ref={bottomRef} />
               </div>
-              {unavailable ? (
+              {active.readOnly ? (
+                <div className="crm-chat-readonly">Read only. Opening this chat does not mark messages seen.</div>
+              ) : unavailable ? (
                 <div className="crm-chat-center"><p>Messaging is unavailable for this contact.</p></div>
               ) : (
                 <>
@@ -724,6 +858,12 @@ const ChatPage = () => {
                       {files.map((file) => (
                         <FileChip key={`${file.name}-${file.size}-${file.lastModified}`} file={file} sending={sending} uploadProgress={uploadProgress} onRemove={() => setFiles((prev) => prev.filter((item) => item !== file))} />
                       ))}
+                    </div>
+                  )}
+                  {typing && (
+                    <div className="crm-chat-typing-line">
+                      <span className="crm-chat-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                      {typing} is typing…
                     </div>
                   )}
                   <form className="crm-chat-compose" onSubmit={(event) => { event.preventDefault(); send(); }}>

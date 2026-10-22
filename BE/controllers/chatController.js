@@ -289,9 +289,20 @@ exports.adminRestore = catchAsyncErrors(async (req, res) => {
   res.json({ success: true });
 });
 
+const liveOrigin = (origin) => {
+  const value = String(origin || "");
+  return value === "https://vocaledge.io"
+    || value === "https://www.vocaledge.io"
+    || /^https:\/\/([a-z0-9-]+\.)*vocaledge\.io$/i.test(value)
+    || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(value);
+};
+
 exports.chatStream = (req, res) => {
+  req.setTimeout(0);
+  res.setTimeout(0);
+  if (res.socket) res.socket.setTimeout(0);
   const origin = req.headers.origin;
-  if (origin) {
+  if (liveOrigin(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Vary", "Origin");
@@ -301,25 +312,35 @@ exports.chatStream = (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   if (typeof res.flushHeaders === "function") res.flushHeaders();
+  console.log("[chat] SSE connected", String(req.user?._id || ""), req.user?.role || "");
   // A padded comment forces proxies to release the first chunk.
   res.write(`:${" ".repeat(2048)}\n\n`);
-  res.write(`event: chat.connected\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+  res.write(`data: ${JSON.stringify({ event: "chat.connected", payload: { ok: true } })}\n\n`);
+  if (typeof res.flush === "function") res.flush();
 
   const remove = chatSse.addClient(req.user, res);
   const heartbeat = setInterval(() => {
-    if (res.writableEnded || res.destroyed) return;
+    if (res.writableEnded || res.destroyed) {
+      clearInterval(heartbeat);
+      return;
+    }
     try {
-      res.write(`event: chat.ping\ndata: ${JSON.stringify({ t: Date.now() })}\n\n`);
+      res.write(`data: ${JSON.stringify({ event: "chat.ping", payload: { t: Date.now() } })}\n\n`);
+      if (typeof res.flush === "function") res.flush();
     } catch (error) {
       clearInterval(heartbeat);
     }
-  }, 20000);
+  }, 15000);
 
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
     clearInterval(heartbeat);
     remove();
   };
-  req.on("close", close);
+  // The response close is the browser disconnect. The request close fires as soon as a GET is received.
+  res.on("close", close);
 };
 
 exports.chatTyping = catchAsyncErrors(async (req, res) => {
@@ -337,7 +358,7 @@ exports.chatTyping = catchAsyncErrors(async (req, res) => {
     emitChat(active ? "chat.typing.started" : "chat.typing.stopped", {
       conversationId: String(req.params.id),
       userId: mine,
-      name: `${req.user.firstName || ""} ${req.user.lastName || ""}`.trim(),
+      name: (req.user.firstName || "").trim() || "Someone",
     }, others.map((id) => `user:${id}`));
     res.json({ success: true });
   } catch (error) {

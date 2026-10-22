@@ -42,6 +42,8 @@ const errorMiddleware = async (err, req, res, next) => {
   }
 
 
+  if (res.headersSent) return;
+
   // ✅ Send response to client
   res.status(statusCode).json({
     success: false,

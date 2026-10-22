@@ -68,6 +68,7 @@
 }
 .crm-chat-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 0 14px 10px;
 }
@@ -197,7 +198,43 @@
   position: relative;
 }
 .crm-chat-head { background: #fff; }
-.crm-chat-head p { margin: 2px 0 0; color: #6b7289; font-size: 13px; }
+.crm-chat-head p { margin: 2px 0 0; color: #6b7289; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.crm-chat-head p.is-typing { color: #128c7e; font-weight: 700; }
+.crm-chat-speaker { display: block; margin-bottom: 2px; font-size: 12px; color: #5b3df5; }
+.crm-chat-bubble.mine .crm-chat-speaker { color: #0b6b4f; }
+.crm-chat-readonly {
+  margin: 0 16px 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff;
+  color: #5c657a;
+  font-size: 13px;
+  font-weight: 700;
+}
+.crm-chat-typing-dots { display: inline-flex; align-items: center; gap: 3px; }
+.crm-chat-typing-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: crm-typing 1s infinite;
+}
+.crm-chat-typing-dots i:nth-child(2) { animation-delay: 0.15s; }
+.crm-chat-typing-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes crm-typing {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+.crm-chat-typing-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 8px;
+  color: #128c7e;
+  font-size: 13px;
+  font-weight: 700;
+}
+.crm-chat-row-typing { color: #128c7e !important; font-weight: 700; }
 .crm-chat-icon {
   border: 0;
   background: transparent;
@@ -594,6 +631,52 @@
 .crm-chat-file strong { font-size: 13px; color: #1e2433; }
 .crm-chat-file em { font-style: normal; font-size: 12px; color: #7b8499; }
 .crm-chat-file button { border: 0; background: #f3f5fa; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; }
+.crm-live-pill {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: #111b21;
+  color: #fff;
+  font: 700 12px/1 system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.28);
+}
+.crm-live-pill i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f04438;
+  box-shadow: 0 0 0 4px rgba(240, 68, 56, 0.2);
+}
+.crm-live-pill.is-connecting i {
+  background: #f79009;
+  box-shadow: 0 0 0 4px rgba(247, 144, 9, 0.22);
+  animation: crm-live-pulse 1s ease-in-out infinite;
+}
+.crm-live-pill.is-open i {
+  background: #12b76a;
+  box-shadow: 0 0 0 4px rgba(18, 183, 106, 0.22);
+}
+.crm-live-pill.is-inline {
+  position: static;
+  transform: none;
+  margin-left: auto;
+  box-shadow: none;
+  background: #f4f6fb;
+  color: #111b21;
+}
+@keyframes crm-live-pulse {
+  50% { opacity: 0.35; }
+}
 .crm-chat-attach img { max-width: 220px; border-radius: 10px; display: block; }
 .crm-chat-doc { display: inline-flex; gap: 8px; align-items: center; background: rgba(255,255,255,0.16); border-radius: 8px; padding: 6px 8px; margin-top: 6px; color: inherit; text-decoration: none; }
 .crm-chat-bubble.theirs .crm-chat-doc { background: #f4f6fb; }

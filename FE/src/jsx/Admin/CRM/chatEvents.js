@@ -1,11 +1,13 @@
-import { getBackendUrl } from "../../../config/appConfig";
+import { getBackendUrl, isBackendLocalhost, isElectronApp } from "../../../config/appConfig";
 
-let subscribers = 0;
 const listeners = new Map();
-let abortController = null;
+const statusListeners = new Set();
+
+let source = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
-let stopped = false;
+let chatStatus = "offline";
+let statusDetail = "Not connected";
 
 const emit = (type, payload) => {
   const handlers = listeners.get(type);
@@ -14,91 +16,125 @@ const emit = (type, payload) => {
     try {
       handler(payload);
     } catch (error) {
-      console.error("Chat event handler failed:", error);
+      console.error("[chat] event handler failed", error);
     }
   });
 };
 
-const parseBlock = (block) => {
-  let eventName = "message";
-  const dataLines = [];
-  block.split("\n").forEach((line) => {
-    if (line.startsWith("event:")) eventName = line.slice(6).trim();
-    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+const setChatStatus = (next, detail) => {
+  chatStatus = next;
+  if (detail) statusDetail = detail;
+  statusListeners.forEach((listener) => {
+    listener({ state: chatStatus, detail: statusDetail });
   });
-  if (!dataLines.length || eventName === "chat.ping") return;
-  try {
-    emit(eventName, JSON.parse(dataLines.join("\n")));
-  } catch (error) {
-    console.error("Chat event parse failed:", error);
-  }
 };
 
-const connect = async () => {
-  if (stopped || abortController) return;
-  const controller = new AbortController();
-  abortController = controller;
+export const getChatConnectionStatus = () => ({ state: chatStatus, detail: statusDetail });
+
+export const subscribeChatStatus = (listener) => {
+  statusListeners.add(listener);
+  listener({ state: chatStatus, detail: statusDetail });
+  return () => statusListeners.delete(listener);
+};
+
+const streamUrl = () => {
+  const base = `${getBackendUrl()}/api/v1/crm/chat/stream`;
+  const useToken = isBackendLocalhost() || isElectronApp();
+  if (!useToken) return base;
   const token = localStorage.getItem("jwttoken") || localStorage.getItem("token") || "";
   const cleanToken = token.startsWith("Bearer ") ? token.slice(7) : token;
-  const headers = {};
-  if (cleanToken) headers.Authorization = `Bearer ${cleanToken}`;
-
-  try {
-    const response = await fetch(`${getBackendUrl()}/api/v1/crm/chat/stream`, {
-      method: "GET",
-      headers,
-      credentials: "include",
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    if (!response.ok || !response.body) throw new Error(`Chat stream ${response.status}`);
-    reconnectDelay = 1000;
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (!stopped) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() || "";
-      blocks.forEach(parseBlock);
-    }
-  } catch (error) {
-    if (controller.signal.aborted || stopped) return;
-  } finally {
-    if (abortController === controller) abortController = null;
-  }
-
-  if (!stopped && subscribers) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(reconnectDelay * 2, 15000);
-  }
+  if (!cleanToken) return base;
+  return `${base}?token=${encodeURIComponent(cleanToken)}`;
 };
 
-const disconnect = () => {
-  stopped = true;
-  clearTimeout(reconnectTimer);
-  if (abortController) {
-    abortController.abort();
-    abortController = null;
+const publicUrl = (url) => url.replace(/token=[^&]+/, "token=hidden");
+
+const handleMessage = (messageEvent) => {
+  if (!messageEvent?.data) return;
+  let data;
+  try {
+    data = JSON.parse(messageEvent.data);
+  } catch (error) {
+    console.error("[chat] event parse failed", error);
+    return;
   }
+  if (!data?.event || data.event === "chat.ping") return;
+  if (data.event === "chat.connected") {
+    console.log("[chat] stream open");
+    setChatStatus("open", "Connected");
+    return;
+  }
+  emit(data.event, data.payload);
+};
+
+const closeSource = () => {
+  if (!source) return;
+  source.onopen = null;
+  source.onmessage = null;
+  source.onerror = null;
+  source.close();
+  source = null;
+};
+
+const openStream = () => {
+  clearTimeout(reconnectTimer);
+  closeSource();
+  const url = streamUrl();
+  console.log("[chat] stream connecting", publicUrl(url));
+  setChatStatus("connecting", "Connecting");
+  const next = new EventSource(url, { withCredentials: true });
+  source = next;
+
+  next.onopen = () => {
+    if (source !== next) return;
+    console.log("[chat] stream open", publicUrl(url));
+    reconnectDelay = 1000;
+    setChatStatus("open", "Connected");
+  };
+
+  next.onmessage = (messageEvent) => {
+    if (source !== next) return;
+    handleMessage(messageEvent);
+  };
+
+  next.onerror = () => {
+    if (source !== next) return;
+    const closed = next.readyState === EventSource.CLOSED;
+    console.warn("[chat] stream failed", closed ? "closed" : "connecting");
+    setChatStatus("offline", closed ? "Connection closed" : "Reconnecting");
+    closeSource();
+    reconnectTimer = setTimeout(openStream, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+  };
+};
+
+export const startChatStream = () => {
+  if (source && source.readyState !== EventSource.CLOSED) return;
+  openStream();
+};
+
+export const restartChatStream = () => {
+  reconnectDelay = 1000;
+  openStream();
 };
 
 export const subscribeChatEvents = (handlers) => {
-  stopped = false;
-  subscribers += 1;
+  startChatStream();
   const entries = Object.entries(handlers || {});
   entries.forEach(([type, handler]) => {
     const set = listeners.get(type) || new Set();
     set.add(handler);
     listeners.set(type, set);
   });
-  connect();
   return () => {
     entries.forEach(([type, handler]) => listeners.get(type)?.delete(handler));
-    subscribers = Math.max(0, subscribers - 1);
-    if (!subscribers) disconnect();
   };
 };
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && chatStatus !== "open" && (source || statusListeners.size || listeners.size)) {
+      startChatStream();
+    }
+  });
+}

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuthUser } from "react-auth-kit";
 import useLiveCrmUser from "../useLiveCrmUser";
 import { subscribeChatEvents } from "../chatEvents";
+import LiveStatusDot from "./LiveStatusDot";
 import { deliveredChatApi, getChatUnreadPopupsApi } from "../../../../Api/Service";
 import "../Chat.css";
 
@@ -19,6 +20,7 @@ const ChatNotifier = () => {
   const navigate = useNavigate();
   const [popups, setPopups] = useState([]);
   const allowed = role === "superadmin" || can("canAccessChat");
+  const crmRole = ["superadmin", "admin", "subadmin", "manager"].includes(role);
   const myIdRef = useRef("");
   myIdRef.current = personId(authUser()?.user?._id || user?._id);
 
@@ -26,10 +28,11 @@ const ChatNotifier = () => {
     if (!message?._id) return;
     const senderId = personId(message.senderId);
     if (senderId && myIdRef.current && senderId === myIdRef.current) return;
-    const viewing = String(message.conversationId) === String(window.__crmActiveChat || "")
+    const viewing = personId(message.conversationId) === personId(window.__crmActiveChat)
       && window.location.pathname.startsWith("/admin/crm/chat")
       && document.visibilityState === "visible";
-    if (!viewing) deliveredChatApi([message._id]);
+    if (viewing) return;
+    deliveredChatApi([message._id]);
     setPopups((current) => {
       if (current.some((item) => String(item._id) === String(message._id))) return current;
       return [...current, message].slice(-6);
@@ -38,14 +41,26 @@ const ChatNotifier = () => {
 
   useEffect(() => {
     const onIncoming = (event) => pushPopup(event.detail);
+    const clearOpenChat = () => {
+      if (document.visibilityState !== "visible") return;
+      const openId = personId(window.__crmActiveChat);
+      if (!openId || !window.location.pathname.startsWith("/admin/crm/chat")) return;
+      setPopups((current) => current.filter((item) => personId(item.conversationId) !== openId));
+    };
     window.addEventListener("crm-chat-incoming", onIncoming);
-    return () => window.removeEventListener("crm-chat-incoming", onIncoming);
+    document.addEventListener("visibilitychange", clearOpenChat);
+    window.addEventListener("focus", clearOpenChat);
+    return () => {
+      window.removeEventListener("crm-chat-incoming", onIncoming);
+      document.removeEventListener("visibilitychange", clearOpenChat);
+      window.removeEventListener("focus", clearOpenChat);
+    };
   }, []);
 
   useEffect(() => {
-    if (!ready || !allowed) return undefined;
+    if (!crmRole) return undefined;
     let cancelled = false;
-    getChatUnreadPopupsApi().then((response) => {
+    if (allowed) getChatUnreadPopupsApi().then((response) => {
       if (cancelled || !response?.success) return;
       (response.messages || []).forEach((message) => pushPopup(message));
     }).catch(() => {});
@@ -57,7 +72,7 @@ const ChatNotifier = () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [ready, allowed]);
+  }, [crmRole, allowed]);
 
   const closePopup = (id) => setPopups((current) => current.filter((item) => String(item._id) !== String(id)));
 
@@ -66,9 +81,7 @@ const ChatNotifier = () => {
     navigate(message.conversationId ? `/admin/crm/chat/chats/${message.conversationId}` : "/admin/crm/chat/chats");
   };
 
-  if (!popups.length) return null;
-
-  return createPortal(
+  const popupLayer = popups.length ? createPortal(
     <div className="crm-chat-popups">
       {popups.map((message) => (
         <article className="crm-chat-popup" key={message._id}>
@@ -82,6 +95,13 @@ const ChatNotifier = () => {
       ))}
     </div>,
     document.body
+  ) : null;
+
+  return (
+    <>
+      <LiveStatusDot />
+      {popupLayer}
+    </>
   );
 };
 

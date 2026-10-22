@@ -74,6 +74,9 @@ let PORT = process.env.SERVER_PORT || 4006;
 let server = app.listen(PORT, () => {
   console.log(`server is running at ${PORT}`);
 });
+server.requestTimeout = 0;
+server.timeout = 0;
+server.keepAliveTimeout = 65000;
 
 // ✅ Setup Socket.io for real-time email queue updates
 const isAllowedSocketOrigin = (origin) => {
