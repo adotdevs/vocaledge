@@ -112,9 +112,9 @@ exports.createReminder = catchAsyncErrors(async (req, res, next) => {
     return next(new ErrorHandler('Title is required', 400));
   }
 
-  let parsedDateTime = reminderDateTime ? new Date(reminderDateTime) : null;
-  if ((!parsedDateTime || Number.isNaN(parsedDateTime.getTime())) && date && time) {
-    parsedDateTime = parseReminderDateTimeInUk(date, time);
+  let parsedDateTime = date && time ? parseReminderDateTimeInUk(date, time) : null;
+  if ((!parsedDateTime || Number.isNaN(parsedDateTime.getTime())) && reminderDateTime) {
+    parsedDateTime = new Date(reminderDateTime);
   }
   if (!parsedDateTime || Number.isNaN(parsedDateTime.getTime())) {
     return next(new ErrorHandler('Valid reminder date and time are required', 400));
@@ -246,10 +246,10 @@ exports.updateReminder = catchAsyncErrors(async (req, res, next) => {
     reminder.description = String(description).trim();
   }
 
-  if (reminderDateTime || (date && time)) {
-    const parsed = reminderDateTime
-      ? new Date(reminderDateTime)
-      : parseReminderDateTimeInUk(date, time);
+  if ((date && time) || reminderDateTime) {
+    const parsed = date && time
+      ? parseReminderDateTimeInUk(date, time)
+      : new Date(reminderDateTime);
     if (!parsed || Number.isNaN(parsed.getTime())) {
       return next(new ErrorHandler('Valid reminder date and time are required', 400));
     }

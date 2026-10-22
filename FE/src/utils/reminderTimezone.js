@@ -1,5 +1,5 @@
-export const REMINDER_TIMEZONE = 'Europe/London';
-export const REMINDER_TIMEZONE_LABEL = 'UK time (GMT/BST)';
+export const REMINDER_TIMEZONE = 'UTC';
+export const REMINDER_TIMEZONE_LABEL = 'UK time (GMT)';
 
 const getZonedParts = (date, timeZone = REMINDER_TIMEZONE) => {
   const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -10,6 +10,7 @@ const getZonedParts = (date, timeZone = REMINDER_TIMEZONE) => {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    hourCycle: 'h23',
     hour12: false,
   });
 
@@ -38,16 +39,17 @@ export const formatReminderDateTime = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'N/A';
 
-  return new Intl.DateTimeFormat('en-GB', {
+  const formatted = new Intl.DateTimeFormat('en-GB', {
     timeZone: REMINDER_TIMEZONE,
     day: '2-digit',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
     hour12: false,
-    timeZoneName: 'short',
   }).format(date);
+  return `${formatted} GMT`;
 };
 
 export const toReminderDateInput = (value) => {

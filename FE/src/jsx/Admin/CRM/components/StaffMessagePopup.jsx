@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, IconButton, Paper, Typography } from '@mui/material';
+import { Box, Button, IconButton, Paper, Typography } from '@mui/material';
 import { Close, Campaign } from '@mui/icons-material';
 import { io } from 'socket.io-client';
 import { useAuthUser } from 'react-auth-kit';
@@ -20,6 +20,18 @@ const getSharedSocket = (backendUrl) => {
 };
 
 const popupKey = (message) => `${message?._id}:${message?.version}`;
+
+const formatWhen = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
 
 const StaffMessagePopup = () => {
   const authUser = useAuthUser();
@@ -97,57 +109,115 @@ const StaffMessagePopup = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        p: 2,
+        p: { xs: 1.5, sm: 3 },
       }}
     >
       <Box
         sx={{
-          width: '100%',
-          maxWidth: 520,
-          maxHeight: 'calc(100vh - 48px)',
+          width: 'min(1200px, 96vw)',
+          height: 'min(860px, 92vh)',
+          maxHeight: '92vh',
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: 1.5,
+          gap: 2,
         }}
       >
         {messages.map((message) => (
           <Paper
             key={popupKey(message)}
-            elevation={16}
+            elevation={24}
             sx={{
-              p: 2.5,
-              borderRadius: 2,
-              borderTop: '4px solid',
-              borderColor: 'primary.main',
+              borderRadius: 3,
+              overflow: 'hidden',
+              minHeight: messages.length === 1 ? '100%' : { xs: 420, sm: 560 },
+              flex: messages.length === 1 ? 1 : '0 0 auto',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
-            <Box display="flex" alignItems="flex-start" justifyContent="space-between" gap={1}>
-              <Box display="flex" alignItems="center" gap={1}>
-                <Campaign color="primary" />
-                <Box>
-                  <Typography variant="subtitle1" fontWeight={700}>
-                    Message
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {message.createdByName || 'Super admin'}
-                  </Typography>
-                </Box>
+            <Box
+              sx={{
+                px: { xs: 2.5, sm: 4 },
+                py: 2.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                color: '#fff',
+              }}
+            >
+              <Box
+                sx={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: '50%',
+                  bgcolor: 'rgba(255,255,255,0.18)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Campaign sx={{ fontSize: 30 }} />
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="h5" fontWeight={800} sx={{ lineHeight: 1.2 }}>
+                  Message
+                </Typography>
+                <Typography variant="body2" sx={{ opacity: 0.9, mt: 0.5 }}>
+                  {message.createdByName || 'Super admin'}
+                  {formatWhen(message.lastSentAt || message.createdAt)
+                    ? ` · ${formatWhen(message.lastSentAt || message.createdAt)}`
+                    : ''}
+                </Typography>
               </Box>
               <IconButton
                 aria-label="Close message"
                 onClick={() => handleClose(message)}
-                size="small"
+                sx={{ color: '#fff', bgcolor: 'rgba(255,255,255,0.12)', '&:hover': { bgcolor: 'rgba(255,255,255,0.22)' } }}
               >
                 <Close />
               </IconButton>
             </Box>
-            <Typography
-              variant="body1"
-              sx={{ mt: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+            <Box
+              sx={{
+                px: { xs: 3, sm: 6 },
+                py: { xs: 4, sm: 6 },
+                flex: 1,
+                overflowY: 'auto',
+              }}
             >
-              {message.message}
-            </Typography>
+              <Typography
+                sx={{
+                  fontSize: { xs: '1.35rem', sm: '1.75rem' },
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {message.message}
+              </Typography>
+            </Box>
+            <Box
+              sx={{
+                px: { xs: 2.5, sm: 4 },
+                py: 2,
+                display: 'flex',
+                justifyContent: 'flex-end',
+                borderTop: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => handleClose(message)}
+                sx={{ minWidth: 140, textTransform: 'none', fontWeight: 700 }}
+              >
+                Got it
+              </Button>
+            </Box>
           </Paper>
         ))}
       </Box>

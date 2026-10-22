@@ -229,7 +229,7 @@ const ReminderModal = ({
           </Grid>
           <Grid item xs={12}>
             <Typography variant="caption" color="text.secondary">
-              Reminder date and time are saved in {REMINDER_TIMEZONE_LABEL}. Minutes are available in 15-minute intervals.
+              Enter the time in {REMINDER_TIMEZONE_LABEL}. This does not follow your computer clock. Minutes are in 15-minute steps.
             </Typography>
           </Grid>
           <Grid item xs={12}>
