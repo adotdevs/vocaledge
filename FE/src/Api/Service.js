@@ -381,6 +381,8 @@ export const uploadLeadsCsvApi = (formData) => {
 export const uploadLeadsCsvStreamApi = (formData, onProgress) => {
   return postFormStreamApi(`crm/uploadLeads`, formData, onProgress);
 };
+export const getLeadUploadsApi = () => getApi(`/crm/lead-uploads`);
+export const deleteLeadUploadApi = (id) => deleteApi(`/crm/lead-uploads/${id}`);
 export const deleteLeadApi = (leadId) => {
   return deleteApi(`/crm/deleteLead/${leadId}`);
 };

@@ -27,6 +27,7 @@ const denyCrmPermission = (res, message) =>
   });
 
 const canViewLeadSource = (user) => hasCrmPermission(user, "canViewLeadSource");
+const canViewLeadBrand = (user) => hasCrmPermission(user, "canViewLeadBrand");
 
 const withoutLeadSource = (lead, user) => {
   if (!lead || canViewLeadSource(user)) return lead;
@@ -34,6 +35,15 @@ const withoutLeadSource = (lead, user) => {
   delete copy.source;
   return copy;
 };
+
+const withoutLeadBrand = (lead, user) => {
+  if (!lead || canViewLeadBrand(user)) return lead;
+  const copy = { ...lead };
+  delete copy.Brand;
+  return copy;
+};
+
+const presentLead = (lead, user) => withoutLeadBrand(withoutLeadSource(lead, user), user);
 
 const redactSourceMention = (text, user) => {
   if (canViewLeadSource(user)) return text;
@@ -49,6 +59,9 @@ module.exports = {
   hasCrmPermission,
   denyCrmPermission,
   canViewLeadSource,
+  canViewLeadBrand,
   withoutLeadSource,
+  withoutLeadBrand,
+  presentLead,
   redactSourceMention,
 };

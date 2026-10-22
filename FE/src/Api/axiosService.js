@@ -123,6 +123,20 @@ const getCredentialsConfig = () => {
   };
 };
 
+const getFetchAuthOptions = (extraHeaders = {}) => {
+  const credentialsConfig = getCredentialsConfig();
+  const headers = { ...extraHeaders };
+  if (isElectronApp() || isBackendLocalhost()) {
+    const token = localStorage.getItem("jwttoken") || localStorage.getItem("token") || "";
+    const cleanToken = token.startsWith("Bearer ") ? token.slice(7) : token;
+    if (cleanToken) headers.Authorization = `Bearer ${cleanToken}`;
+  }
+  return {
+    credentials: credentialsConfig.credentials,
+    headers,
+  };
+};
+
 export const getApi = async (endpoint) => {
   try {
     const credentialsConfig = getCredentialsConfig();
@@ -325,10 +339,9 @@ export const deleteApi = async (endpoint, options = {}) => {
 // SSE streaming for CSV upload with progress
 export const postFormStreamApi = async (endpoint, data, onProgress) => {
   try {
-    const credentialsConfig = getCredentialsConfig();
     const response = await fetch(`${API_URL}/${endpoint}`, {
       method: 'POST',
-      credentials: credentialsConfig.credentials,
+      ...getFetchAuthOptions(),
       body: data // FormData
     });
 

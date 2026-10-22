@@ -116,7 +116,6 @@ import {
     bulkCallLeadsApi,
     scheduleCallApi,
     getCallStatusApi,
-    getCallHistoryApi,
     getActiveCallsApi,
     cancelCallApi,
     activateLeadsBulkWithProgress,
@@ -126,6 +125,7 @@ import {
 } from "../../../Api/Service";
 import { toast } from "react-toastify";
 import Sidebar from "./Sidebar.js";
+import LeadUploadHistory from "./components/LeadUploadHistory";
 import CrmAccessDenied from "./components/CrmAccessDenied";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthUser } from "react-auth-kit";
@@ -163,10 +163,12 @@ const AVAILABLE_FIELDS = [
 ];
 
 // Enhanced Create Lead Dialog Component - Memoized for performance
-const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUser, allowCsvUpload, allowManageStatuses, allowViewSource = false }) => {
-    const leadFields = allowViewSource
-        ? AVAILABLE_FIELDS
-        : AVAILABLE_FIELDS.filter((field) => field.key !== 'source');
+const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUser, allowCsvUpload, allowManageStatuses, allowViewSource = false, allowViewBrand = false }) => {
+    const leadFields = AVAILABLE_FIELDS.filter((field) => {
+        if (field.key === 'source' && !allowViewSource) return false;
+        if (field.key === 'Brand' && !allowViewBrand) return false;
+        return true;
+    });
 
     const [activeStep, setActiveStep] = useState(0);
     const [tabValue, setTabValue] = useState(0);
@@ -801,6 +803,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                             onChange={(e) => handleManualFormChange('country', e.target.value)}
                                         />
                                     </Grid>
+                                    {allowViewBrand && (
                                     <Grid item xs={12} sm={6}>
                                         <TextField
                                             fullWidth
@@ -810,6 +813,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                             placeholder="Brand assigned to this lead"
                                         />
                                     </Grid>
+                                    )}
                                     {allowViewSource && (
                                     <Grid item xs={12} sm={6}>
                                         <TextField
@@ -1027,8 +1031,12 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                         </Grid>
                                         <Grid item xs={6}><strong>Country:</strong></Grid>
                                         <Grid item xs={6}>{manualForm.country}</Grid>
-                                        <Grid item xs={6}><strong>Brand:</strong></Grid>
-                                        <Grid item xs={6}>{manualForm.Brand}</Grid>
+                                        {allowViewBrand && (
+                                            <>
+                                                <Grid item xs={6}><strong>Brand:</strong></Grid>
+                                                <Grid item xs={6}>{manualForm.Brand}</Grid>
+                                            </>
+                                        )}
                                         {allowViewSource && (
                                             <>
                                                 <Grid item xs={6}><strong>Source:</strong></Grid>
@@ -1280,7 +1288,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
 });
 
 // View Details Component - Memoized for performance
-const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false }) => {
+const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false, showBrand = false }) => {
     if (!lead) return null;
 
     const handleViewStream = () => {
@@ -1360,10 +1368,12 @@ const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false })
                         <Typography variant="subtitle2" color="text.secondary">Country</Typography>
                         <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>{lead.country || 'Not provided'}</Typography>
                     </Grid>
+                    {showBrand && (
                     <Grid item xs={12} sm={6}>
                         <Typography variant="subtitle2" color="text.secondary">Brand</Typography>
                         <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>{lead.Brand || 'Not provided'}</Typography>
                     </Grid>
+                    )}
                     {showSource && (
                     <Grid item xs={12} sm={6}>
                         <Typography variant="subtitle2" color="text.secondary">Source</Typography>
@@ -1446,7 +1456,7 @@ const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false })
 });
 
 // Edit Lead Component - Memoized for performance
-const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageStatuses }) => {
+const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageStatuses, allowViewBrand = false }) => {
 
     const [editForm, setEditForm] = useState({
         firstName: "",
@@ -1565,6 +1575,7 @@ const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageSt
                             onChange={(e) => handleEditFormChange('country', e.target.value)}
                         />
                     </Grid>
+                    {allowViewBrand && (
                     <Grid item xs={12} sm={6}>
                         <TextField
                             fullWidth
@@ -1573,6 +1584,7 @@ const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageSt
                             onChange={(e) => handleEditFormChange('Brand', e.target.value)}
                         />
                     </Grid>
+                    )}
                     <Grid item xs={12}>
                         <TextField
                             fullWidth
@@ -1793,6 +1805,7 @@ const LeadsPage = () => {
     const [anchorEl, setAnchorEl] = useState(null);
     const [selectedLead, setSelectedLead] = useState(null);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
+    const [uploadHistoryOpen, setUploadHistoryOpen] = useState(false);
     const [viewDetailsOpen, setViewDetailsOpen] = useState(false);
     const [editDialogOpen, setEditDialogOpen] = useState(false);
     const [sendEmailDialogOpen, setSendEmailDialogOpen] = useState(false);
@@ -1969,16 +1982,18 @@ const LeadsPage = () => {
             }
         };
 
-        fetchEmailQueueStatus(); // Initial fetch
-        const interval = setInterval(fetchEmailQueueStatus, 10000); // Poll every 10 seconds
+        fetchEmailQueueStatus();
+        const interval = setInterval(fetchEmailQueueStatus, 60000);
 
         return () => clearInterval(interval);
     }, []);
 
     // ✅ Polling for active calls status updates (like CallDashboard.jsx)
     useEffect(() => {
+        let inFlight = false;
         const fetchActiveCallsStatus = async () => {
-            if (!callAccessRef.current.dashboard) return;
+            if (!callAccessRef.current.dashboard || inFlight) return;
+            inFlight = true;
             try {
                 const response = await getActiveCallsApi();
                 if (response?.success === false) {
@@ -2092,11 +2107,13 @@ const LeadsPage = () => {
                 }
             } catch (err) {
                 console.error('Error fetching active calls status:', err);
+            } finally {
+                inFlight = false;
             }
         };
 
-        fetchActiveCallsStatus(); // Initial fetch
-        const interval = setInterval(fetchActiveCallsStatus, 5000); // Poll every 5 seconds (same as CallDashboard)
+        fetchActiveCallsStatus();
+        const interval = setInterval(fetchActiveCallsStatus, 20000);
 
         return () => clearInterval(interval);
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2365,28 +2382,25 @@ const LeadsPage = () => {
                         toast.info(`Call ringing: ${data.phoneNumber || ''}`, { autoClose: 1500 });
                     } else if (mappedStatus === 'completed' && prevStatus !== 'completed') {
                         toast.info(`Call completed: ${data.phoneNumber || ''}`, { autoClose: 2000 });
-                        // Refresh leads to show updated call history and call statuses
+                        if (leadId) {
+                            setLeadCallStatuses((prev) => {
+                                const current = prev[leadId] || {};
+                                return {
+                                    ...prev,
+                                    [leadId]: {
+                                        status: mappedStatus,
+                                        endedAt: data.endedAt || new Date().toISOString(),
+                                        duration: data.duration ?? current.duration ?? null,
+                                        callCount: (current.callCount || 0) + 1,
+                                        checked: true,
+                                    },
+                                };
+                            });
+                        }
                         setTimeout(() => {
                             const currentPage = pagination?.currentPage || 1;
                             if (typeof fetchLeads === 'function') {
                                 fetchLeads(currentPage);
-                            }
-                            // Also refresh call status for this specific lead
-                            if (leadId) {
-                                getCallHistoryApi(leadId).then(response => {
-                                    if (response.success && response.calls && response.calls.length > 0) {
-                                        const latestCall = response.calls[0];
-                                        setLeadCallStatuses(prev => ({
-                                            ...prev,
-                                            [leadId]: {
-                                                status: latestCall.status,
-                                                endedAt: latestCall.endedAt,
-                                                duration: latestCall.duration,
-                                                callCount: response.calls.length
-                                            }
-                                        }));
-                                    }
-                                }).catch(err => console.error('Error refreshing call status:', err));
                             }
                         }, 2000);
                     }
@@ -2522,7 +2536,8 @@ const LeadsPage = () => {
     const [currentUserLatest, setCurrentUserLatest] = useState(null);
     const canManageStatuses = can('canManageLeadStatuses');
     const canViewLeadSource = can('canViewLeadSource');
-    const leadColumnCount = canViewLeadSource ? 13 : 12;
+    const canViewLeadBrand = can('canViewLeadBrand');
+    const leadColumnCount = 11 + (canViewLeadSource ? 1 : 0) + (canViewLeadBrand ? 1 : 0);
     const [filterLeadStatuses, setFilterLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
 
     useEffect(() => {
@@ -2561,7 +2576,15 @@ const LeadsPage = () => {
 
 
             if (res.success) {
-                setLeads(res.data.leads || []);
+                const nextLeads = res.data.leads || [];
+                setLeads(nextLeads);
+                const statusMap = {};
+                nextLeads.forEach((lead) => {
+                    if (!lead?._id || !lead.callSummary) return;
+                    statusMap[lead._id] = lead.callSummary;
+                });
+                setLeadCallStatuses(statusMap);
+                setLoadingCallStatuses(false);
                 setBrandOptions(Array.isArray(res.data.brands) ? res.data.brands : []);
                 setAllLeadsForFiltering([]); // Not needed anymore - backend handles filtering
                 setFilteredLeads([]); // Not needed anymore
@@ -2617,97 +2640,6 @@ const LeadsPage = () => {
             return { ...prev, status: statusFromUrl };
         });
     }, [searchParams]);
-
-    // Create a unique key for the current leads set to detect changes
-    const leadsKey = useMemo(() => {
-        if (leads.length === 0) return '';
-        return leads.map(lead => lead._id).join(',') + `_page_${pagination.currentPage}_limit_${pagination.limit}`;
-    }, [leads, pagination.currentPage, pagination.limit]);
-
-    // OPTIMIZED: Fetch call history only for current page leads (for display purposes only)
-    // Backend now handles call status filtering, so we only need call history for display
-    useEffect(() => {
-        const fetchCallStatusesForLeads = async () => {
-            if (!callAccessRef.current.logs) return;
-            // Only fetch call history for current page leads (for display)
-            if (leads.length === 0) {
-                setLeadCallStatuses({});
-                return;
-            }
-
-            // Don't fetch if we're currently loading leads
-            if (loadingRef.current) {
-                return;
-            }
-
-            try {
-                setLoadingCallStatuses(true);
-
-                // OPTIMIZED: Batch fetch call history in smaller chunks to avoid overwhelming the server
-                const BATCH_SIZE = 10; // Process 10 leads at a time
-                const leadIds = leads.map(lead => lead._id);
-                const statusMap = {};
-
-                // Process in batches
-                for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
-                    const batch = leadIds.slice(i, i + BATCH_SIZE);
-                    if (!callAccessRef.current.logs) break;
-                    const batchPromises = batch.map(async (leadId) => {
-                        try {
-                            const response = await getCallHistoryApi(leadId);
-                            if (response?.success === false) {
-                                callAccessRef.current.stoppedLogs = true;
-                                callAccessRef.current.logs = false;
-                                return { leadId, status: null, callCount: 0, checked: true };
-                            }
-                            if (response.success && response.calls && response.calls.length > 0) {
-                                const latestCall = response.calls[0];
-                                return {
-                                    leadId,
-                                    status: latestCall.status,
-                                    endedAt: latestCall.endedAt,
-                                    duration: latestCall.duration,
-                                    callCount: response.calls.length
-                                };
-                            }
-                            return { leadId, status: null, callCount: 0, checked: true };
-                        } catch (error) {
-                            console.error(`Error fetching call history for lead ${leadId}:`, error);
-                            return { leadId, status: null, callCount: 0, checked: true };
-                        }
-                    });
-
-                    const batchResults = await Promise.all(batchPromises);
-                    batchResults.forEach(result => {
-                        if (result && result.leadId) {
-                            statusMap[result.leadId] = {
-                                status: result.status !== undefined ? result.status : null,
-                                endedAt: result.endedAt,
-                                duration: result.duration,
-                                callCount: result.callCount || 0,
-                                checked: true
-                            };
-                        }
-                    });
-                }
-
-                setLeadCallStatuses(statusMap);
-            } catch (error) {
-                console.error('Error fetching call statuses:', error);
-            } finally {
-                setLoadingCallStatuses(false);
-            }
-        };
-
-        // Fetch call history for current page leads after a short delay
-        const timer = setTimeout(() => {
-            if (!loadingRef.current && leads.length > 0) {
-                fetchCallStatusesForLeads();
-            }
-        }, 300);
-
-        return () => clearTimeout(timer);
-    }, [leadsKey]);
 
     // REMOVED: Frontend filtering is no longer needed - backend handles all filtering efficiently
 
@@ -3805,6 +3737,19 @@ const LeadsPage = () => {
                                 Export
                             </Button>
                             )}
+                            {isSuperAdmin && (
+                                <Button
+                                    variant="outlined"
+                                    size="small"
+                                    sx={{
+                                        borderRadius: 2,
+                                        flex: { xs: '1 1 auto', sm: '0 0 auto' }
+                                    }}
+                                    onClick={() => setUploadHistoryOpen(true)}
+                                >
+                                    Upload history
+                                </Button>
+                            )}
                             {isSuperAdmin && leads.length > 0 && (
                                 <Button
                                     variant="outlined"
@@ -3916,6 +3861,7 @@ const LeadsPage = () => {
                                         )}
                                     />
                                 </Grid>
+                                {canViewLeadBrand && (
                                 <Grid item xs={12} sm={6} md={3}>
                                     <Autocomplete
                                         freeSolo
@@ -3968,6 +3914,7 @@ const LeadsPage = () => {
                                         )}
                                     />
                                 </Grid>
+                                )}
                                 {(can('canAssignLeads') || authUser().user.role === 'manager') ? <Grid item xs={12} sm={6} md={3}>
                                     <FormControl fullWidth size="small">
                                         <InputLabel>Agent</InputLabel>
@@ -4274,9 +4221,11 @@ const LeadsPage = () => {
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 120 }}>
                                                     Country
                                                 </TableCell>
+                                                {canViewLeadBrand && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 120 }}>
                                                     Brand
                                                 </TableCell>
+                                                )}
                                                 {canViewLeadSource && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 140 }}>
                                                     Source
@@ -4403,11 +4352,13 @@ const LeadsPage = () => {
                                                         <TableCell>
                                                             <Typography variant="body2">{lead.country}</Typography>
                                                         </TableCell>
+                                                        {canViewLeadBrand && (
                                                         <TableCell>
                                                             <Typography variant="body2" fontWeight="medium">
                                                                 {lead.Brand}
                                                             </Typography>
                                                         </TableCell>
+                                                        )}
                                                         {canViewLeadSource && (
                                                         <TableCell>
                                                             <Typography variant="body2" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.source || ''}>
@@ -4715,10 +4666,12 @@ const LeadsPage = () => {
                                                                             <Typography variant="subtitle2" color="text.secondary">Country</Typography>
                                                                             <Typography variant="body2">{lead.country || 'Not provided'}</Typography>
                                                                         </Grid>
+                                                                        {canViewLeadBrand && (
                                                                         <Grid item xs={12} sm={6} md={3}>
                                                                             <Typography variant="subtitle2" color="text.secondary">Brand</Typography>
                                                                             <Typography variant="body2">{lead.Brand || 'Not provided'}</Typography>
                                                                         </Grid>
+                                                                        )}
                                                                         {canViewLeadSource && (
                                                                         <Grid item xs={12} sm={6} md={3}>
                                                                             <Typography variant="subtitle2" color="text.secondary">Source</Typography>
@@ -4968,6 +4921,12 @@ const LeadsPage = () => {
                 )}
             </Menu>
 
+            <LeadUploadHistory
+                open={uploadHistoryOpen}
+                onClose={() => setUploadHistoryOpen(false)}
+                onDeleted={() => fetchLeads(pagination.currentPage)}
+            />
+
             {/* Create Lead Dialog */}
             <CreateLeadDialog
                 open={createDialogOpen}
@@ -4978,6 +4937,7 @@ const LeadsPage = () => {
                 allowCsvUpload={can('canUploadLeads')}
                 allowManageStatuses={canManageStatuses}
                 allowViewSource={canViewLeadSource}
+                allowViewBrand={canViewLeadBrand}
             />
 
             {/* View Details Dialog */}
@@ -4987,6 +4947,7 @@ const LeadsPage = () => {
                 onClose={() => setViewDetailsOpen(false)}
                 navigate={navigate}
                 showSource={canViewLeadSource}
+                showBrand={canViewLeadBrand}
             />
 
             {/* Edit Lead Dialog */}
@@ -4996,6 +4957,7 @@ const LeadsPage = () => {
                 onClose={() => setEditDialogOpen(false)}
                 onLeadUpdated={handleLeadUpdated}
                 allowManageStatuses={canManageStatuses}
+                allowViewBrand={canViewLeadBrand}
             />
 
             <SendLeadEmailDialog

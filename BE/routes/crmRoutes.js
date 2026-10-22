@@ -3,7 +3,7 @@ let express = require("express");
 const { authorizedRoles, isAuthorizedUser, checkCrmAccess, requireSuperAdmin } = require("../middlewares/auth");
 
 const singleUpload = require("../middlewares/multer");
-const { uploadCSV, loginCRM, getLeads, exportLeads, createLead, importUsersAsLeads, deleteLead, deleteAllLeads, bulkDeleteLeads, editLead, assignLeadsToAgent, bulkUpdateLeadStatus, getDeletedLeads, restoreLead, hardDeleteLead, bulkRestoreLeads, bulkHardDeleteLeads, restoreAllLeads, hardDeleteAllLeads, createPublicLead } = require("../controllers/crmController");
+const { uploadCSV, loginCRM, getLeads, exportLeads, createLead, importUsersAsLeads, deleteLead, deleteAllLeads, bulkDeleteLeads, editLead, assignLeadsToAgent, bulkUpdateLeadStatus, getDeletedLeads, restoreLead, hardDeleteLead, bulkRestoreLeads, bulkHardDeleteLeads, restoreAllLeads, hardDeleteAllLeads, createPublicLead, listLeadUploads, deleteLeadUpload } = require("../controllers/crmController");
 const { activateLead, bulkActivateLeads: bulkActivateLeadsOld, getActivationProgress, getFailedEmails, resendFailedEmails, deleteFailedEmails } = require("../controllers/activateLeads");
 const { bulkActivateLeads, getEmailQueueStatus, processEmailQueueNow, clearEmailQueue } = require("../controllers/activateLeadsNew");
 const { requirePublicLeadApiKey, rateLimitPublicLead, honeypotPublicLead } = require("../middlewares/publicLeadForm");
@@ -200,6 +200,8 @@ router.route('/crm/uploadLeads').post(
     handleMulterError,
     uploadCSV
 );
+router.route("/crm/lead-uploads").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, listLeadUploads);
+router.route("/crm/lead-uploads/:id").delete(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, deleteLeadUpload);
 // router.route('/crm/uploadLeads').post(uploadCSV);
 router.route('/crm/createLead').post(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, createLead);
 router.route('/crm/importUsersAsLeads').post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, importUsersAsLeads);

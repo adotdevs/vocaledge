@@ -136,7 +136,10 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   useEffect(() => {
     if (!canAccessCallDashboard) return;
 
+    let inFlight = false;
     const fetchCallCounts = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const [queueRes, statsRes] = await Promise.all([
           getCallQueueStatusApi({ scheduledPage: 1, scheduledLimit: 1 }),
@@ -163,12 +166,13 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
         }
       } catch (error) {
         console.error('Error fetching call counts:', error);
+      } finally {
+        inFlight = false;
       }
     };
 
     fetchCallCounts();
-    // Refresh every 10 seconds
-    const interval = setInterval(fetchCallCounts, 10000);
+    const interval = setInterval(fetchCallCounts, 60000);
     return () => clearInterval(interval);
   }, [canAccessCallDashboard]);
 

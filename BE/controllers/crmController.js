@@ -12,7 +12,7 @@ const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const ErrorHandler = require('../utils/errorHandler');
 const { logActivity } = require('./activityController');
 const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = require('../utils/leadStatusHelpers');
-const { hasCrmPermission, denyCrmPermission, canViewLeadSource, withoutLeadSource } = require('../utils/crmPermissions');
+const { hasCrmPermission, denyCrmPermission, canViewLeadSource, canViewLeadBrand, presentLead } = require('../utils/crmPermissions');
 
 const stream = require('stream');
 
@@ -324,7 +324,7 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
             email,
             phone: formattedPhone,
             country: country ? String(country).trim() : undefined,
-            Brand: Brand ? String(Brand).trim() : '',
+            Brand: canViewLeadBrand(req.user) && Brand ? String(Brand).trim() : '',
             source: canViewLeadSource(req.user) && source ? String(source).trim() : null,
             Address,
             status: normalizedStatus,
@@ -340,7 +340,7 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
         if (email) fieldsList.push(`email: '${email}'`);
         if (phone) fieldsList.push(`phone: '${phone}'`);
         if (country) fieldsList.push(`country: '${country}'`);
-        if (Brand) fieldsList.push(`brand: '${String(Brand).trim()}'`);
+        if (canViewLeadBrand(req.user) && Brand) fieldsList.push(`brand: '${String(Brand).trim()}'`);
         if (canViewLeadSource(req.user) && source) fieldsList.push(`source: '${String(source).trim()}'`);
         if (Address) fieldsList.push(`address: '${Address}'`);
         if (normalizedStatus) fieldsList.push(`status: '${normalizedStatus}'`);
@@ -357,7 +357,7 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
         res.status(201).json({
             success: true,
             msg: 'Lead created successfully',
-            data: { lead: withoutLeadSource(newLead.toObject(), req.user) }
+            data: { lead: presentLead(newLead.toObject(), req.user) }
         });
     } catch (err) {
         console.error(err);
@@ -641,7 +641,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
         const enableProgress = req.body.enableProgress === 'true'; // Check if progress tracking is enabled
         const addPhonePlusPrefix =
             req.body.addPhonePlusPrefix === true || req.body.addPhonePlusPrefix === 'true';
-        const overrideBrand = String(req.body.overrideBrand || '').trim();
+        const overrideBrand = canViewLeadBrand(req.user) ? String(req.body.overrideBrand || '').trim() : '';
         const overrideSource = canViewLeadSource(req.user) ? String(req.body.source || '').trim() : '';
 
         if (!hasCrmPermission(req.user, 'canUploadLeads')) {
@@ -824,7 +824,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                             email: mappedData.email ? mappedData.email.trim().toLowerCase() : undefined, // Optional - can be undefined
                             phone: mappedData.phone ? normalizeLeadPhone(mappedData.phone, addPhonePlusPrefix) : '',
                             country: mappedData.country ? mappedData.country.trim() : '',
-                            Brand: overrideBrand || (mappedData.Brand ? mappedData.Brand.trim() : ''),
+                            Brand: canViewLeadBrand(req.user) ? (overrideBrand || (mappedData.Brand ? mappedData.Brand.trim() : '')) : '',
                             source: overrideSource || null,
                             Address: mappedData.Address ? mappedData.Address.trim() : '',
                             status: mappedData.status && statusLabels.includes(String(mappedData.status).trim())
@@ -897,6 +897,9 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
             percentage: 0
         });
 
+        // One id for this CSV so the whole batch can be removed later.
+        const uploadBatchId = new mongoose.Types.ObjectId();
+
         // Process leads in batches with bulk operations
         const BATCH_SIZE = 1000; // Increased batch size for better performance
         let processedCount = 0; // Track count instead of storing documents
@@ -965,6 +968,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                     if (leadData.phone) {
                         leadData.phone = formattedPhone;
                     }
+                    leadData.uploadBatchId = uploadBatchId;
                     leadsToInsert.push(leadData);
                 }
             }
@@ -1013,12 +1017,29 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
             }
         }
 
+        let uploadId = null;
+        if (processedCount > 0) {
+            const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+            const LeadUpload = await getLeadUploadModel();
+            const uploadRecord = await LeadUpload.create({
+                _id: uploadBatchId,
+                fileName: req.file.originalname || "upload.csv",
+                uploadedBy: req.user?._id || null,
+                uploadedByName: `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim(),
+                uploadedByRole: req.user?.role || "",
+                leadCount: processedCount,
+                skippedCount: skippedLeads.length,
+            });
+            uploadId = uploadRecord._id;
+        }
+
         const responseData = {
             success: true,
             msg: `Successfully processed ${processedCount} leads${skippedLeads.length > 0 ? `, ${skippedLeads.length} skipped` : ''}`,
             data: {
                 processed: processedCount,
                 skipped: skippedLeads.length,
+                uploadId,
                 leadIds: createdLeadIds, // Return IDs of newly created leads for bulk calling
                 details: {
                     // Don't return full lead objects to save memory
@@ -1083,7 +1104,7 @@ exports.getLeads = async (req, res) => {
                 { lastName: regexGlobal },
                 { email: regexGlobal },
                 { phone: regexGlobal },
-                { Brand: regexGlobal },
+                ...(canViewLeadBrand(req.user) ? [{ Brand: regexGlobal }] : []),
                 { Address: regexGlobal },
                 // Full name contains search (e.g., "john doe")
                 { $expr: { $regexMatch: { input: { $concat: ['$firstName', ' ', '$lastName'] }, regex: nameRegex } } }
@@ -1101,10 +1122,10 @@ exports.getLeads = async (req, res) => {
         if (status && status !== '') query.status = status;
         applyCountryFilter(query, country);
         applyCountrySearchFilter(query, countrySearch);
-        applyBrandSearchFilter(query, brandSearch);
         if (agent && agent !== '') query.agent = agent;
 
         await applyLeadVisibilityToQuery(query, req.user);
+        if (canViewLeadBrand(req.user)) applyBrandSearchFilter(query, brandSearch);
 
       
 
@@ -1221,33 +1242,62 @@ exports.getLeads = async (req, res) => {
                 .limit(limitNum)
                 .lean(),
             Lead.countDocuments(query),
-            getDistinctLeadBrands(req.user),
+            canViewLeadBrand(req.user) ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
             Lead.countDocuments(totalLeadsQuery),
         ]);
         
         leads = leadsResult;
         totalFiltered = totalFilteredResult;
 
-        // Manually populate agent data - OPTIMIZED: Only fetch if there are leads with agents
+        // One query for the icons on this page. The old page called call history once per lead.
+        const canSeeCallSummary = req.user.role === "superadmin"
+            || hasCrmPermission(req.user, "canViewCallLogs")
+            || hasCrmPermission(req.user, "canAccessCallDashboard");
         let agentMap = {};
-        if (leads.length > 0) {
-            const agentIds = leads.map(lead => lead.agent).filter(id => id);
-            if (agentIds.length > 0) {
+        const callSummaryMap = {};
+        await Promise.all([
+            (async () => {
+                if (!leads.length) return;
+                const agentIds = leads.map((lead) => lead.agent).filter(Boolean);
+                if (!agentIds.length) return;
                 const agents = await User.find({ _id: { $in: agentIds } })
-                    .select('firstName lastName email role')
+                    .select("firstName lastName email role")
                     .lean();
+                agents.forEach((agent) => {
+                    agentMap[agent._id.toString()] = agent;
+                });
+            })(),
+            (async () => {
+                if (!leads.length || !canSeeCallSummary) return;
+                const summaries = await Call.aggregate([
+                    { $match: { leadId: { $in: leads.map((lead) => lead._id) } } },
+                    { $sort: { createdAt: -1 } },
+                    {
+                        $group: {
+                            _id: "$leadId",
+                            status: { $first: "$status" },
+                            endedAt: { $first: "$endedAt" },
+                            duration: { $first: "$duration" },
+                            callCount: { $sum: 1 },
+                        },
+                    },
+                ]);
+                summaries.forEach((row) => {
+                    callSummaryMap[String(row._id)] = {
+                        status: row.status || null,
+                        endedAt: row.endedAt || null,
+                        duration: row.duration ?? null,
+                        callCount: row.callCount || 0,
+                        checked: true,
+                    };
+                });
+            })(),
+        ]);
 
-                agentMap = agents.reduce((map, agent) => {
-                    map[agent._id.toString()] = agent;
-                    return map;
-                }, {});
-            }
-        }
-
-        // Combine leads with agent data
-        const populatedLeads = leads.map(lead => withoutLeadSource({
+        const populatedLeads = leads.map((lead) => presentLead({
             ...lead,
-            agent: lead.agent ? agentMap[lead.agent.toString()] : null
+            agent: lead.agent ? agentMap[lead.agent.toString()] || null : null,
+            callSummary: callSummaryMap[String(lead._id)] || null,
         }, req.user));
 
         // Calculate pagination info
@@ -1728,7 +1778,8 @@ exports.editLead = async (req, res) => {
         }
 
         const sameText = (left, right) => String(left ?? '').trim() === String(right ?? '').trim();
-        const detailsChanged = ['firstName', 'lastName', 'email', 'country', 'Brand', 'Address', 'remarks', 'source'].some(
+        const allowBrand = canViewLeadBrand(req.user);
+        const detailsChanged = ['firstName', 'lastName', 'email', 'country', ...(allowBrand ? ['Brand'] : []), 'Address', 'remarks', 'source'].some(
             (field) => req.body[field] !== undefined && !sameText(req.body[field], lead[field])
         ) || (phone !== undefined && !sameText(phone, lead.phone));
         const statusWillChange = status !== undefined && !sameText(status, lead.status);
@@ -1799,7 +1850,7 @@ exports.editLead = async (req, res) => {
         if (lead.email !== email) changes.push(`email: from '${lead.email || 'N/A'}' to '${email}'`);
         if (lead.phone !== formattedPhone) changes.push(`phone: from '${lead.phone || 'N/A'}' to '${formattedPhone}'`);
         if (lead.country !== country) changes.push(`country: from '${lead.country || 'N/A'}' to '${country}'`);
-        if (lead.Brand !== Brand) changes.push(`brand: from '${lead.Brand || 'N/A'}' to '${Brand}'`);
+        if (allowBrand && lead.Brand !== Brand) changes.push(`brand: from '${lead.Brand || 'N/A'}' to '${Brand}'`);
         if (lead.Address !== Address) changes.push(`address: from '${lead.Address || 'N/A'}' to '${Address}'`);
         if (lead.remarks !== remarks) changes.push(`remarks: from '${lead.remarks || 'N/A'}' to '${remarks || ''}'`);
         
@@ -1814,7 +1865,7 @@ exports.editLead = async (req, res) => {
         lead.email = email;
         lead.phone = formattedPhone;
         lead.country = country;
-        lead.Brand = Brand;
+        if (allowBrand) lead.Brand = Brand;
         lead.Address = Address;
         lead.status = normalizedStatus;
         if (remarks !== undefined) lead.remarks = remarks || null;
@@ -1849,7 +1900,7 @@ exports.editLead = async (req, res) => {
         res.status(200).json({
             success: true,
             msg: 'Lead updated successfully',
-            data: { lead: withoutLeadSource(typeof lead.toObject === 'function' ? lead.toObject() : lead, req.user) }
+            data: { lead: presentLead(typeof lead.toObject === 'function' ? lead.toObject() : lead, req.user) }
         });
 
     } catch (err) {
@@ -1861,6 +1912,50 @@ exports.editLead = async (req, res) => {
         });
     }
 };
+exports.listLeadUploads = async (req, res) => {
+    try {
+        if (req.user?.role !== "superadmin") {
+            return res.status(403).json({ success: false, msg: "Super admin only" });
+        }
+        const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+        const LeadUpload = await getLeadUploadModel();
+        const uploads = await LeadUpload.find().sort({ createdAt: -1 }).limit(50).lean();
+        res.json({ success: true, uploads });
+    } catch (err) {
+        console.error("Error listing lead uploads:", err);
+        res.status(500).json({ success: false, msg: "Could not load upload history" });
+    }
+};
+
+exports.deleteLeadUpload = async (req, res) => {
+    try {
+        if (req.user?.role !== "superadmin") {
+            return res.status(403).json({ success: false, msg: "Super admin only" });
+        }
+        const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+        const LeadUpload = await getLeadUploadModel();
+        const Lead = await getLeadModel();
+        const upload = await LeadUpload.findById(req.params.id);
+        if (!upload) {
+            return res.status(404).json({ success: false, msg: "Upload not found" });
+        }
+        if (upload.deletedAt) {
+            return res.json({ success: true, deleted: 0, alreadyDeleted: true });
+        }
+        const result = await Lead.updateMany(
+            { uploadBatchId: upload._id, isDeleted: { $ne: true } },
+            { $set: { isDeleted: true, deletedAt: new Date() } }
+        );
+        upload.deletedAt = new Date();
+        upload.deletedCount = result.modifiedCount || 0;
+        await upload.save();
+        res.json({ success: true, deleted: result.modifiedCount || 0 });
+    } catch (err) {
+        console.error("Error deleting lead upload:", err);
+        res.status(500).json({ success: false, msg: "Could not delete this upload" });
+    }
+};
+
 exports.exportLeads = async (req, res) => {
     try {
         if (!hasCrmPermission(req.user, 'canExportLeads')) {
@@ -1879,7 +1974,7 @@ exports.exportLeads = async (req, res) => {
                 { lastName: { $regex: search, $options: "i" } },
                 { email: { $regex: search, $options: "i" } },
                 { phone: { $regex: search, $options: "i" } },
-                { Brand: { $regex: search, $options: "i" } },
+                ...(canViewLeadBrand(req.user) ? [{ Brand: { $regex: search, $options: "i" } }] : []),
                 { Address: { $regex: search, $options: "i" } }
             ];
         }
@@ -1887,7 +1982,7 @@ exports.exportLeads = async (req, res) => {
         if (status && status !== '') query.status = status;
         applyCountryFilter(query, country);
         applyCountrySearchFilter(query, countrySearch);
-        applyBrandSearchFilter(query, brandSearch);
+        if (canViewLeadBrand(req.user)) applyBrandSearchFilter(query, brandSearch);
         if (agent && agent !== '') query.agent = agent;
 
         await applyLeadVisibilityToQuery(query, req.user);
@@ -1902,7 +1997,7 @@ exports.exportLeads = async (req, res) => {
             email: 'Email',
             phone: 'Phone',
             country: 'Country',
-            Brand: 'Brand',
+            ...(canViewLeadBrand(req.user) ? { Brand: 'Brand' } : {}),
             Address: 'Address',
             status: 'Status',
             createdAt: 'Created Date'
@@ -1988,7 +2083,7 @@ exports.getDeletedLeads = async (req, res) => {
                 { lastName: regexGlobal },
                 { email: regexGlobal },
                 { phone: regexGlobal },
-                { Brand: regexGlobal },
+                ...(canViewLeadBrand(req.user) ? [{ Brand: regexGlobal }] : []),
                 { Address: regexGlobal },
                 { $expr: { $regexMatch: { input: { $concat: ['$firstName', ' ', '$lastName'] }, regex: nameRegex } } }
             ];
@@ -2024,10 +2119,10 @@ exports.getDeletedLeads = async (req, res) => {
         const agentIds = leadsRaw.map(l => l.agent).filter(Boolean);
         const agents = await User.find({ _id: { $in: agentIds } }).select('firstName lastName email role').lean();
         const agentMap = agents.reduce((m, a) => { m[a._id.toString()] = a; return m; }, {});
-        const leads = leadsRaw.map(l => ({
+        const leads = leadsRaw.map(l => presentLead({
             ...l,
             agent: l.agent ? agentMap[l.agent.toString()] || null : null,
-        }));
+        }, req.user));
 
         const totalPages = Math.ceil(totalFiltered / limitNum);
 

@@ -30,6 +30,7 @@ const leadSchema = new mongoose.Schema({
   callHistory: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Call' }],
   isDeleted: { type: Boolean, default: false },
   deletedAt: { type: Date, default: null },
+  uploadBatchId: { type: mongoose.Schema.Types.ObjectId, default: null },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date },
 });
@@ -48,6 +49,7 @@ leadSchema.index({ isDeleted: 1, createdAt: -1 });
 leadSchema.index({ isDeleted: 1, agent: 1, createdAt: -1 });
 leadSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
 leadSchema.index({ source: 1 }); // For filtering public form leads (e.g. takebackanalytics)
+leadSchema.index({ uploadBatchId: 1, isDeleted: 1 });
 
 const getLeadModel = async () => {
   const crmDB = await connectCRMDatabase();

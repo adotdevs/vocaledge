@@ -3,7 +3,7 @@ const getLeadModel = require('../crmDB/models/leadsModel');
 const User = require('../models/userModel'); // Main database User model
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const { createNotificationsForActivity } = require('../utils/crmNotificationService');
-const { hasCrmPermission, withoutLeadSource, redactSourceMention } = require('../utils/crmPermissions');
+const { hasCrmPermission, presentLead, redactSourceMention } = require('../utils/crmPermissions');
 
 // Helper function to log activity
 async function logActivity({ leadId, type, createdBy, comment = '', changes = null, metadata = {}, isSystemGenerated = false }) {
@@ -370,7 +370,7 @@ exports.getLeadWithActivity = catchAsyncErrors(async (req, res) => {
 
     res.json({
         success: true,
-        lead: withoutLeadSource(lead, currentUser),
+        lead: presentLead(lead, currentUser),
         activities: formattedActivities,
         totalActivities
     });

@@ -296,6 +296,7 @@ const LeadStream = () => {
     const canViewCallRecordings = can('canViewCallRecordings');
     const canManageReminders = can('canManageReminders');
     const canViewLeadSource = can('canViewLeadSource');
+    const canViewLeadBrand = can('canViewLeadBrand');
     const [loading, setLoading] = useState(true);
     const [lead, setLead] = useState(null);
     const [activities, setActivities] = useState([]);
@@ -2746,6 +2747,7 @@ const LeadStream = () => {
                                                     Business Information
                                                 </Typography>
                                                 <Stack spacing={2}>
+                                                    {canViewLeadBrand && (
                                                     <LeadEditableField
                                                         label="Brand"
                                                         field="Brand"
@@ -2760,6 +2762,7 @@ const LeadStream = () => {
                                                         onCancel={() => handleCancelEdit('Brand')}
                                                         canEdit={canEdit}
                                                     />
+                                                    )}
                                                     <LeadEditableField
                                                         label="Country"
                                                         field="country"
