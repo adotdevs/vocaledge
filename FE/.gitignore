@@ -2,3 +2,6 @@
 config.env
 config/config.env 
 .env
+
+FE/build
+FE/build/*

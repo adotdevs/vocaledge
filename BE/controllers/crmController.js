@@ -12,7 +12,7 @@ const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const ErrorHandler = require('../utils/errorHandler');
 const { logActivity } = require('./activityController');
 const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = require('../utils/leadStatusHelpers');
-const { hasCrmPermission, denyCrmPermission, canViewLeadSource, canViewLeadBrand, presentLead } = require('../utils/crmPermissions');
+const { hasCrmPermission, denyCrmPermission, canViewLeadSource, presentLead } = require('../utils/crmPermissions');
 
 const stream = require('stream');
 
@@ -324,7 +324,7 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
             email,
             phone: formattedPhone,
             country: country ? String(country).trim() : undefined,
-            Brand: canViewLeadBrand(req.user) && Brand ? String(Brand).trim() : '',
+            Brand: hasCrmPermission(req.user, "canViewLeadBrand") && Brand ? String(Brand).trim() : '',
             source: canViewLeadSource(req.user) && source ? String(source).trim() : null,
             Address,
             status: normalizedStatus,
@@ -340,7 +340,7 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
         if (email) fieldsList.push(`email: '${email}'`);
         if (phone) fieldsList.push(`phone: '${phone}'`);
         if (country) fieldsList.push(`country: '${country}'`);
-        if (canViewLeadBrand(req.user) && Brand) fieldsList.push(`brand: '${String(Brand).trim()}'`);
+        if (hasCrmPermission(req.user, "canViewLeadBrand") && Brand) fieldsList.push(`brand: '${String(Brand).trim()}'`);
         if (canViewLeadSource(req.user) && source) fieldsList.push(`source: '${String(source).trim()}'`);
         if (Address) fieldsList.push(`address: '${Address}'`);
         if (normalizedStatus) fieldsList.push(`status: '${normalizedStatus}'`);
@@ -641,7 +641,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
         const enableProgress = req.body.enableProgress === 'true'; // Check if progress tracking is enabled
         const addPhonePlusPrefix =
             req.body.addPhonePlusPrefix === true || req.body.addPhonePlusPrefix === 'true';
-        const overrideBrand = canViewLeadBrand(req.user) ? String(req.body.overrideBrand || '').trim() : '';
+        const overrideBrand = hasCrmPermission(req.user, "canViewLeadBrand") ? String(req.body.overrideBrand || '').trim() : '';
         const overrideSource = canViewLeadSource(req.user) ? String(req.body.source || '').trim() : '';
 
         if (!hasCrmPermission(req.user, 'canUploadLeads')) {
@@ -824,7 +824,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                             email: mappedData.email ? mappedData.email.trim().toLowerCase() : undefined, // Optional - can be undefined
                             phone: mappedData.phone ? normalizeLeadPhone(mappedData.phone, addPhonePlusPrefix) : '',
                             country: mappedData.country ? mappedData.country.trim() : '',
-                            Brand: canViewLeadBrand(req.user) ? (overrideBrand || (mappedData.Brand ? mappedData.Brand.trim() : '')) : '',
+                            Brand: hasCrmPermission(req.user, "canViewLeadBrand") ? (overrideBrand || (mappedData.Brand ? mappedData.Brand.trim() : '')) : '',
                             source: overrideSource || null,
                             Address: mappedData.Address ? mappedData.Address.trim() : '',
                             status: mappedData.status && statusLabels.includes(String(mappedData.status).trim())
@@ -1104,7 +1104,7 @@ exports.getLeads = async (req, res) => {
                 { lastName: regexGlobal },
                 { email: regexGlobal },
                 { phone: regexGlobal },
-                ...(canViewLeadBrand(req.user) ? [{ Brand: regexGlobal }] : []),
+                ...(hasCrmPermission(req.user, "canViewLeadBrand") ? [{ Brand: regexGlobal }] : []),
                 { Address: regexGlobal },
                 // Full name contains search (e.g., "john doe")
                 { $expr: { $regexMatch: { input: { $concat: ['$firstName', ' ', '$lastName'] }, regex: nameRegex } } }
@@ -1125,7 +1125,7 @@ exports.getLeads = async (req, res) => {
         if (agent && agent !== '') query.agent = agent;
 
         await applyLeadVisibilityToQuery(query, req.user);
-        if (canViewLeadBrand(req.user)) applyBrandSearchFilter(query, brandSearch);
+        if (hasCrmPermission(req.user, "canViewLeadBrand")) applyBrandSearchFilter(query, brandSearch);
 
       
 
@@ -1242,7 +1242,7 @@ exports.getLeads = async (req, res) => {
                 .limit(limitNum)
                 .lean(),
             Lead.countDocuments(query),
-            canViewLeadBrand(req.user) ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
+            hasCrmPermission(req.user, "canViewLeadBrand") ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
             Lead.countDocuments(totalLeadsQuery),
         ]);
         
@@ -1778,7 +1778,7 @@ exports.editLead = async (req, res) => {
         }
 
         const sameText = (left, right) => String(left ?? '').trim() === String(right ?? '').trim();
-        const allowBrand = canViewLeadBrand(req.user);
+        const allowBrand = hasCrmPermission(req.user, "canViewLeadBrand");
         const detailsChanged = ['firstName', 'lastName', 'email', 'country', ...(allowBrand ? ['Brand'] : []), 'Address', 'remarks', 'source'].some(
             (field) => req.body[field] !== undefined && !sameText(req.body[field], lead[field])
         ) || (phone !== undefined && !sameText(phone, lead.phone));
@@ -1974,7 +1974,7 @@ exports.exportLeads = async (req, res) => {
                 { lastName: { $regex: search, $options: "i" } },
                 { email: { $regex: search, $options: "i" } },
                 { phone: { $regex: search, $options: "i" } },
-                ...(canViewLeadBrand(req.user) ? [{ Brand: { $regex: search, $options: "i" } }] : []),
+                ...(hasCrmPermission(req.user, "canViewLeadBrand") ? [{ Brand: { $regex: search, $options: "i" } }] : []),
                 { Address: { $regex: search, $options: "i" } }
             ];
         }
@@ -1982,7 +1982,7 @@ exports.exportLeads = async (req, res) => {
         if (status && status !== '') query.status = status;
         applyCountryFilter(query, country);
         applyCountrySearchFilter(query, countrySearch);
-        if (canViewLeadBrand(req.user)) applyBrandSearchFilter(query, brandSearch);
+        if (hasCrmPermission(req.user, "canViewLeadBrand")) applyBrandSearchFilter(query, brandSearch);
         if (agent && agent !== '') query.agent = agent;
 
         await applyLeadVisibilityToQuery(query, req.user);
@@ -1997,7 +1997,7 @@ exports.exportLeads = async (req, res) => {
             email: 'Email',
             phone: 'Phone',
             country: 'Country',
-            ...(canViewLeadBrand(req.user) ? { Brand: 'Brand' } : {}),
+            ...(hasCrmPermission(req.user, "canViewLeadBrand") ? { Brand: 'Brand' } : {}),
             Address: 'Address',
             status: 'Status',
             createdAt: 'Created Date'
@@ -2083,7 +2083,7 @@ exports.getDeletedLeads = async (req, res) => {
                 { lastName: regexGlobal },
                 { email: regexGlobal },
                 { phone: regexGlobal },
-                ...(canViewLeadBrand(req.user) ? [{ Brand: regexGlobal }] : []),
+                ...(hasCrmPermission(req.user, "canViewLeadBrand") ? [{ Brand: regexGlobal }] : []),
                 { Address: regexGlobal },
                 { $expr: { $regexMatch: { input: { $concat: ['$firstName', ' ', '$lastName'] }, regex: nameRegex } } }
             ];
