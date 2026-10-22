@@ -145,7 +145,11 @@ const EmailQueue = () => {
         
         const socket = io(backendUrl, {
             withCredentials: true,
-            transports: ['websocket', 'polling'] // Better compatibility
+            transports: ['polling', 'websocket'],
+            upgrade: true,
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            timeout: 20000,
         });
 
         socket.on('connect', () => {});

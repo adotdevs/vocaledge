@@ -311,6 +311,7 @@ let userSchema = new mongoose.Schema({
     canManageReminders: { type: Boolean, default: false },
     canManageDocuments: { type: Boolean, default: false },
     canViewLeadSource: { type: Boolean, default: false },
+    canAccessChat: { type: Boolean, default: false },
     accessWallet: { type: Boolean, default: true },
     changeTicketStatus: { type: Boolean, default: false },
     // add more when needed
@@ -339,6 +340,7 @@ let userSchema = new mongoose.Schema({
     canManageReminders: { type: Boolean, default: false },
     canManageDocuments: { type: Boolean, default: false },
     canViewLeadSource: { type: Boolean, default: false },
+    canAccessChat: { type: Boolean, default: false },
     canAccessAiInstructions: { type: Boolean, default: false },
     canManageReferrals: { type: Boolean, default: false },
     accessWallet: { type: Boolean, default: true },
@@ -447,6 +449,9 @@ let userSchema = new mongoose.Schema({
   lastActivity: { type: Date, default: null },
 
 });
+
+userSchema.index({ online: 1, lastActivity: 1 });
+userSchema.index({ role: 1 });
 
 userSchema.methods.generateToken = function () {
   return jwt.sign({ _id: this._id }, process.env.SECRET_JWT, {

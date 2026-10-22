@@ -5,10 +5,12 @@ import { useNavigate } from "react-router-dom";
 import { useSignOut } from "react-auth-kit";
 import { toast } from "react-toastify";
 import { logoutApi } from "../../../../Api/Service";
+import useLiveCrmUser from "../useLiveCrmUser";
 
 const CrmAccessDenied = () => {
   const navigate = useNavigate();
   const signOut = useSignOut();
+  const { can } = useLiveCrmUser();
 
   const handleLogout = async () => {
     try {
@@ -51,7 +53,12 @@ const CrmAccessDenied = () => {
         <Typography color="text.secondary" sx={{ mb: 3 }}>
           CRM is turned off for this account. A super admin can turn on Open CRM in your permissions.
         </Typography>
-        <Button variant="contained" onClick={handleLogout}>
+        {can("canAccessChat") && (
+          <Button variant="contained" sx={{ mr: 1 }} onClick={() => navigate("/admin/crm/chat/chats")}>
+            Open chat
+          </Button>
+        )}
+        <Button variant="outlined" onClick={handleLogout}>
           Log out
         </Button>
       </Paper>

@@ -30,6 +30,7 @@ root.render(
           closeButton={false}
           pauseOnFocusLoss={false}
           theme="colored"
+          style={{ zIndex: 20000 }}
         />
       </Provider>
     </AuthProvider>

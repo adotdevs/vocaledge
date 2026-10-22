@@ -1,6 +1,23 @@
 const jwt = require("jsonwebtoken");
 const ErrorHandler = require("../utils/errorHandler");
 const User = require("../models/userModel");
+
+const AUTH_USER_TTL_MS = 15000;
+const ACTIVITY_TOUCH_MS = 60000;
+const authUserCache = new Map();
+const activityTouch = new Map();
+
+const touchUserActivity = (userId) => {
+  const key = String(userId);
+  const now = Date.now();
+  if (now - (activityTouch.get(key) || 0) < ACTIVITY_TOUCH_MS) return;
+  activityTouch.set(key, now);
+  User.updateOne({ _id: userId }, { $set: { lastActivity: new Date(), online: true } }).catch(() => {});
+};
+
+exports.invalidateAuthUser = (userId) => {
+  if (userId) authUserCache.delete(String(userId));
+};
 const UserRestriction = require("../models/usersRestrictions");
 const { hasCrmPermission } = require("../utils/crmPermissions");
 
@@ -73,19 +90,20 @@ exports.isAuthorizedUser = async (req, res, next) => {
       return next(new ErrorHandler("Session expired. Please login again.", 401));
     }
 
-    // CRITICAL: Always select adminPermissions and permissions to ensure they're available for permission checks
-    const user = await User.findById(decoded._id).select('+adminPermissions +permissions');
-
+    // Reuse the user for a short time so every CRM request does not wait on Atlas.
+    const cacheKey = String(decoded._id);
+    const cached = authUserCache.get(cacheKey);
+    let user = cached && Date.now() - cached.fetchedAt < AUTH_USER_TTL_MS ? cached.user : null;
     if (!user) {
-      return next(new ErrorHandler("User not found. Please login again.", 401));
+      user = await User.findById(decoded._id).select('+adminPermissions +permissions').lean();
+      if (!user) {
+        return next(new ErrorHandler("User not found. Please login again.", 401));
+      }
+      authUserCache.set(cacheKey, { user, fetchedAt: Date.now() });
     }
 
     req.user = user;
-    await User.findByIdAndUpdate(req.user._id, {
-      lastActivity: new Date(),
-      online: true
-    });
-
+    touchUserActivity(decoded._id);
     next();
   } catch (err) {
     console.error("Auth Error:", err);

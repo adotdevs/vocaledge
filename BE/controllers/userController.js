@@ -653,8 +653,11 @@ exports.allUser = catchAsyncErrors(async (req, res, next) => {
     limit = 50,
     sortBy = 'createdAt',
     sortOrder = 'desc',
-    includeCounts = 'false' // For getting total counts without pagination
+    includeCounts = 'false', // For getting total counts without pagination
+    brief = 'false'
   } = req.query;
+  const briefFields = 'firstName lastName email role assignedManager';
+  const isBrief = String(brief) === 'true';
 
   // For subadmins, handle search parameter or return filtered users
   if (signedUser.role === "subadmin") {
@@ -700,9 +703,11 @@ exports.allUser = catchAsyncErrors(async (req, res, next) => {
     }
 
     // ✅ Default subadmin behavior - return all accessible users
-    const allUsers = await UserModel.find(
+    const subadminQuery = UserModel.find(
       subadminAccessibleUsersQuery(signedUser._id)
     ).sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 });
+    if (isBrief) subadminQuery.select(briefFields);
+    const allUsers = await subadminQuery.lean();
 
     // ✅ Append the logged-in subadmin user to ensure they can find their own permissions data
     const userExists = allUsers.some(user => user._id.toString() === signedUser._id.toString());
@@ -787,21 +792,22 @@ exports.allUser = catchAsyncErrors(async (req, res, next) => {
   const limitNum = parseInt(limit);
   const skip = (pageNum - 1) * limitNum;
 
-  // Get total count
-  const total = await UserModel.countDocuments(query);
+  // Skip the extra count when the caller only needs a short name list.
+  const total = isBrief ? null : await UserModel.countDocuments(query);
 
   // Get paginated results
-  const allUsers = await UserModel.find(query)
+  let usersQuery = UserModel.find(query)
     .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
     .skip(skip)
-    .limit(limitNum)
-    .lean();
+    .limit(limitNum);
+  if (isBrief) usersQuery = usersQuery.select(briefFields);
+  const allUsers = await usersQuery.lean();
 
   // ✅ SECURITY: Only append logged-in user if NOT searching by ID (to avoid duplicates)
   const isSearchingById = search && search.trim() && /^[0-9a-fA-F]{24}$/.test(search.trim());
   const userExists = allUsers.some(user => user._id.toString() === signedUser._id.toString());
 
-  if (!userExists && !isSearchingById) {
+  if (!userExists && !isSearchingById && !isBrief) {
     // Fetch the logged-in user's latest data
     const currentUser = await UserModel.findById(signedUser._id).lean();
 
@@ -821,16 +827,16 @@ exports.allUser = catchAsyncErrors(async (req, res, next) => {
     msg: "All Users",
     allUsers,
     pagination: {
-      total,
+      total: total == null ? allUsers.length : total,
       page: pageNum,
       limit: limitNum,
-      pages: Math.ceil(total / limitNum)
+      pages: Math.ceil((total == null ? allUsers.length : total) / limitNum) || 1
     }
   });
 });
 exports.singleUser = catchAsyncErrors(async (req, res, next) => {
   let { id } = req.params;
-  let signleUser = await UserModel.findById({ _id: id });
+  let signleUser = await UserModel.findById(id).select("-password").lean();
 
   if (!signleUser) {
     return next(new errorHandler("User not found", 404));
@@ -842,7 +848,7 @@ exports.singleUser = catchAsyncErrors(async (req, res, next) => {
     const hasAccess = hasSubAdminAccessToUser(signleUser, req.user._id);
 
     if (hasAccess && req.user.permissions?.viewClientDetails !== true) {
-      const sanitized = signleUser.toObject();
+      const sanitized = { ...signleUser };
       delete sanitized.password;
       delete sanitized.email;
       delete sanitized.phone;
@@ -1175,7 +1181,7 @@ exports.deleteKycDocument = catchAsyncErrors(async (req, res, next) => {
 });
 exports.getsignUser = catchAsyncErrors(async (req, res, next) => {
   let { id } = req.body;
-  let signleUser = await UserModel.findById({ _id: id });
+  let signleUser = await UserModel.findById(id).select("-password").lean();
   res.status(200).send({
     success: true,
     msg: "Signle Users",
@@ -3188,6 +3194,10 @@ exports.updateSubAdminPermissions = catchAsyncErrors(async (req, res) => {
   );
 
 
+  if (Object.prototype.hasOwnProperty.call(req.body, "canAccessChat") && global.chatControllerSync) {
+    global.chatControllerSync(req.params.id, req.body.canAccessChat === true);
+  }
+  require("../middlewares/auth").invalidateAuthUser(req.params.id);
   res.json({ success: true, msg: "Data updated successfully", updated });
 });
 exports.updateAdminPermissions = catchAsyncErrors(async (req, res) => {
@@ -3202,6 +3212,10 @@ exports.updateAdminPermissions = catchAsyncErrors(async (req, res) => {
     { new: true, upsert: true }
   );
 
+  if (Object.prototype.hasOwnProperty.call(req.body, "canAccessChat") && global.chatControllerSync) {
+    global.chatControllerSync(req.params.id, req.body.canAccessChat === true);
+  }
+  require("../middlewares/auth").invalidateAuthUser(req.params.id);
 
   res.json({ success: true, msg: "Data updated successfully", updated });
 });

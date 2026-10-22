@@ -59,12 +59,22 @@ export const getFrontendDomain = () => {
  * Get the API base URL (without /api/v1)
  * Returns just the protocol + hostname
  */
+const isLiveFrontend = (hostname) => {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'vocaledge.io' || host === 'www.vocaledge.io' || host.endsWith('.vocaledge.io');
+};
+
 export const getApiBaseUrl = () => {
   // Check if we're in production (not localhost)
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const protocol = typeof window !== 'undefined' ? window.location.protocol : 'https:';
   const isProduction = protocol === 'https:' && !hostname.includes('localhost') && hostname !== '127.0.0.1';
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '';
+
+  // Live site always talks to the live API, including www and subdomains.
+  if (isLiveFrontend(hostname)) {
+    return 'https://api.vocaledge.io';
+  }
 
   // Electron app: Always use production API (app is distributed, server is on VPS)
   if (isElectronApp()) {
@@ -173,6 +183,10 @@ export const getApiUrl = () => {
   // Check if we're in production (not localhost)
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '';
+
+  if (isLiveFrontend(hostname)) {
+    return 'https://api.vocaledge.io/api/v1';
+  }
 
   // PRIORITY 2: Check environment variables (only for web, not Electron)
   if (process.env.REACT_APP_API_URL) {

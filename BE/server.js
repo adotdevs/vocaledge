@@ -76,11 +76,23 @@ let server = app.listen(PORT, () => {
 });
 
 // ✅ Setup Socket.io for real-time email queue updates
+const isAllowedSocketOrigin = (origin) => {
+  if (!origin) return true;
+  if (origin === "https://vocaledge.io" || origin === "https://www.vocaledge.io") return true;
+  if (origin.endsWith(".vocaledge.io")) return true;
+  if (process.env.BASE_URL && origin === process.env.BASE_URL) return true;
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+};
 const io = new Server(server, {
   cors: {
-    origin: process.env.BASE_URL || "http://localhost:3000",
-    credentials: true
-  }
+    origin: (origin, callback) => callback(null, isAllowedSocketOrigin(origin)),
+    credentials: true,
+    methods: ["GET", "POST"],
+  },
+  transports: ["polling", "websocket"],
+  allowUpgrades: true,
+  pingInterval: 20000,
+  pingTimeout: 25000,
 });
 
 // Socket.io connection
@@ -88,6 +100,7 @@ const io = new Server(server, {
 
 // Make io available globally for emitting events
 global.io = io;
+global.chatControllerSync = require("./controllers/chatController").syncChatAccess;
 
 // Initialize VoIP agent
 const WebRTCVoiceAgent = require('./voip/webrtcVoiceAgent');

@@ -37,6 +37,7 @@ import {
   FolderOpen,
   FilterList,
   Campaign,
+  Forum,
 } from '@mui/icons-material';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useAuthUser, useSignOut } from "react-auth-kit";
@@ -76,6 +77,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const [internalMobileMenu, setInternalMobileMenu] = useState(false);
   const previousPathRef = useRef(location.pathname);
   const { can, role } = useLiveCrmUser();
+  const canManageReminders = can("canManageReminders");
 
   // Use internal state if setisMobileMenu not provided
   const mobileMenuState = isMobileMenu ?? internalMobileMenu;
@@ -93,14 +95,12 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
       }
     };
 
-    if (can('canManageReminders')) {
-      fetchReminderBadge();
-      const interval = setInterval(fetchReminderBadge, 60000);
-      return () => clearInterval(interval);
-    }
+    if (!canManageReminders) return undefined;
 
-    return undefined;
-  }, [can]);
+    fetchReminderBadge();
+    const interval = setInterval(fetchReminderBadge, 60000);
+    return () => clearInterval(interval);
+  }, [canManageReminders]);
 
   // ✅ Socket.io for real-time email queue updates
   useEffect(() => {
@@ -112,7 +112,11 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
 
     const socket = io(backendUrl, {
       withCredentials: true,
-      transports: ['websocket', 'polling'] // Better compatibility
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      timeout: 20000,
     });
 
     socket.on('connect', () => { });
@@ -242,6 +246,10 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   // }
 
   // Admin Management (CRM) - superadmin only
+  if (can('canAccessChat')) {
+    menuItems.push({ icon: <Forum />, label: 'Chat', link: '/admin/crm/chat/chats' });
+  }
+
   if (isSuperadmin) {
     menuItems.push({ icon: <Campaign />, label: 'Messages', link: "/admin/crm/messages" });
     menuItems.push({ icon: <AdminPanelSettings />, label: 'Admin Management', link: "/admin/crm/admin-management" });
@@ -258,7 +266,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
     menuItems.push({ icon: <Settings />, label: 'My Profile', link: "/admin/crm/profile" });
   }
 
-  const isActiveLink = (link) => location.pathname === link;
+  const isActiveLink = (link) => location.pathname === link || (link.startsWith("/admin/crm/chat") && location.pathname.startsWith("/admin/crm/chat"));
   const isLeadsRoute = location.pathname === LEADS_LINK;
   const activeStatusFilter = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -297,8 +305,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
             }
           } catch (e) {
             // Fallback: check API URL directly
-            const apiUrl = process.env.REACT_APP_API_URL || 'https://api.vocaledge.io/api/v1';
-            if (apiUrl.includes('localhost') || apiUrl.includes('127.0.0.1') || apiUrl.startsWith('http://')) {
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
               localStorage.removeItem('jwttoken');
             }
           }

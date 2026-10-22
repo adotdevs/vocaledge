@@ -140,7 +140,14 @@ async function applyLeadVisibilityToQuery(query, user) {
     }
 }
 
+const brandCache = new Map();
+const BRAND_CACHE_MS = 60 * 1000;
+
 async function getDistinctLeadBrands(user) {
+    const cacheKey = `${user?.role || "all"}:${user?._id || ""}`;
+    const cached = brandCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < BRAND_CACHE_MS) return cached.brands;
+
     const Lead = await getLeadModel();
     const brandsQuery = {
         isDeleted: false,
@@ -150,11 +157,13 @@ async function getDistinctLeadBrands(user) {
     await applyLeadVisibilityToQuery(brandsQuery, user);
 
     const brandsRaw = await Lead.distinct('Brand', brandsQuery);
-    return [...new Set(
+    const brands = [...new Set(
         brandsRaw
             .map((brand) => String(brand).trim())
             .filter(Boolean)
     )].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    brandCache.set(cacheKey, { brands, at: Date.now() });
+    return brands;
 }
 
 exports.loginCRM = catchAsyncErrors(async (req, res, next) => {
@@ -1201,8 +1210,11 @@ exports.getLeads = async (req, res) => {
             });
         }
 
-        // OPTIMIZED: Fetch leads, count, and brand options in parallel
-        const [leadsResult, totalFilteredResult, brands] = await Promise.all([
+        const totalLeadsQuery = { isDeleted: false };
+        await applyLeadVisibilityToQuery(totalLeadsQuery, req.user);
+
+        // Fetch the page, both counts, and brand options together.
+        const [leadsResult, totalFilteredResult, brands, totalLeads] = await Promise.all([
             Lead.find(query)
                 .sort(sort)
                 .skip(skip)
@@ -1210,6 +1222,7 @@ exports.getLeads = async (req, res) => {
                 .lean(),
             Lead.countDocuments(query),
             getDistinctLeadBrands(req.user),
+            Lead.countDocuments(totalLeadsQuery),
         ]);
         
         leads = leadsResult;
@@ -1236,40 +1249,6 @@ exports.getLeads = async (req, res) => {
             ...lead,
             agent: lead.agent ? agentMap[lead.agent.toString()] : null
         }, req.user));
-
-        // Get total leads count (without call status filter) - OPTIMIZED: Use same query logic
-        const totalLeadsQuery = { isDeleted: false };
-        if (req.user && req.user.role === 'manager') {
-            // Manager can only see leads from admins assigned to them
-            const assignedAdmins = await User.find({ 
-                role: 'admin', 
-                assignedManager: req.user._id 
-            }).select('_id').lean();
-            
-            const assignedAdminIds = assignedAdmins.map(admin => admin._id);
-            
-            if (assignedAdminIds.length === 0) {
-                // Manager has no assigned admins - return empty results
-                totalLeadsQuery.agent = { $in: [] };
-            } else {
-                // Filter leads to only show those assigned to the manager's admins
-                totalLeadsQuery.agent = { $in: assignedAdminIds };
-            }
-        } else if (req.user && req.user.role === 'subadmin') {
-            totalLeadsQuery.agent = req.user._id;
-        } else if (req.user && req.user.role === 'admin') {
-            // Reuse cached permissions
-            const userPerms = await getCachedUserPermissions(req.user._id);
-            if (userPerms?.adminPermissions?.canManageCrmLeads) {
-                const subadminIds = await getCachedSubadmins();
-                totalLeadsQuery.agent = { $in: [req.user._id, ...subadminIds] };
-            } else {
-                totalLeadsQuery.agent = req.user._id;
-            }
-        }
-        
-        // OPTIMIZED: Run count in parallel with leads fetch if not already done
-        const totalLeads = await Lead.countDocuments(totalLeadsQuery);
 
         // Calculate pagination info
         const totalPages = Math.ceil(totalFiltered / limitNum);

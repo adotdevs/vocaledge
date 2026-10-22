@@ -535,4 +535,57 @@ router.route('/crm/documents/:id/download').get(
   downloadDocument
 );
 
+const {
+  chatAgents,
+  chatStream,
+  chatTyping,
+  chatConversations,
+  chatUnreadPopups,
+  openChat,
+  chatMessages,
+  sendChatMessage,
+  editChatMessage,
+  hideChatMessage,
+  deleteChatMessage,
+  seenChat,
+  deliveredChat,
+  reactChatMessage,
+  removeChatConversation,
+  flagChatConversation,
+  adminConversations,
+  adminRecycle,
+  adminClearRecycleConversation,
+  adminPurgeRecycleMessage,
+  adminRestore,
+} = require("../controllers/chatController");
+
+const chatRoles = authorizedRoles("superadmin", "admin", "subadmin", "manager");
+const attachChatSseToken = (req, res, next) => {
+  if (!req.headers.authorization && req.query.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  next();
+};
+router.route("/crm/chat/stream").get(attachChatSseToken, isAuthorizedUser, chatRoles, chatStream);
+router.route("/crm/chat/conversations/:id/typing").post(isAuthorizedUser, chatRoles, chatTyping);
+router.route("/crm/chat/agents").get(isAuthorizedUser, chatRoles, chatAgents);
+router.route("/crm/chat/conversations").get(isAuthorizedUser, chatRoles, chatConversations);
+router.route("/crm/chat/unread-popups").get(isAuthorizedUser, chatRoles, chatUnreadPopups);
+router.route("/crm/chat/conversations").post(isAuthorizedUser, chatRoles, openChat);
+router.route("/crm/chat/conversations/:id/messages").get(isAuthorizedUser, chatRoles, chatMessages);
+router.route("/crm/chat/messages").post(isAuthorizedUser, chatRoles, sendChatMessage);
+router.route("/crm/chat/messages/:id").patch(isAuthorizedUser, chatRoles, editChatMessage);
+router.route("/crm/chat/messages/:id/hide").post(isAuthorizedUser, chatRoles, hideChatMessage);
+router.route("/crm/chat/messages/:id/delete").post(isAuthorizedUser, chatRoles, deleteChatMessage);
+router.route("/crm/chat/messages/:id/react").post(isAuthorizedUser, chatRoles, reactChatMessage);
+router.route("/crm/chat/conversations/:id/seen").post(isAuthorizedUser, chatRoles, seenChat);
+router.route("/crm/chat/receipts/delivered").post(isAuthorizedUser, chatRoles, deliveredChat);
+router.route("/crm/chat/conversations/:id/remove").post(isAuthorizedUser, chatRoles, removeChatConversation);
+router.route("/crm/chat/conversations/:id/flag").post(isAuthorizedUser, chatRoles, flagChatConversation);
+router.route("/crm/chat/admin/conversations").get(isAuthorizedUser, requireSuperAdmin, adminConversations);
+router.route("/crm/chat/admin/recycle").get(isAuthorizedUser, requireSuperAdmin, adminRecycle);
+router.route("/crm/chat/admin/recycle/conversations/:id").delete(isAuthorizedUser, requireSuperAdmin, adminClearRecycleConversation);
+router.route("/crm/chat/admin/messages/:id/restore").post(isAuthorizedUser, requireSuperAdmin, adminRestore);
+router.route("/crm/chat/admin/messages/:id").delete(isAuthorizedUser, requireSuperAdmin, adminPurgeRecycleMessage);
+
 module.exports = router;

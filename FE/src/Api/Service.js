@@ -9,6 +9,7 @@ import {
   postFormStreamApi,
   putSimpleApi
 } from "./axiosService";
+import axiosService from "./axiosService";
 import { baseUrl } from "../utils/Constant";
 import { applyLiveFxFromPricePayload } from "../utils/euroCoinUtils";
 
@@ -483,6 +484,43 @@ export const resendStaffMessageApi = (id) => postApi(`/crm/staff-messages/${id}/
 export const deleteStaffMessageApi = (id) => deleteApi(`/crm/staff-messages/${id}`);
 export const getPendingStaffMessagesApi = () => getApi(`/crm/staff-messages/pending`);
 export const dismissStaffMessageApi = (id) => postApi(`/crm/staff-messages/${id}/dismiss`);
+
+export const getChatAgentsApi = (search = "") => getApi(`/crm/chat/agents?search=${encodeURIComponent(search)}`);
+export const getChatConversationsApi = () => getApi(`/crm/chat/conversations`);
+export const getChatUnreadPopupsApi = () => getApi(`/crm/chat/unread-popups`);
+export const openChatApi = (userId) => postApi(`/crm/chat/conversations`, { userId });
+export const getChatMessagesApi = (id, params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return getApi(`/crm/chat/conversations/${id}/messages${query ? `?${query}` : ""}`);
+};
+export const sendChatMessageApi = async (formData, onProgress) => {
+  try {
+    const response = await axiosService.post(`/crm/chat/messages`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      withCredentials: true,
+      onUploadProgress: (event) => {
+        if (onProgress && event.total) onProgress(Math.round((event.loaded / event.total) * 100));
+      },
+    });
+    return response.data;
+  } catch (error) {
+    return error?.response?.data || { success: false, msg: error.message };
+  }
+};
+export const editChatMessageApi = (id, data) => patchApi(`/crm/chat/messages/${id}`, data);
+export const hideChatMessageApi = (id) => postApi(`/crm/chat/messages/${id}/hide`);
+export const deleteChatMessageApi = (id, data) => postApi(`/crm/chat/messages/${id}/delete`, data);
+export const reactChatMessageApi = (id, emoji) => postApi(`/crm/chat/messages/${id}/react`, { emoji });
+export const seenChatApi = (id) => postApi(`/crm/chat/conversations/${id}/seen`);
+export const typingChatApi = (id, active) => postApi(`/crm/chat/conversations/${id}/typing`, { active });
+export const deliveredChatApi = (messageIds) => postApi(`/crm/chat/receipts/delivered`, { messageIds });
+export const removeChatConversationApi = (id) => postApi(`/crm/chat/conversations/${id}/remove`);
+export const flagChatConversationApi = (id, field) => postApi(`/crm/chat/conversations/${id}/flag`, { field });
+export const getAdminChatConversationsApi = () => getApi(`/crm/chat/admin/conversations`);
+export const getChatRecycleApi = () => getApi(`/crm/chat/admin/recycle`);
+export const clearChatRecycleConversationApi = (id) => deleteApi(`/crm/chat/admin/recycle/conversations/${id}`);
+export const restoreChatMessageApi = (id) => postApi(`/crm/chat/admin/messages/${id}/restore`);
+export const deleteChatRecycleMessageApi = (id) => deleteApi(`/crm/chat/admin/messages/${id}`);
 
 export const getCrmNotificationsApi = (params = {}) => {
   const queryString = new URLSearchParams(

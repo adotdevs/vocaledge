@@ -14,7 +14,11 @@ const getSharedSocket = (backendUrl) => {
   if (sharedSocket) return sharedSocket;
   sharedSocket = io(backendUrl, {
     withCredentials: true,
-    transports: ['websocket', 'polling'],
+    transports: ['polling', 'websocket'],
+    upgrade: true,
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    timeout: 20000,
   });
   return sharedSocket;
 };

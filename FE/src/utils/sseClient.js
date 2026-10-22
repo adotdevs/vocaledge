@@ -49,8 +49,8 @@ class SSEClient {
         this.eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                console.log('📥 [SSE] Message received:', data.type, data);
-                
+                if (data?.type === 'heartbeat' || data?.type === 'connected') return;
+
                 // Emit to specific listeners
                 const listeners = this.listeners.get(data.type);
                 if (listeners) {

@@ -26,7 +26,9 @@ import Reminders from "../jsx/Admin/CRM/Reminders.jsx";
 import DocumentLibrary from "../jsx/Admin/CRM/DocumentLibrary.jsx";
 import AdminReminderNotifier from "../jsx/Admin/CRM/components/AdminReminderNotifier";
 import StaffMessagePopup from "../jsx/Admin/CRM/components/StaffMessagePopup";
+import ChatNotifier from "../jsx/Admin/CRM/components/ChatNotifier";
 import StaffMessages from "../jsx/Admin/CRM/StaffMessages";
+import ChatPage from "../jsx/Admin/CRM/Chat";
 
 import Error404 from "../jsx/pages/error/Error404";
 
@@ -118,6 +120,7 @@ export default function Router() {
         <RouterComponent>
           <AdminReminderNotifier />
           <StaffMessagePopup />
+          <ChatNotifier />
           <ScrollToTop />
           <UserOnlineStatus />
           <AppRouter />
@@ -188,6 +191,14 @@ export default function Router() {
               element={
                 <RequireAuth loginPath={"/auth/login/crm"}>
                   <DocumentLibrary />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/crm/chat/:tab?/:conversationId?"
+              element={
+                <RequireAuth loginPath={"/auth/login/crm"}>
+                  <ChatPage />
                 </RequireAuth>
               }
             />

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import sseClient from '../../../utils/sseClient';
+import { getBackendUrl } from '../../../config/appConfig';
 import { getCachedLeadStatuses } from './components/leadStatusCache';
 import { getStatusChipSx, getStatusColor } from './components/leadStatusStyles';
 import {
@@ -1599,27 +1600,7 @@ const LeadStream = () => {
 
     // ✅ Use SSE for real-time call status updates
     useEffect(() => {
-        const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
-        
-        // Parse URL properly to avoid malformed URLs
-        let backendUrl;
-        try {
-            const url = new URL(apiUrl);
-            backendUrl = `${url.protocol}//${url.host}`;
-        } catch (e) {
-            console.error('Invalid REACT_APP_API_URL:', apiUrl);
-            // Use production API if localhost fails
-            backendUrl = window.location.hostname === 'localhost' 
-                ? 'http://localhost:4000' 
-                : 'https://api.vocaledge.io';
-        }
-        
-        // If still localhost but not running locally, use production
-        if (backendUrl.includes('localhost') && window.location.hostname !== 'localhost') {
-            backendUrl = 'https://api.vocaledge.io';
-        }
-        
-        console.log('🔌 [LEADSTREAM] Using backend URL for SSE:', backendUrl);
+        const backendUrl = getBackendUrl();
         
         // Connect to SSE endpoint (async)
         sseClient.connect(`${backendUrl}/api/v1/crm/call/updates/sse`).catch(err => {

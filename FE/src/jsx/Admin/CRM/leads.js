@@ -107,6 +107,7 @@ import {
     deleteAllLeadsApiWithProgress,
     updateLeadApi, exportLeadsApi,
     allUsersApi,
+    signleUsersApi,
     assignLeadsApi,
     bulkUpdateLeadStatusApi,
     activateLeadApi,
@@ -1815,6 +1816,7 @@ const LeadsPage = () => {
         byLeadId: {} // leadId -> true
     });
     const finalizedGuardsRef = useRef(finalizedGuards);
+    const callAccessRef = useRef({ dashboard: false, logs: false });
     useEffect(() => {
         finalizedGuardsRef.current = finalizedGuards;
     }, [finalizedGuards]);
@@ -1976,8 +1978,14 @@ const LeadsPage = () => {
     // ✅ Polling for active calls status updates (like CallDashboard.jsx)
     useEffect(() => {
         const fetchActiveCallsStatus = async () => {
+            if (!callAccessRef.current.dashboard) return;
             try {
                 const response = await getActiveCallsApi();
+                if (response?.success === false) {
+                    callAccessRef.current.stoppedDashboard = true;
+                    callAccessRef.current.dashboard = false;
+                    return;
+                }
                 if (response.success && response.calls) {
                     console.log('📞 [LEADS.JS] Active calls received from polling:', response.calls.length);
 
@@ -2414,19 +2422,16 @@ const LeadsPage = () => {
     // Toggle sidebar
     const currentAuthUser = authUser();
     const { can } = useLiveCrmUser();
-    const getAllUsers = useCallback(async () => {
+    const getAllUsers = useCallback(async (includeAgents = true) => {
         try {
-            const currentUser = authUser().user;// Fetch current user's latest data (with their own role to get permissions)// ✅ SECURITY: Fetch current user's latest data BY ID (not email to avoid duplicates)
-            const currentUserResponse = await allUsersApi({
-                search: currentUser._id,  // Search by ID instead of email!
-                limit: 1
-            }); if (!currentUserResponse.success || currentUserResponse.allUsers.length === 0) {
+            const currentUser = authUser().user;
+            const currentUserResponse = await signleUsersApi(currentUser._id);
+            const updatedCurrentUser = currentUserResponse?.signleUser;
+            if (!updatedCurrentUser) {
                 toast.error("Failed to fetch user data");
                 setCurrentUserLatest(currentUser);
                 return;
             }
-
-            const updatedCurrentUser = currentUserResponse.allUsers[0];
             setCurrentUserLatest(updatedCurrentUser);
 
             // ✅ CRITICAL: Check CRM access permissions in real-time and redirect if false
@@ -2444,6 +2449,7 @@ const LeadsPage = () => {
                 return;
             }
             setCrmAccessDenied(false);
+            if (!includeAgents) return;
 
             let agents = []; // Initialize agents array
 
@@ -2451,8 +2457,8 @@ const LeadsPage = () => {
             if (updatedCurrentUser.role === "superadmin") {
                 // Superadmin can see all admins, subadmins, and superadmins
                 const [adminsResponse, subadminsResponse] = await Promise.all([
-                    allUsersApi({ role: 'admin', limit: 1000 }),
-                    allUsersApi({ role: 'subadmin', limit: 1000 })
+                    allUsersApi({ role: 'admin', limit: 1000, brief: 'true' }),
+                    allUsersApi({ role: 'subadmin', limit: 1000, brief: 'true' })
                 ]);
 
                 const allFetchedAgents = [
@@ -2470,17 +2476,17 @@ const LeadsPage = () => {
             } else if (updatedCurrentUser.role === "admin") {
                 // Admin: can assign only if allowed, and targets restricted to subadmins
                 if (updatedCurrentUser.adminPermissions?.canAssignLeads === true) {
-                    const subadminsResponse = await allUsersApi({ role: 'subadmin', limit: 1000 });
+                    const subadminsResponse = await allUsersApi({ role: 'subadmin', limit: 1000, brief: 'true' });
                     agents = subadminsResponse.success ? subadminsResponse.allUsers : [];
                 } else {
                     agents = [];
                 }
             } else if (updatedCurrentUser.role === "subadmin" && updatedCurrentUser.permissions?.canAssignLeads === true) {
-                const subadminsResponse = await allUsersApi({ role: 'subadmin', limit: 1000 });
+                const subadminsResponse = await allUsersApi({ role: 'subadmin', limit: 1000, brief: 'true' });
                 agents = subadminsResponse.success ? subadminsResponse.allUsers : [];
             } else if (updatedCurrentUser.role === "manager") {
                 // Manager: can only see admins assigned to them
-                const adminsResponse = await allUsersApi({ role: 'admin', limit: 1000 });
+                const adminsResponse = await allUsersApi({ role: 'admin', limit: 1000, brief: 'true' });
                 if (adminsResponse.success && adminsResponse.allUsers) {
                     // Filter to only admins assigned to this manager
                     agents = adminsResponse.allUsers.filter(admin =>
@@ -2502,12 +2508,11 @@ const LeadsPage = () => {
     }, []); // ✅ EMPTY dependencies - only run once on mount
 
     useEffect(() => {
-        getAllUsers();
-        // ✅ CRITICAL: Check permissions periodically (every 30 seconds) to catch permission changes in real-time
-        // This ensures users are kicked out immediately when permissions are revoked
+        getAllUsers(true);
+        // Recheck access without downloading the full agent lists again.
         const permissionCheckInterval = setInterval(() => {
-            getAllUsers();
-        }, 30000); // Check every 30 seconds
+            getAllUsers(false);
+        }, 30000);
 
         return () => {
             clearInterval(permissionCheckInterval);
@@ -2530,6 +2535,12 @@ const LeadsPage = () => {
     const isSuperAdmin = currentUserLatest?.role === 'superadmin';
     const canSendLeadEmail = can('canSendLeadEmail');
     const canMakeCalls = can('canMakeCalls');
+    if (!callAccessRef.current.stoppedDashboard) {
+        callAccessRef.current.dashboard = can('canAccessCallDashboard');
+    }
+    if (!callAccessRef.current.stoppedLogs) {
+        callAccessRef.current.logs = can('canViewCallLogs') || can('canAccessCallDashboard');
+    }
 
     // OPTIMIZED: Fetch leads with filters and pagination - backend now handles callStatus filtering
     const fetchLeads = async (page = 1, limit = pagination.limit) => {
@@ -2617,6 +2628,7 @@ const LeadsPage = () => {
     // Backend now handles call status filtering, so we only need call history for display
     useEffect(() => {
         const fetchCallStatusesForLeads = async () => {
+            if (!callAccessRef.current.logs) return;
             // Only fetch call history for current page leads (for display)
             if (leads.length === 0) {
                 setLeadCallStatuses({});
@@ -2639,9 +2651,15 @@ const LeadsPage = () => {
                 // Process in batches
                 for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
                     const batch = leadIds.slice(i, i + BATCH_SIZE);
+                    if (!callAccessRef.current.logs) break;
                     const batchPromises = batch.map(async (leadId) => {
                         try {
                             const response = await getCallHistoryApi(leadId);
+                            if (response?.success === false) {
+                                callAccessRef.current.stoppedLogs = true;
+                                callAccessRef.current.logs = false;
+                                return { leadId, status: null, callCount: 0, checked: true };
+                            }
                             if (response.success && response.calls && response.calls.length > 0) {
                                 const latestCall = response.calls[0];
                                 return {
@@ -2689,7 +2707,7 @@ const LeadsPage = () => {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [leads, pagination.currentPage]); // Only fetch when leads or page changes
+    }, [leadsKey]);
 
     // REMOVED: Frontend filtering is no longer needed - backend handles all filtering efficiently
 
