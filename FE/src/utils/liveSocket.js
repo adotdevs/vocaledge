@@ -36,10 +36,14 @@ export function getLiveSocket() {
     timeout: 20000,
     auth: useToken && cleanToken ? { token: `Bearer ${cleanToken}` } : {},
   });
+  const forwardChat = (data) => {
+    window.dispatchEvent(new CustomEvent("crm-chat-stream", { detail: data }));
+  };
   socket.on("connect", () => {
     console.log("[live] socket connected", socket.id);
     publish("open", "Connected");
   });
+  socket.on("chat.event", forwardChat);
   socket.on("disconnect", () => {
     console.warn("[live] socket disconnected");
     publish("connecting", "Reconnecting");

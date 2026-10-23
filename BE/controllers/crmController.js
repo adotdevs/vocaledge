@@ -12,7 +12,15 @@ const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const ErrorHandler = require('../utils/errorHandler');
 const { logActivity } = require('./activityController');
 const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = require('../utils/leadStatusHelpers');
-const { hasCrmPermission, denyCrmPermission, canViewLeadSource, presentLead } = require('../utils/crmPermissions');
+const { hasCrmPermission, denyCrmPermission, canViewLeadSource } = require('../utils/crmPermissions');
+
+const hidePrivateLeadFields = (lead, user) => {
+  if (!lead) return lead;
+  const copy = { ...lead };
+  if (!hasCrmPermission(user, "canViewLeadSource")) delete copy.source;
+  if (!hasCrmPermission(user, "canViewLeadBrand")) delete copy.Brand;
+  return copy;
+};
 
 const stream = require('stream');
 
@@ -357,7 +365,7 @@ exports.createLead = catchAsyncErrors(async (req, res, next) => {
         res.status(201).json({
             success: true,
             msg: 'Lead created successfully',
-            data: { lead: presentLead(newLead.toObject(), req.user) }
+            data: { lead: hidePrivateLeadFields(newLead.toObject(), req.user) }
         });
     } catch (err) {
         console.error(err);
@@ -1294,7 +1302,7 @@ exports.getLeads = async (req, res) => {
             })(),
         ]);
 
-        const populatedLeads = leads.map((lead) => presentLead({
+        const populatedLeads = leads.map((lead) => hidePrivateLeadFields({
             ...lead,
             agent: lead.agent ? agentMap[lead.agent.toString()] || null : null,
             callSummary: callSummaryMap[String(lead._id)] || null,
@@ -1900,7 +1908,7 @@ exports.editLead = async (req, res) => {
         res.status(200).json({
             success: true,
             msg: 'Lead updated successfully',
-            data: { lead: presentLead(typeof lead.toObject === 'function' ? lead.toObject() : lead, req.user) }
+            data: { lead: hidePrivateLeadFields(typeof lead.toObject === 'function' ? lead.toObject() : lead, req.user) }
         });
 
     } catch (err) {
@@ -2119,7 +2127,7 @@ exports.getDeletedLeads = async (req, res) => {
         const agentIds = leadsRaw.map(l => l.agent).filter(Boolean);
         const agents = await User.find({ _id: { $in: agentIds } }).select('firstName lastName email role').lean();
         const agentMap = agents.reduce((m, a) => { m[a._id.toString()] = a; return m; }, {});
-        const leads = leadsRaw.map(l => presentLead({
+        const leads = leadsRaw.map(l => hidePrivateLeadFields({
             ...l,
             agent: l.agent ? agentMap[l.agent.toString()] || null : null,
         }, req.user));

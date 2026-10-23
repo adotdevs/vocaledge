@@ -300,7 +300,10 @@ const liveOrigin = (origin) => {
 exports.chatStream = (req, res) => {
   req.setTimeout(0);
   res.setTimeout(0);
-  if (res.socket) res.socket.setTimeout(0);
+  if (res.socket) {
+    res.socket.setTimeout(0);
+    res.socket.setNoDelay(true);
+  }
   const origin = req.headers.origin;
   if (liveOrigin(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -335,11 +338,11 @@ exports.chatStream = (req, res) => {
   let closed = false;
   const close = () => {
     if (closed) return;
+    if (!res.writableEnded && !res.destroyed && res.socket && !res.socket.destroyed) return;
     closed = true;
     clearInterval(heartbeat);
     remove();
   };
-  // The response close is the browser disconnect. The request close fires as soon as a GET is received.
   res.on("close", close);
 };
 

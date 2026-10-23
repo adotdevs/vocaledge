@@ -47,6 +47,7 @@ const connectCRMDatabase = require("./config/crmDatabase");
 const cloudinary = require("cloudinary");
 const http = require('http');
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 
 app.get("/", async (req, res) => {
   res.send("working");
@@ -98,8 +99,20 @@ const io = new Server(server, {
   pingTimeout: 25000,
 });
 
-// Socket.io connection
- 
+io.on("connection", (socket) => {
+  try {
+    const headerToken = String(socket.handshake?.auth?.token || "").replace(/^Bearer\s+/i, "");
+    const cookie = String(socket.handshake?.headers?.cookie || "");
+    const cookieMatch = cookie.match(/(?:^|;\s*)jwttoken=([^;]+)/);
+    const token = headerToken || (cookieMatch ? decodeURIComponent(cookieMatch[1]) : "");
+    if (token && process.env.SECRET_JWT) {
+      const decoded = jwt.verify(token, process.env.SECRET_JWT);
+      if (decoded?._id) socket.join(`user:${decoded._id}`);
+    }
+  } catch (error) {
+    // A missing token still allows the other live features. Chat events stay in the user room.
+  }
+});
 
 // Make io available globally for emitting events
 global.io = io;

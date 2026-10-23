@@ -3,7 +3,15 @@ const getLeadModel = require('../crmDB/models/leadsModel');
 const User = require('../models/userModel'); // Main database User model
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const { createNotificationsForActivity } = require('../utils/crmNotificationService');
-const { hasCrmPermission, presentLead, redactSourceMention } = require('../utils/crmPermissions');
+const { hasCrmPermission, redactSourceMention } = require('../utils/crmPermissions');
+
+const hidePrivateLeadFields = (lead, user) => {
+  if (!lead) return lead;
+  const copy = { ...lead };
+  if (!hasCrmPermission(user, "canViewLeadSource")) delete copy.source;
+  if (!hasCrmPermission(user, "canViewLeadBrand")) delete copy.Brand;
+  return copy;
+};
 
 // Helper function to log activity
 async function logActivity({ leadId, type, createdBy, comment = '', changes = null, metadata = {}, isSystemGenerated = false }) {
@@ -370,7 +378,7 @@ exports.getLeadWithActivity = catchAsyncErrors(async (req, res) => {
 
     res.json({
         success: true,
-        lead: presentLead(lead, currentUser),
+        lead: hidePrivateLeadFields(lead, currentUser),
         activities: formattedActivities,
         totalActivities
     });

@@ -99,9 +99,12 @@ const openStream = () => {
 
   next.onerror = () => {
     if (source !== next) return;
-    const closed = next.readyState === EventSource.CLOSED;
-    console.warn("[chat] stream failed", closed ? "closed" : "connecting");
-    setChatStatus("offline", closed ? "Connection closed" : "Reconnecting");
+    if (next.readyState !== EventSource.CLOSED) {
+      setChatStatus("connecting", "Reconnecting");
+      return;
+    }
+    console.warn("[chat] stream failed", "closed");
+    setChatStatus("offline", "Connection closed");
     closeSource();
     reconnectTimer = setTimeout(openStream, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 10000);
@@ -130,6 +133,14 @@ export const subscribeChatEvents = (handlers) => {
     entries.forEach(([type, handler]) => listeners.get(type)?.delete(handler));
   };
 };
+
+if (typeof window !== "undefined") {
+  window.addEventListener("crm-chat-stream", (event) => {
+    const data = event.detail || {};
+    if (!data.event || data.event === "chat.ping" || data.event === "chat.connected") return;
+    emit(data.event, data.payload);
+  });
+}
 
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {

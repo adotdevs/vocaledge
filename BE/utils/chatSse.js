@@ -5,12 +5,18 @@ const getChatConversationModel = require("../crmDB/models/chatConversationModel"
 const clients = new Map();
 
 const writeEvent = (res, event, payload) => {
-  res.write(`data: ${JSON.stringify({ event, payload: payload || {} })}\n\n`);
+  const body = `data: ${JSON.stringify({ event, payload: payload || {} })}\n\n`;
+  if (res.socket && !res.socket.destroyed) res.socket.setNoDelay(true);
+  res.write(body);
   if (typeof res.flush === "function") res.flush();
 };
 
 const publishToUser = (userId, event, payload) => {
-  const sockets = clients.get(String(userId));
+  const key = String(userId);
+  if (global.io) {
+    global.io.to(`user:${key}`).emit("chat.event", { event, payload: payload || {} });
+  }
+  const sockets = clients.get(key);
   if (!sockets || !sockets.size) return;
   sockets.forEach((res) => {
     if (res.writableEnded || res.destroyed) {
