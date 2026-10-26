@@ -42,6 +42,7 @@ const leadSchema = new mongoose.Schema({
   screenSharing: { type: String, enum: ["", "yes", "no"], default: "" },
   screenSharingId: { type: String, default: "" },
   customerPotential: { type: Number, default: null },
+  refillBatch: { type: mongoose.Schema.Types.ObjectId, default: null },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date },
 });
@@ -59,6 +60,7 @@ leadSchema.index({ createdAt: -1 }); // For sorting by date
 leadSchema.index({ isDeleted: 1, createdAt: -1 });
 leadSchema.index({ isDeleted: 1, agent: 1, createdAt: -1 });
 leadSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
+leadSchema.index({ isDeleted: 1, status: 1, agent: 1 });
 leadSchema.index({ source: 1 }); // For filtering public form leads (e.g. takebackanalytics)
 leadSchema.index({ uploadBatchId: 1, isDeleted: 1 });
 

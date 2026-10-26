@@ -336,7 +336,8 @@ const listUnreadPopups = async (actor) => {
     deletedForEveryoneAt: null,
     hiddenFor: { $ne: actor._id },
     receipts: { $not: { $elemMatch: { userId: actor._id, seenAt: { $ne: null } } } },
-  }).sort({ createdAt: -1 }).limit(40).select("senderId senderName body conversationId createdAt").lean();
+  }).sort({ createdAt: -1 }).limit(40).select("senderId senderName body conversationId createdAt attachments replyTo").lean();
+  const users = await loadUsers(messages.map((message) => message.senderId));
   const seenConversation = new Set();
   const popups = [];
   for (const message of messages) {
@@ -345,12 +346,20 @@ const listUnreadPopups = async (actor) => {
     const key = String(message.conversationId);
     if (seenConversation.has(key)) continue;
     seenConversation.add(key);
+    const sender = users.get(String(message.senderId));
     popups.push({
       _id: message._id,
       conversationId: message.conversationId,
       senderId: message.senderId,
       senderName: message.senderName || "",
+      senderRole: sender?.role || "",
       body: message.body || "",
+      createdAt: message.createdAt,
+      replyTo: message.replyTo || null,
+      attachments: (message.attachments || []).map((file) => ({
+        originalName: file.originalName || "",
+        resourceType: file.resourceType || "",
+      })),
     });
     if (popups.length === 6) break;
   }
@@ -433,7 +442,7 @@ const sendMessage = async (actor, { conversationId, recipientId, body, clientKey
     (item) => new Date(conversation.lastMessageAt) <= new Date(item.removedAt)
   );
   await conversation.save();
-  return { conversation, message: serializeMessage(message.toObject(), actor._id), duplicate: false };
+  return { conversation, message: { ...serializeMessage(message.toObject(), actor._id), senderRole: actor.role || "" }, duplicate: false };
 };
 
 const editMessage = async (actor, messageId, body, reason) => {

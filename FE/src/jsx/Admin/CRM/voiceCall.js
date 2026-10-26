@@ -29,6 +29,9 @@ let ringTimer = null;
 let audioCtx = null;
 let myId = "";
 let pendingIce = [];
+let pendingOffer = null;
+let answerSentFor = "";
+let sdpChain = Promise.resolve();
 let preparing = null;
 let speakFrame = 0;
 let speakCtx = null;
@@ -62,18 +65,31 @@ let ringToken = 0;
 let ringOn = false;
 let masterGain = null;
 let liveTones = [];
+let ringTimeouts = [];
+
+const rememberTimeout = (id) => {
+  ringTimeouts.push(id);
+  return id;
+};
 
 const stopRing = () => {
   ringOn = false;
   ringToken += 1;
   clearInterval(ringTimer);
   ringTimer = null;
+  ringTimeouts.forEach((id) => clearTimeout(id));
+  ringTimeouts = [];
   liveTones.forEach((tone) => {
-    try { tone.stop(); } catch (error) { /* already stopped */ }
+    try { tone.stop(0); } catch (error) { /* already stopped */ }
+    try { tone.disconnect(); } catch (error) { /* already disconnected */ }
   });
   liveTones = [];
   if (masterGain) {
-    try { masterGain.gain.setValueAtTime(0, masterGain.context.currentTime); } catch (error) { /* context already closed */ }
+    try {
+      masterGain.gain.cancelScheduledValues(0);
+      masterGain.gain.setValueAtTime(0, masterGain.context.currentTime);
+      masterGain.disconnect();
+    } catch (error) { /* context already closed */ }
     masterGain = null;
   }
   if (audioCtx) {
@@ -117,9 +133,9 @@ const startRing = (outgoing) => {
     if (outgoing) beep(440, 0.28);
     else {
       beep(480, 0.16);
-      setTimeout(() => {
+      rememberTimeout(setTimeout(() => {
         if (ringOn && token === ringToken) beep(620, 0.16);
-      }, 200);
+      }, 200));
     }
   };
   pulse();
@@ -216,6 +232,9 @@ const reset = (statusText = "") => {
   stopRing();
   stopMedia();
   preparing = null;
+  pendingOffer = null;
+  answerSentFor = "";
+  sdpChain = Promise.resolve();
   publish({
     phase: statusText ? "ended" : "idle",
     callId: "",
@@ -295,7 +314,11 @@ const askForMicrophone = async () => {
 const preparePeer = async () => {
   localStream = await askForMicrophone();
   pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-  localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+  localStream.getAudioTracks().forEach((track) => {
+    track.enabled = !state.muted;
+    pc.addTrack(track, localStream);
+  });
+  if (state.muted && state.callId) send({ type: "mute", callId: state.callId, muted: true });
   pc.ontrack = (event) => {
     const audio = ensureRemoteAudio();
     const stream = event.streams[0];
@@ -309,24 +332,61 @@ const preparePeer = async () => {
   };
   pc.onconnectionstatechange = () => {
     if (!pc) return;
-    if (pc.connectionState === "connected") publish({ phase: "active", startedAt: state.startedAt || Date.now(), statusText: "" });
+    if (pc.connectionState === "connected") {
+      stopRing();
+      publish({ phase: "active", startedAt: state.startedAt || Date.now(), statusText: "" });
+    }
     if (pc.connectionState === "failed") hangUp();
   };
+  if (pendingOffer && state.direction === "in") {
+    const queued = pendingOffer;
+    pendingOffer = null;
+    await applyOffer(queued);
+  }
 };
 
 const makeOffer = async () => {
-  if (!pc) return;
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  send({ type: "offer", callId: state.callId, sdp: pc.localDescription });
+  if (!pc || pc.signalingState !== "stable") return;
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    send({ type: "offer", callId: state.callId, sdp: pc.localDescription });
+  } catch (error) {
+    console.warn("[voice] offer failed", error);
+  }
+};
+
+const canAnswer = () => pc && (pc.signalingState === "have-remote-offer" || pc.signalingState === "have-local-pranswer");
+
+const applyOffer = (message) => {
+  const callId = String(message?.callId || state.callId || "");
+  sdpChain = sdpChain.then(async () => {
+    if (!pc || !message?.sdp || !callId) return;
+    stopRing();
+    if (answerSentFor === callId && pc.signalingState === "stable") return;
+    if (pc.signalingState === "stable") await pc.setRemoteDescription(message.sdp);
+    if (!canAnswer() || answerSentFor === callId) return;
+    await flushIce();
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    answerSentFor = callId;
+    send({ type: "answer", callId, sdp: pc.localDescription });
+    publish({ phase: "active", startedAt: state.startedAt || Date.now(), statusText: "" });
+  }).catch((error) => {
+    console.warn("[voice] offer failed", error);
+  });
+  return sdpChain;
 };
 
 const showExistingCall = (message) => {
   const callId = String(message?.callId || "");
   if (!callId) return;
-  if (state.callId === callId && state.phase !== "idle" && state.phase !== "ended") return;
   const direction = message.direction === "in" ? "in" : "out";
   const ringing = message.status === "ringing";
+  if (state.callId === callId && state.phase !== "idle" && state.phase !== "ended") {
+    if (!ringing) stopRing();
+    return;
+  }
   const hasMedia = Boolean(pc && localStream);
   publish({
     phase: ringing ? (direction === "out" ? "outgoing" : "incoming") : "active",
@@ -348,6 +408,7 @@ const showExistingCall = (message) => {
 };
 
 export const startVoiceCall = async ({ userId, name, conversationId }) => {
+  if (window.__crmCanVoiceCall === false) return;
   if (!userId || userId === myId) return;
   if (["outgoing", "active", "connecting", "incoming"].includes(state.phase) || (state.phase === "mic" && state.callId)) {
     publish({ minimized: false });
@@ -403,6 +464,7 @@ export const toggleVoiceMinimized = () => publish({ minimized: !state.minimized 
 
 export const acceptVoiceCall = async () => {
   if (state.phase !== "incoming" || !state.callId) return;
+  stopRing();
   publish({ phase: "connecting", statusText: "Connecting…", peerMuted: false });
   try {
     await silenceThen(() => preparePeer());
@@ -466,12 +528,13 @@ export const hangUp = () => {
 };
 
 export const toggleMute = () => {
-  if (!localStream) return;
   const next = !state.muted;
-  localStream.getAudioTracks().forEach((track) => {
-    track.enabled = !next;
-  });
-  if (state.callId) send({ type: "mute", callId: state.callId, muted: next });
+  if (localStream) {
+    localStream.getAudioTracks().forEach((track) => {
+      track.enabled = !next;
+    });
+    if (state.callId) send({ type: "mute", callId: state.callId, muted: next });
+  }
   publish({ muted: next });
 };
 
@@ -481,6 +544,10 @@ const onSignal = async (message) => {
   if (!type) return;
 
   if (type === "invite") {
+    if (window.__crmCanVoiceCall === false) {
+      send({ type: "reject", callId });
+      return;
+    }
     if (String(message.from || "") === String(myId || "")) return;
     if (state.callId === callId && state.phase !== "idle" && state.phase !== "ended") return;
     if (hasLiveCall() && state.callId !== callId) {
@@ -518,6 +585,10 @@ const onSignal = async (message) => {
   if (callId && state.callId && callId !== state.callId) return;
 
   if (type === "ringing") {
+    if (state.phase === "connecting" || state.phase === "active" || state.phase === "mic") {
+      stopRing();
+      return;
+    }
     if (state.phase !== "outgoing" || callId !== state.callId) return;
     publish({ statusText: "Ringing" });
     startRing(true);
@@ -531,6 +602,7 @@ const onSignal = async (message) => {
   }
 
   if (type === "accept") {
+    stopRing();
     publish({ phase: "connecting", statusText: "Connecting…" });
     try {
       await silenceThen(() => preparePeer());
@@ -541,20 +613,25 @@ const onSignal = async (message) => {
     return;
   }
 
-  if (type === "offer" && message.sdp && pc) {
-    await pc.setRemoteDescription(message.sdp);
-    await flushIce();
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    send({ type: "answer", callId: state.callId, sdp: pc.localDescription });
-    publish({ phase: "active", startedAt: state.startedAt || Date.now(), statusText: "" });
+  if (type === "offer" && message.sdp) {
+    if (!pc) {
+      pendingOffer = message;
+      return;
+    }
+    await applyOffer(message);
     return;
   }
 
   if (type === "answer" && message.sdp && pc) {
-    await pc.setRemoteDescription(message.sdp);
-    await flushIce();
-    publish({ phase: "active", startedAt: Date.now(), statusText: "" });
+    sdpChain = sdpChain.then(async () => {
+      if (!pc || (pc.signalingState !== "have-local-offer" && pc.signalingState !== "have-remote-pranswer")) return;
+      stopRing();
+      await pc.setRemoteDescription(message.sdp);
+      await flushIce();
+      publish({ phase: "active", startedAt: Date.now(), statusText: "" });
+    }).catch((error) => {
+      console.warn("[voice] answer failed", error);
+    });
     return;
   }
 
@@ -589,7 +666,9 @@ const onSignal = async (message) => {
     return;
   }
   if (type === "ended") {
-    const text = message.reason === "missed"
+    const text = message.reason === "unavailable"
+      ? "Calling is turned off"
+      : message.reason === "missed"
       ? (state.direction === "out" ? "No answer" : "")
       : message.reason === "rejected"
         ? "Call declined"

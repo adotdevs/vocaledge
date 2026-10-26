@@ -37,6 +37,7 @@ import {
   NotificationsActive,
   FolderOpen,
   FilterList,
+  Assessment,
   Campaign,
   Forum,
 } from '@mui/icons-material';
@@ -209,6 +210,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const menuItems = [];
   if (hasCrmAccess) {
     menuItems.push({ icon: <People />, label: 'Leads', link: "/admin/dashboard/crm" });
+    menuItems.push({ icon: <Assessment />, label: 'Statistics', link: '/admin/crm/list-statistics' });
     if (can('canManageReminders')) {
       menuItems.push({
         icon: <NotificationsActive />,

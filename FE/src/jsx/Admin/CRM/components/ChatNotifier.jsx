@@ -15,6 +15,30 @@ const personId = (value) => {
   return String(value);
 };
 
+const roleLabel = (role) => {
+  if (role === "superadmin") return "Super admin";
+  if (role === "subadmin") return "Sub admin";
+  if (role === "admin") return "Admin";
+  if (role === "manager") return "Manager";
+  return "";
+};
+
+const receivedAt = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (date.toDateString() === new Date().toDateString()) return time;
+  return `${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`;
+};
+
+const attachmentLabel = (message) => {
+  const files = Array.isArray(message?.attachments) ? message.attachments : [];
+  if (!files.length) return "";
+  const first = files[0]?.originalName || (files[0]?.resourceType === "image" ? "Photo" : "File");
+  return files.length > 1 ? `${first} +${files.length - 1}` : first;
+};
+
 const ChatNotifier = () => {
   const authUser = useAuthUser();
   const { can, role, ready, user } = useLiveCrmUser();
@@ -89,16 +113,32 @@ const ChatNotifier = () => {
 
   const popupLayer = popups.length ? createPortal(
     <div className="crm-chat-popups">
-      {popups.map((message) => (
-        <article className="crm-chat-popup" key={message._id}>
-          <header>
-            <strong>{message.senderName || "New message"}</strong>
-            <button type="button" aria-label="Close" onClick={() => closePopup(message._id)}>×</button>
-          </header>
-          <p>{(message.body || "Sent an attachment").slice(0, 140)}</p>
-          <button type="button" onClick={() => openChat(message)}>Open chat</button>
-        </article>
-      ))}
+      {popups.map((message) => {
+        const name = message.senderName || "New message";
+        const role = roleLabel(message.senderRole);
+        const when = receivedAt(message.createdAt);
+        const file = attachmentLabel(message);
+        const preview = (message.body || "").trim();
+        return (
+          <article className="crm-chat-popup" key={message._id}>
+            <header>
+              <span className="crm-chat-popup-avatar" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
+              <div className="crm-chat-popup-who">
+                <strong>{name}</strong>
+                <span>{[role, when].filter(Boolean).join(" · ") || "New message"}</span>
+              </div>
+              <button type="button" aria-label="Close" onClick={() => closePopup(message._id)}>×</button>
+            </header>
+            <p className="crm-chat-popup-body">{preview ? preview.slice(0, 180) : (file ? "Sent an attachment" : "New message")}</p>
+            <div className="crm-chat-popup-meta">
+              {file && <span>{file}</span>}
+              {message.replyTo && <span>Reply</span>}
+              {when && <span>Received {when}</span>}
+            </div>
+            <button type="button" onClick={() => openChat(message)}>Open chat</button>
+          </article>
+        );
+      })}
     </div>,
     document.body
   ) : null;

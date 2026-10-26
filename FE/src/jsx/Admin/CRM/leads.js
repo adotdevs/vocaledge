@@ -128,6 +128,7 @@ import Sidebar from "./Sidebar.js";
 import LeadUploadHistory from "./components/LeadUploadHistory";
 import CrmAccessDenied from "./components/CrmAccessDenied";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { subscribeChatEvents } from "./chatEvents";
 import { useAuthUser } from "react-auth-kit";
 import { debounce } from "../../../utils/debounce";
 // Removed socket.io-client - using SSE instead
@@ -142,13 +143,33 @@ import {
     getCachedLeadStatuses,
     subscribeLeadStatuses,
 } from './components/leadStatusCache';
-import { getStatusChipSx, getStatusColor } from './components/leadStatusStyles';
+import { contrastText, getStatusChipSx, getStatusColor } from './components/leadStatusStyles';
 import useLiveCrmUser from './useLiveCrmUser';
 import SendLeadEmailDialog from './components/SendLeadEmailDialog';
 import LeadRemindersSection from './components/LeadRemindersSection';
 import ReminderModal from './components/ReminderModal';
 import { CustomerFieldsEditor, CustomerFieldsFilters, CustomerFieldsView } from './components/CustomerFields';
 import { applyCustomerFieldChange, emptyCustomerFields, customerFieldsFromLead } from './leadCustomerFields';
+
+const statusCountBadgeSx = (chipColor, filled) => {
+    const ink = filled ? contrastText(chipColor || "#5e35b1") : "#3d4754";
+    return {
+        px: 0.75,
+        minWidth: 22,
+        height: 18,
+        borderRadius: "999px",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: "0.68rem",
+        fontWeight: 700,
+        lineHeight: 1,
+        letterSpacing: 0,
+        bgcolor: filled ? ink : "#e7ebf0",
+        color: filled ? (chipColor || "#5e35b1") : "#3d4754",
+        boxShadow: filled ? "none" : "inset 0 0 0 1px rgba(15, 23, 42, 0.08)",
+    };
+};
 
 // ... (Field mapping configuration and CreateLeadDialog component remain the same)
 // Field mapping configuration based on updated schema
@@ -1558,7 +1579,7 @@ const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageSt
             const response = await updateLeadApi(lead._id, editForm);
             if (response.success) {
                 toast.success('Lead updated successfully!');
-                onLeadUpdated(response.data?.lead || { ...lead, ...editForm });
+                onLeadUpdated(response.data?.lead || { ...lead, ...editForm }, response.data);
                 onClose();
             } else {
                 toast.error(response.msg || 'Failed to update lead');
@@ -1808,6 +1829,38 @@ const LeadsPage = () => {
             next.add(phoneNumber);
             return next;
         });
+    }, []);
+    const [statusCounts, setStatusCounts] = useState({});
+    const [statusTotal, setStatusTotal] = useState(0);
+    const filtersRef = useRef(filters);
+    filtersRef.current = filters;
+    const appliedRefillIds = useRef(new Set());
+    const applyRefilledLeads = useCallback((rows) => {
+        const incoming = Array.isArray(rows) ? rows : [];
+        const fresh = [];
+        incoming.forEach((lead) => {
+            const id = lead?._id ? String(lead._id) : "";
+            if (!id || appliedRefillIds.current.has(id)) return;
+            appliedRefillIds.current.add(id);
+            fresh.push(lead);
+        });
+        if (!fresh.length) return;
+        const show = !filtersRef.current.status || filtersRef.current.status === "New";
+        if (show) {
+            setLeads((prev) => {
+                const seen = new Set(prev.map((item) => String(item._id)));
+                const adding = fresh.filter((lead) => !seen.has(String(lead._id)));
+                return adding.length ? [...adding, ...prev] : prev;
+            });
+        }
+        setStatusCounts((prev) => ({ ...prev, New: (Number(prev.New) || 0) + fresh.length }));
+        setStatusTotal((prev) => Number(prev) + fresh.length);
+        setPagination((prev) => ({
+            ...prev,
+            totalLeads: Number(prev.totalLeads || 0) + fresh.length,
+            totalFiltered: show ? Number(prev.totalFiltered || 0) + fresh.length : prev.totalFiltered,
+        }));
+        toast.success(`${fresh.length.toLocaleString()} new leads added`);
     }, []);
     const [pagination, setPagination] = useState({
         currentPage: 1,
@@ -2662,7 +2715,19 @@ const LeadsPage = () => {
 
             if (res.success) {
                 const nextLeads = res.data.leads || [];
-                setLeads(nextLeads);
+                const incoming = Array.isArray(res.data.refilledLeads) ? res.data.refilledLeads : [];
+                const showRefill = !filters.status || filters.status === "New";
+                const seen = new Set(nextLeads.map((lead) => String(lead._id)));
+                const adding = [];
+                let unseenRefill = 0;
+                incoming.forEach((lead) => {
+                    const id = lead?._id ? String(lead._id) : "";
+                    if (!id) return;
+                    if (!appliedRefillIds.current.has(id)) unseenRefill += 1;
+                    appliedRefillIds.current.add(id);
+                    if (showRefill && !seen.has(id)) adding.push(lead);
+                });
+                setLeads(adding.length ? [...adding, ...nextLeads] : nextLeads);
                 const statusMap = {};
                 nextLeads.forEach((lead) => {
                     if (!lead?._id || !lead.callSummary) return;
@@ -2671,6 +2736,9 @@ const LeadsPage = () => {
                 setLeadCallStatuses(statusMap);
                 setLoadingCallStatuses(false);
                 setBrandOptions(Array.isArray(res.data.brands) ? res.data.brands : []);
+                setStatusCounts(res.data.statusCounts && typeof res.data.statusCounts === "object" ? res.data.statusCounts : {});
+                setStatusTotal(Number(res.data.statusTotal) || 0);
+                if (unseenRefill > 0) toast.success(`${unseenRefill.toLocaleString()} new leads added`);
                 setAllLeadsForFiltering([]); // Not needed anymore - backend handles filtering
                 setFilteredLeads([]); // Not needed anymore
                 setPagination(res.data.pagination || {
@@ -2716,6 +2784,10 @@ const LeadsPage = () => {
         fetchLeads(1); // Reset to page 1 when filters change
     }, [filters]);
 
+    useEffect(() => subscribeChatEvents({
+        "leads.refilled": (payload) => applyRefilledLeads(payload?.leads),
+    }), [applyRefilledLeads]);
+
     useEffect(() => {
         const statusFromUrl = searchParams.get('status') || '';
         setFilters((prev) => {
@@ -2732,9 +2804,25 @@ const LeadsPage = () => {
         fetchLeads(pagination.currentPage);
     };
 
-    const handleLeadUpdated = (updated) => {
+    const moveStatusCount = (fromStatus, toStatus) => {
+        const from = fromStatus || "New";
+        const to = toStatus || "New";
+        if (from === to) return;
+        setStatusCounts((prev) => ({
+            ...prev,
+            [from]: Math.max(0, (prev[from] || 0) - 1),
+            [to]: (prev[to] || 0) + 1,
+        }));
+    };
+
+    const handleLeadUpdated = (updated, extra) => {
         if (!updated?._id) return;
         const nextStatus = updated.status;
+        const current = leads.find((item) => item._id === updated._id);
+        if (current && nextStatus && current.status !== nextStatus) {
+            moveStatusCount(current.status, nextStatus);
+        }
+        if (extra?.refilledLeads?.length) applyRefilledLeads(extra.refilledLeads);
         if (filters.status && nextStatus && nextStatus !== filters.status) {
             setLeads((prev) => prev.filter((item) => item._id !== updated._id));
             setPagination((prev) => ({
@@ -3281,6 +3369,7 @@ const LeadsPage = () => {
             });
 
             if (response.success) {
+                moveStatusCount(lead.status, newStatus);
                 const shouldRemoveFromFilteredView = filters.status && newStatus !== filters.status;
 
                 if (shouldRemoveFromFilteredView) {
@@ -3317,6 +3406,7 @@ const LeadsPage = () => {
                     );
                 }
                 toast.success("Status updated");
+                if (response.data?.refilledLeads?.length) applyRefilledLeads(response.data.refilledLeads);
             } else {
                 toast.error(response.msg || "Failed to update status");
             }
@@ -4068,7 +4158,14 @@ const LeadsPage = () => {
                                     </Typography>
                                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.25, alignItems: 'center' }}>
                                         <Chip
-                                            label="All"
+                                            label={(
+                                                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.85 }}>
+                                                    All
+                                                    <Box component="span" sx={statusCountBadgeSx("#5e35b1", !filters.status)}>
+                                                        {Number(statusTotal || 0).toLocaleString()}
+                                                    </Box>
+                                                </Box>
+                                            )}
                                             clickable
                                             size="medium"
                                             onClick={() => handleFilterChange('status', '')}
@@ -4087,11 +4184,19 @@ const LeadsPage = () => {
                                         {filterLeadStatuses.map((status) => {
                                             const isSelected = filters.status === status.label;
                                             const statusColor = getStatusColor(status);
+                                            const statusCount = Number(statusCounts[status.label] || 0).toLocaleString();
 
                                             return (
                                                 <Chip
                                                     key={status._id}
-                                                    label={status.label}
+                                                    label={(
+                                                        <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.85 }}>
+                                                            {status.label}
+                                                            <Box component="span" sx={statusCountBadgeSx(statusColor, isSelected)}>
+                                                                {statusCount}
+                                                            </Box>
+                                                        </Box>
+                                                    )}
                                                     clickable
                                                     size="medium"
                                                     onClick={() => handleFilterChange('status', status.label)}
@@ -5339,8 +5444,40 @@ const LeadsPage = () => {
                                 setBulkStatusUpdating(true);
                                 const res = await bulkUpdateLeadStatusApi(Array.from(selectedLeads), bulkStatusValue);
                                 if (res.success) {
+                                    const incoming = Array.isArray(res.data?.refilledLeads) ? res.data.refilledLeads : [];
+                                    if (allFilteredSelected) {
+                                        incoming.forEach((lead) => {
+                                            if (lead?._id) appliedRefillIds.current.add(String(lead._id));
+                                        });
+                                        await fetchLeads(pagination.currentPage);
+                                        const showNew = !filters.status || filters.status === "New";
+                                        if (showNew && incoming.length) {
+                                            setLeads((prev) => {
+                                                const seen = new Set(prev.map((lead) => String(lead._id)));
+                                                const adding = incoming.filter((lead) => lead?._id && !seen.has(String(lead._id)));
+                                                return adding.length ? [...adding, ...prev] : prev;
+                                            });
+                                        }
+                                    } else {
+                                        const selectedOnPage = leads.filter((lead) => selectedLeads.has(lead._id));
+                                        selectedOnPage.forEach((lead) => {
+                                            if (lead.status !== bulkStatusValue) moveStatusCount(lead.status, bulkStatusValue);
+                                        });
+                                        const showUpdated = !filters.status || filters.status === bulkStatusValue;
+                                        setLeads((prev) => prev.flatMap((lead) => {
+                                            if (!selectedLeads.has(lead._id)) return [lead];
+                                            if (!showUpdated) return [];
+                                            return [{ ...lead, status: bulkStatusValue }];
+                                        }));
+                                        if (!showUpdated) {
+                                            setPagination((prev) => ({
+                                                ...prev,
+                                                totalFiltered: Math.max(0, (prev.totalFiltered || 0) - selectedOnPage.length),
+                                            }));
+                                        }
+                                        applyRefilledLeads(incoming);
+                                    }
                                     toast.success(res.msg || 'Lead statuses updated successfully');
-                                    await fetchLeads(pagination.currentPage);
                                     setBulkStatusValue('');
                                     setSelectedLeads(new Set());
                                     setAllFilteredSelected(false);

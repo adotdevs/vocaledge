@@ -527,6 +527,7 @@ export const getChatCallsApi = (conversationId, options = {}) => {
   return getApi(`/crm/chat/calls${query ? `?${query}` : ""}`);
 };
 export const getChatRecycleApi = () => getApi(`/crm/chat/admin/recycle`);
+export const getLeadListStatsApi = () => getApi(`/crm/lead-list-stats`);
 export const clearChatRecycleConversationApi = (id) => deleteApi(`/crm/chat/admin/recycle/conversations/${id}`);
 export const restoreChatMessageApi = (id) => postApi(`/crm/chat/admin/messages/${id}/restore`);
 export const deleteChatRecycleMessageApi = (id) => deleteApi(`/crm/chat/admin/messages/${id}`);

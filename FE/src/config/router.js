@@ -25,6 +25,7 @@ import AdminManagementCRM from "../jsx/Admin/CRM/AdminManagement.jsx";
 import AIInstructions from "../jsx/Admin/CRM/AIInstructions.jsx";
 import Reminders from "../jsx/Admin/CRM/Reminders.jsx";
 import DocumentLibrary from "../jsx/Admin/CRM/DocumentLibrary.jsx";
+import LeadListStatistics from "../jsx/Admin/CRM/LeadListStatistics.jsx";
 import AdminReminderNotifier from "../jsx/Admin/CRM/components/AdminReminderNotifier";
 import StaffMessagePopup from "../jsx/Admin/CRM/components/StaffMessagePopup";
 import ChatNotifier from "../jsx/Admin/CRM/components/ChatNotifier";
@@ -195,6 +196,14 @@ export default function Router() {
               element={
                 <RequireAuth loginPath={"/auth/login/crm"}>
                   <DocumentLibrary />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/crm/list-statistics"
+              element={
+                <RequireAuth loginPath={"/auth/login/crm"}>
+                  <LeadListStatistics />
                 </RequireAuth>
               }
             />

@@ -778,7 +778,7 @@ const ChatPage = () => {
                     <History />
                   </button>
                 )}
-                {!active.readOnly && active.other?._id && (
+                {!active.readOnly && active.other?._id && !unavailable && (
                   <button
                     type="button"
                     className="crm-chat-icon"
@@ -959,7 +959,7 @@ const ChatPage = () => {
                             <strong>{mine ? "Outgoing" : "Incoming"} · {label}</strong>
                             <p>{new Date(item.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{item.durationSec ? ` · ${mins}:${secs}` : ""}</p>
                           </div>
-                          <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || "") } }))}>Call</button>
+                          {!unavailable && <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || "") } }))}>Call</button>}
                         </article>
                       );
                     })}

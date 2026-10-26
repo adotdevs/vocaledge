@@ -74,43 +74,55 @@ const attachVoice = (io, socket) => {
     if (type === "invite") {
       const to = String(message.to || "");
       if (!to || to === userId || !callId) return;
-      if (byUser.has(userId)) {
-        const existing = calls.get(byUser.get(userId));
-        if (existing) send(userId, snapshot(existing, userId));
-        else byUser.delete(userId);
-        if (existing) return;
-      }
-      const peerOnline = userOnline(io, to);
-      const call = {
-        id: callId,
-        from: userId,
-        to,
-        conversationId: String(message.conversationId || ""),
-        fromName: String(message.fromName || "Agent").slice(0, 80),
-        toName: String(message.toName || "Agent").slice(0, 80),
-        status: peerOnline ? "ringing" : "offline",
-      };
-      if (!peerOnline) {
-        send(userId, { type: "offline", callId });
-        saveLog(call, "offline", 0);
-        return;
-      }
-      if (byUser.has(to)) {
-        send(userId, { type: "busy", callId, reason: "busy" });
-        saveLog(call, "busy", 0);
-        return;
-      }
-      call.timer = setTimeout(() => finish(callId, "missed"), 45000);
-      calls.set(callId, call);
-      byUser.set(userId, callId);
-      byUser.set(to, callId);
-      send(userId, { type: "ringing", callId });
-      send(to, {
-        type: "invite",
-        callId,
-        conversationId: call.conversationId,
-        from: userId,
-        fromName: call.fromName,
+      const User = require("../models/userModel");
+      const { hasChatAccess } = require("./chatService");
+      User.find({ _id: { $in: [userId, to] } }).select("role adminPermissions permissions").lean().then((rows) => {
+        const people = new Map(rows.map((item) => [String(item._id), item]));
+        if (!hasChatAccess(people.get(String(userId))) || !hasChatAccess(people.get(to))) {
+          send(userId, { type: "ended", callId, reason: "unavailable", status: "cancelled" });
+          return;
+        }
+        if (byUser.has(userId)) {
+          const existing = calls.get(byUser.get(userId));
+          if (existing) send(userId, snapshot(existing, userId));
+          else byUser.delete(userId);
+          if (existing) return;
+        }
+        const peerOnline = userOnline(io, to);
+        const call = {
+          id: callId,
+          from: userId,
+          to,
+          conversationId: String(message.conversationId || ""),
+          fromName: String(message.fromName || "Agent").slice(0, 80),
+          toName: String(message.toName || "Agent").slice(0, 80),
+          status: peerOnline ? "ringing" : "offline",
+        };
+        if (!peerOnline) {
+          send(userId, { type: "offline", callId });
+          saveLog(call, "offline", 0);
+          return;
+        }
+        if (byUser.has(to)) {
+          send(userId, { type: "busy", callId, reason: "busy" });
+          saveLog(call, "busy", 0);
+          return;
+        }
+        call.timer = setTimeout(() => finish(callId, "missed"), 45000);
+        calls.set(callId, call);
+        byUser.set(userId, callId);
+        byUser.set(to, callId);
+        send(userId, { type: "ringing", callId });
+        send(to, {
+          type: "invite",
+          callId,
+          conversationId: call.conversationId,
+          from: userId,
+          fromName: call.fromName,
+        });
+      }).catch((error) => {
+        console.error("Voice invite check failed:", error.message);
+        send(userId, { type: "ended", callId, reason: "unavailable", status: "cancelled" });
       });
       return;
     }

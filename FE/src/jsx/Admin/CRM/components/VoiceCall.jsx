@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useAuthUser } from "react-auth-kit";
-import { CallEnd, CloseFullscreen, Mic, MicOff, Phone } from "@mui/icons-material";
+import { CallEnd, ChatBubbleOutline, CloseFullscreen, Mic, MicOff, Phone } from "@mui/icons-material";
+import useLiveCrmUser from "../useLiveCrmUser";
 import {
   acceptVoiceCall,
   bindVoiceIdentity,
@@ -87,9 +88,18 @@ const formatDuration = (startedAt) => {
 const VoiceCall = () => {
   const authUser = useAuthUser();
   const navigate = useNavigate();
+  const { can, role, ready } = useLiveCrmUser();
+  const voiceAllowed = role === "superadmin" || can("canAccessChat");
   const [call, setCall] = useState(getVoiceState());
   const [clock, setClock] = useState("00:00");
   const person = authUser()?.user;
+
+  useEffect(() => {
+    window.__crmCanVoiceCall = voiceAllowed;
+    if (ready && !voiceAllowed) {
+      window.dispatchEvent(new CustomEvent("crm-voice-force-end"));
+    }
+  }, [voiceAllowed, ready]);
 
   useEffect(() => {
     const name = `${person?.firstName || ""} ${person?.lastName || ""}`.trim() || "Agent";
@@ -109,19 +119,27 @@ const VoiceCall = () => {
   if (call.phase === "idle") return null;
 
   const initial = (call.name || "A").slice(0, 1).toUpperCase();
-  const accept = async () => {
-    await acceptVoiceCall();
+  const dark = call.phase === "incoming";
+  const live = call.phase === "active" || call.phase === "connecting";
+  const canFold = live || call.phase === "outgoing";
+  const openChat = () => {
     if (call.conversationId) navigate(`/admin/crm/chat/chats/${call.conversationId}`);
   };
-  const statusLabel = call.phase === "active"
-    ? clock
-    : call.statusText === "Ringing"
-      ? "Ringing"
-      : call.statusText === "Offline"
-        ? "Offline"
-        : (call.statusText || "Voice call");
+  const accept = async () => {
+    await acceptVoiceCall();
+    openChat();
+  };
+  const headline = call.phase === "incoming"
+    ? "Incoming call..."
+    : call.phase === "outgoing"
+      ? (call.statusText === "Offline" ? "Not connected" : call.statusText === "Ringing" ? "Ringing..." : "Calling...")
+      : call.phase === "connecting"
+        ? "Connecting..."
+        : call.phase === "ended"
+          ? (call.statusText || "Call ended")
+          : "";
 
-  if (call.minimized && (call.phase === "active" || call.phase === "connecting")) {
+  if (call.minimized && canFold) {
     return createPortal(
       <button type="button" className="crm-voice-mini" onClick={toggleVoiceMinimized}>
         <Phone />
@@ -135,36 +153,29 @@ const VoiceCall = () => {
   }
 
   return createPortal(
-    <section className={`crm-voice is-${call.phase}`} role="dialog" aria-label="Voice call">
-      {(call.phase === "active" || call.phase === "connecting") && (
+    <section className={`crm-voice ${dark ? "is-dark" : "is-light"} is-${call.phase}`} role="dialog" aria-label="Voice call">
+      {canFold && (
         <button type="button" className="crm-voice-fold" aria-label="Minimize call" onClick={toggleVoiceMinimized}>
           <CloseFullscreen />
         </button>
       )}
-      {call.phase !== "mic" && <div className="crm-voice-person">
-        <div className={`crm-voice-avatar ${call.phase === "incoming" || call.statusText === "Ringing" ? "is-ringing" : ""} ${call.peerSpeaking ? "is-speaking" : ""} ${call.statusText === "Offline" ? "is-offline" : ""}`}>{initial}</div>
-        <p className="crm-voice-kicker">
-          {call.phase === "incoming" && "Incoming voice call"}
-          {call.phase === "outgoing" && (call.statusText === "Ringing" ? "Ringing" : call.statusText === "Offline" ? "Not connected" : "Calling")}
-          {call.phase === "connecting" && "Connecting"}
-          {call.phase === "mic" && "Microphone needed"}
-          {call.phase === "active" && (call.rejoined ? "Call still open" : "Connected")}
-          {call.phase === "ended" && (call.statusText === "Offline" ? "Not connected" : "Finished")}
-        </p>
-        <p className="crm-voice-name">{call.name || "Agent"}</p>
-        <p className={`crm-voice-status ${call.statusText === "Ringing" ? "is-live" : ""} ${call.statusText === "Offline" ? "is-off" : ""}`}>
-          {call.phase === "mic" ? "The microphone is off" : statusLabel}
-        </p>
-        {call.phase === "active" && call.peerMuted && (
-          <p className="crm-voice-peer-mute"><MicOff /> {call.name || "They"} muted their microphone</p>
-        )}
-        {call.phase === "active" && !call.peerMuted && call.peerSpeaking && (
-          <p className="crm-voice-speaking"><span className="crm-voice-waves" aria-hidden="true"><i /><i /><i /><i /><i /></span> Speaking</p>
-        )}
-        {call.phase === "active" && !call.peerMuted && !call.peerSpeaking && !call.rejoined && (
-          <p className="crm-voice-quiet">Quiet</p>
-        )}
-      </div>}
+      {call.phase !== "mic" && (
+        <div className="crm-voice-person">
+          <div className={`crm-voice-avatar ${call.phase === "incoming" || call.statusText === "Ringing" ? "is-ringing" : ""} ${call.peerSpeaking ? "is-speaking" : ""} ${call.statusText === "Offline" ? "is-offline" : ""}`}>{initial}</div>
+          <p className="crm-voice-name">{call.name || "Agent"}</p>
+          {call.phase === "active" ? <p className="crm-voice-clock">{clock}</p> : headline && <p className="crm-voice-sub">{headline}</p>}
+          {call.phase === "active" && (
+            <p className={`crm-voice-live ${call.peerMuted ? "is-muted" : ""} ${call.peerSpeaking ? "is-speaking" : ""}`}>
+              <span className="crm-voice-bars" aria-hidden="true"><i /><i /><i /><i /></span>
+              {call.rejoined ? "Call still open" : call.peerMuted ? "Muted" : call.peerSpeaking ? "Speaking" : "Connected"}
+            </p>
+          )}
+          {call.phase !== "active" && call.phase !== "ended" && (
+            <p className="crm-voice-kind"><Phone /> Audio call</p>
+          )}
+          {call.phase === "active" && call.muted && <p className="crm-voice-you-mute">Your microphone is muted</p>}
+        </div>
+      )}
       {call.phase === "mic" && <MicGuide kind={call.micKind} name={call.name} />}
       {call.rejoined && call.phase === "active" && (
         <p className="crm-voice-help">This call is still open. End it before starting another.</p>
@@ -173,20 +184,14 @@ const VoiceCall = () => {
         {call.phase === "incoming" && (
           <>
             <button type="button" className="crm-voice-btn decline" onClick={declineVoiceCall}>
-              <CallEnd />
-              <span>Decline</span>
+              <span className="crm-voice-orb"><CallEnd /></span>
+              <em>Decline</em>
             </button>
             <button type="button" className="crm-voice-btn accept" onClick={accept}>
-              <Phone />
-              <span>Accept</span>
+              <span className="crm-voice-orb"><Phone /></span>
+              <em>Accept</em>
             </button>
           </>
-        )}
-        {call.phase === "outgoing" && (
-          <button type="button" className="crm-voice-btn decline" onClick={declineVoiceCall}>
-            <CallEnd />
-            <span>Cancel</span>
-          </button>
         )}
         {call.phase === "mic" && (
           <>
@@ -198,18 +203,24 @@ const VoiceCall = () => {
             </button>
           </>
         )}
-        {(call.phase === "active" || call.phase === "connecting") && (
+        {(call.phase === "outgoing" || live) && (
           <>
-            {!call.rejoined && (
+            {call.phase !== "active" || !call.rejoined ? (
               <button type="button" className={`crm-voice-btn mute ${call.muted ? "is-muted" : ""}`} onClick={toggleMute}>
-                {call.muted ? <MicOff /> : <Mic />}
-                <span>{call.muted ? "Unmute" : "Mute"}</span>
+                <span className="crm-voice-orb">{call.muted ? <MicOff /> : <Mic />}</span>
+                <em>{call.muted ? "Unmute" : "Mute"}</em>
+              </button>
+            ) : null}
+            <button type="button" className="crm-voice-btn decline" onClick={call.phase === "outgoing" ? declineVoiceCall : hangUp}>
+              <span className="crm-voice-orb"><CallEnd /></span>
+              <em>End call</em>
+            </button>
+            {call.conversationId && (
+              <button type="button" className="crm-voice-btn chat" onClick={openChat}>
+                <span className="crm-voice-orb"><ChatBubbleOutline /></span>
+                <em>Chat</em>
               </button>
             )}
-            <button type="button" className="crm-voice-btn decline" onClick={hangUp}>
-              <CallEnd />
-              <span>End</span>
-            </button>
           </>
         )}
       </div>

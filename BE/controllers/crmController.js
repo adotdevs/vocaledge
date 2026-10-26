@@ -14,6 +14,7 @@ const { logActivity } = require('./activityController');
 const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = require('../utils/leadStatusHelpers');
 const { hasCrmPermission, denyCrmPermission, canViewLeadSource } = require('../utils/crmPermissions');
 const { addCustomerSearch, applyCustomerFilters, normalizeCustomerFields, bodyHasCustomerFields } = require('../utils/leadCustomerFields');
+const { isNewStatus, refillOwners, listRequestCanRefill } = require('../utils/leadRefill');
 
 const hidePrivateLeadFields = (lead, user) => {
   if (!lead) return lead;
@@ -1262,11 +1263,18 @@ exports.getLeads = async (req, res) => {
             });
         }
 
+        let openedRefill = { leads: [], batchId: "" };
+        if ((req.user?.role === "admin" || req.user?.role === "subadmin") && listRequestCanRefill(req.query)) {
+            openedRefill = await refillOwners([req.user._id], req.user);
+        }
+
         const totalLeadsQuery = { isDeleted: false };
         await applyLeadVisibilityToQuery(totalLeadsQuery, req.user);
+        const statusCountMatch = { ...query };
+        delete statusCountMatch.status;
 
         // Fetch the page, both counts, and brand options together.
-        const [leadsResult, totalFilteredResult, brands, totalLeads] = await Promise.all([
+        const [leadsResult, totalFilteredResult, brands, totalLeads, statusGroups] = await Promise.all([
             Lead.find(query)
                 .sort(sort)
                 .skip(skip)
@@ -1275,6 +1283,21 @@ exports.getLeads = async (req, res) => {
             Lead.countDocuments(query),
             hasCrmPermission(req.user, "canViewLeadBrand") ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
             Lead.countDocuments(totalLeadsQuery),
+            Lead.aggregate([
+                { $match: statusCountMatch },
+                {
+                    $group: {
+                        _id: {
+                            $cond: [
+                                { $or: [{ $eq: [{ $ifNull: ["$status", ""] }, ""] }] },
+                                "New",
+                                "$status",
+                            ],
+                        },
+                        count: { $sum: 1 },
+                    },
+                },
+            ]),
         ]);
         
         leads = leadsResult;
@@ -1325,6 +1348,15 @@ exports.getLeads = async (req, res) => {
             })(),
         ]);
 
+        const statusCounts = {};
+        let statusTotal = 0;
+        statusGroups.forEach((row) => {
+            const label = String(row._id || "New");
+            const count = row.count || 0;
+            statusCounts[label] = (statusCounts[label] || 0) + count;
+            statusTotal += count;
+        });
+
         const populatedLeads = leads.map((lead) => hidePrivateLeadFields({
             ...lead,
             agent: lead.agent ? agentMap[lead.agent.toString()] || null : null,
@@ -1341,6 +1373,10 @@ exports.getLeads = async (req, res) => {
             data: {
                 leads: populatedLeads,
                 brands,
+                statusCounts,
+                statusTotal,
+                refilledLeads: openedRefill.leads,
+                refillBatchId: openedRefill.batchId,
                 pagination: {
                     currentPage: pageNum,
                     totalPages,
@@ -1393,7 +1429,7 @@ exports.assignLeadsToAgent = async (req, res) => {
         }
 
         // Get leads before update to track old agents
-        const leadsToUpdate = await Lead.find({ _id: { $in: leadIds }, isDeleted: false }).select('_id agent');
+        const leadsToUpdate = await Lead.find({ _id: { $in: leadIds }, isDeleted: false }).select('_id agent status');
 
         // Update leads in bulk
         const result = await Lead.updateMany(
@@ -1423,10 +1459,19 @@ exports.assignLeadsToAgent = async (req, res) => {
             });
         }
 
+        const lostNewOwners = leadsToUpdate
+            .filter((lead) => isNewStatus(lead.status) && lead.agent && String(lead.agent) !== String(agentId))
+            .map((lead) => lead.agent);
+        const refilled = await refillOwners(lostNewOwners, req.user);
+
         return res.status(200).json({
             success: true,
             msg: `${result.modifiedCount} lead(s) assigned to ${agentUser.firstName} ${agentUser.lastName}`,
-            data: { modifiedCount: result.modifiedCount }
+            data: {
+                modifiedCount: result.modifiedCount,
+                refilledLeads: refilled.leads,
+                refillBatchId: refilled.batchId,
+            }
         });
     } catch (err) {
         console.error('Error assigning leads:', err);
@@ -1520,6 +1565,10 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
         }
 
         const skippedCount = leadIds.length - authorizedLeadIds.length;
+        const lostNewOwners = leadsWithStatusChange
+            .filter((lead) => isNewStatus(lead.status) && !isNewStatus(normalizedStatus) && lead.agent)
+            .map((lead) => lead.agent);
+        const refilled = await refillOwners(lostNewOwners, req.user);
         const message = skippedCount > 0
             ? `${result.modifiedCount} lead(s) updated to "${normalizedStatus}" (${skippedCount} skipped due to permissions)`
             : `${result.modifiedCount} lead(s) updated to "${normalizedStatus}"`;
@@ -1531,6 +1580,8 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
                 modifiedCount: result.modifiedCount,
                 skippedCount,
                 status: normalizedStatus,
+                refilledLeads: refilled.leads,
+                refillBatchId: refilled.batchId,
             },
         });
     } catch (err) {
@@ -1559,10 +1610,11 @@ exports.deleteLead = async (req, res) => {
             });
         }
 
-        // Soft delete by setting isDeleted to true and timestamp
+        const ownerId = isNewStatus(lead.status) ? lead.agent : null;
         lead.isDeleted = true;
         lead.deletedAt = new Date();
         await lead.save();
+        if (ownerId) await refillOwners([ownerId], req.user);
 
         res.status(200).json({
             success: true,
@@ -1597,7 +1649,7 @@ exports.bulkDeleteLeads = async (req, res) => {
             });
         }
 
-        const leads = await Lead.find({ _id: { $in: leadIds } }).select('_id');
+        const leads = await Lead.find({ _id: { $in: leadIds } }).select('_id agent status');
 
         if (leads.length === 0) {
             return res.status(404).json({
@@ -1608,10 +1660,15 @@ exports.bulkDeleteLeads = async (req, res) => {
 
         const authorizedLeadIds = leads.map(lead => lead._id);
 
+        const lostNewOwners = leads
+            .filter((lead) => isNewStatus(lead.status) && lead.agent)
+            .map((lead) => lead.agent);
+
         const result = await Lead.updateMany(
             { _id: { $in: authorizedLeadIds } },
             { $set: { isDeleted: true, deletedAt: new Date() } }
         );
+        if (lostNewOwners.length) await refillOwners(lostNewOwners, req.user);
 
         res.status(200).json({
             success: true,
@@ -1940,10 +1997,22 @@ exports.editLead = async (req, res) => {
             });
         }
 
+        let refilledLeads = [];
+        let refillBatchId = "";
+        if (statusChanged && isNewStatus(oldStatus) && !isNewStatus(normalizedStatus) && lead.agent) {
+            const refilled = await refillOwners([lead.agent], req.user);
+            refilledLeads = refilled.leads;
+            refillBatchId = refilled.batchId;
+        }
+
         res.status(200).json({
             success: true,
             msg: 'Lead updated successfully',
-            data: { lead: hidePrivateLeadFields(typeof lead.toObject === 'function' ? lead.toObject() : lead, req.user) }
+            data: {
+                lead: hidePrivateLeadFields(typeof lead.toObject === 'function' ? lead.toObject() : lead, req.user),
+                refilledLeads,
+                refillBatchId,
+            }
         });
 
     } catch (err) {
@@ -2484,5 +2553,50 @@ exports.hardDeleteAllLeads = async (req, res) => {
                 });
             }
         }
+    }
+};
+
+exports.leadListStatistics = async (req, res) => {
+    try {
+        const Lead = await getLeadModel();
+        const getLeadStatusModel = require("../crmDB/models/leadStatusModel");
+        const LeadStatus = await getLeadStatusModel();
+        const statuses = await LeadStatus.find().sort({ sortOrder: 1, label: 1 }).select("label color").lean();
+
+        const match = { isDeleted: false };
+        await applyLeadVisibilityToQuery(match, req.user);
+
+        const rows = await Lead.aggregate([
+            { $match: match },
+            {
+                $group: {
+                    _id: {
+                        $cond: [
+                            { $or: [{ $eq: ["$status", null] }, { $eq: ["$status", ""] }] },
+                            "New",
+                            "$status",
+                        ],
+                    },
+                    count: { $sum: 1 },
+                },
+            },
+        ]);
+
+        const counts = new Map(rows.map((row) => [String(row._id || "New"), row.count || 0]));
+        const known = new Set(statuses.map((status) => status.label));
+        const statusRows = statuses.map((status) => ({
+            label: status.label,
+            color: status.color || "",
+            count: counts.get(status.label) || 0,
+        }));
+        counts.forEach((count, label) => {
+            if (!known.has(label)) statusRows.push({ label, color: "", count });
+        });
+        const total = statusRows.reduce((sum, status) => sum + status.count, 0);
+
+        res.json({ success: true, total, statuses: statusRows });
+    } catch (err) {
+        console.error("Lead statistics failed:", err);
+        res.status(500).json({ success: false, msg: "Could not load statistics" });
     }
 };

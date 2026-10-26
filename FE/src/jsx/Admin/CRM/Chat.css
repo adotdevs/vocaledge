@@ -152,18 +152,30 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: min(360px, calc(100vw - 32px));
+  width: min(380px, calc(100vw - 32px));
 }
 .crm-chat-popup {
   background: #fff;
   border: 1px solid #e7eaf3;
-  border-left: 4px solid #5b3df5;
-  border-radius: 14px;
-  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.18);
-  padding: 12px 14px;
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(16, 24, 40, 0.16);
+  padding: 14px;
 }
-.crm-chat-popup header { display: flex; align-items: center; gap: 8px; }
-.crm-chat-popup header strong { flex: 1; color: #1e2433; }
+.crm-chat-popup header { display: flex; align-items: flex-start; gap: 10px; }
+.crm-chat-popup-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #efe9ff;
+  color: #5b3df5;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+.crm-chat-popup-who { flex: 1; min-width: 0; }
+.crm-chat-popup-who strong { display: block; color: #1e2433; font-size: 15px; }
+.crm-chat-popup-who span { display: block; margin-top: 2px; color: #6b7289; font-size: 12px; font-weight: 600; }
 .crm-chat-popup header button, .crm-chat-popup > button {
   border: 0;
   background: #f3f5fa;
@@ -173,8 +185,17 @@
   font-weight: 800;
 }
 .crm-chat-popup header button { width: 28px; height: 28px; }
-.crm-chat-popup p { margin: 8px 0; color: #3d465c; font-size: 14px; }
-.crm-chat-popup > button { padding: 6px 12px; color: #5b3df5; background: #efe9ff; }
+.crm-chat-popup-body { margin: 10px 0 0; color: #1e2433; font-size: 14px; line-height: 1.45; }
+.crm-chat-popup-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.crm-chat-popup-meta span {
+  background: #f4f6fb;
+  color: #3d465c;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.crm-chat-popup > button { margin-top: 12px; padding: 7px 12px; color: #5b3df5; background: #efe9ff; }
 .crm-chat-thread-line { margin: 0 0 6px; color: #1e2433; font-size: 13px; }
 .crm-chat-badge {
   background: #5b3df5;
