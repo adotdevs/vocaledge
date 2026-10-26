@@ -139,6 +139,8 @@ import { useAuthUser } from 'react-auth-kit';
 import { mapSipEventsToStatus } from '../../../utils/callStatus';
 import { formatReminderDateTime } from '../../../utils/reminderTimezone';
 import LeadEditableField from './components/LeadEditableField';
+import { CustomerFieldsEditor, CustomerFieldsView } from './components/CustomerFields';
+import { applyCustomerFieldChange, customerFieldsFromLead } from './leadCustomerFields';
 import useLiveCrmUser from './useLiveCrmUser';
 import CrmAccessDenied from './components/CrmAccessDenied';
 
@@ -297,9 +299,12 @@ const LeadStream = () => {
     const canManageReminders = can('canManageReminders');
     const canViewLeadSource = can('canViewLeadSource');
     const canViewLeadBrand = can('canViewLeadBrand');
+    const canViewLeadFileName = can('canViewLeadFileName');
     const canViewStreamLogs = can('canViewStreamLogs');
     const [loading, setLoading] = useState(true);
     const [lead, setLead] = useState(null);
+    const [customerForm, setCustomerForm] = useState(customerFieldsFromLead());
+    const [savingCustomer, setSavingCustomer] = useState(false);
     const [activities, setActivities] = useState([]);
     const [totalActivities, setTotalActivities] = useState(0);
     const [newComment, setNewComment] = useState('');
@@ -486,6 +491,7 @@ const LeadStream = () => {
                 const fetchedLead = response.lead;
                 
                 setLead(fetchedLead);
+                setCustomerForm(customerFieldsFromLead(fetchedLead));
                 setActivities(response.activities);
                 setTotalActivities(response.totalActivities);
                 if (remindersResponse.success) {
@@ -502,6 +508,7 @@ const LeadStream = () => {
                             phone: fetchedLead.phone || '',
                             country: fetchedLead.country || '',
                             Brand: fetchedLead.Brand || '',
+                            fileName: fetchedLead.fileName || '',
                             Address: fetchedLead.Address || '',
                             status: fetchedLead.status || 'New',
                         };
@@ -693,6 +700,35 @@ const LeadStream = () => {
 
     const handleEditChange = (field, value) => {
         setEditValues(prev => ({ ...prev, [field]: value }));
+    };
+
+    const handleSaveCustomerFields = async () => {
+        if (!lead) return;
+        try {
+            setSavingCustomer(true);
+            const response = await updateLeadApi(leadId, {
+                firstName: lead.firstName,
+                lastName: lead.lastName,
+                email: lead.email,
+                phone: lead.phone,
+                country: lead.country,
+                Brand: lead.Brand,
+                Address: lead.Address,
+                status: lead.status,
+                remarks: lead.remarks,
+                ...customerForm,
+            });
+            if (response.success) {
+                toast.success("Customer details updated");
+                fetchLeadData(true);
+            } else {
+                toast.error(response.msg || "Failed to update customer details");
+            }
+        } catch (error) {
+            toast.error("Failed to update customer details");
+        } finally {
+            setSavingCustomer(false);
+        }
     };
 
     const handleSaveField = async (field) => {
@@ -2765,6 +2801,21 @@ const LeadStream = () => {
                                                         canEdit={canEdit}
                                                     />
                                                     )}
+                                                    {canViewLeadFileName && (
+                                                    <LeadEditableField
+                                                        label="File Name"
+                                                        field="fileName"
+                                                        value={lead.fileName}
+                                                        isEditing={editMode.fileName}
+                                                        isSaving={saving.fileName}
+                                                        editValue={editValues.fileName}
+                                                        onEditToggle={() => handleEditToggle('fileName')}
+                                                        onEditChange={(value) => handleEditChange('fileName', value)}
+                                                        onSave={() => handleSaveField('fileName')}
+                                                        onCancel={() => handleCancelEdit('fileName')}
+                                                        canEdit={canEdit}
+                                                    />
+                                                    )}
                                                     <LeadEditableField
                                                         label="Country"
                                                         field="country"
@@ -2795,6 +2846,29 @@ const LeadStream = () => {
                                                         canEdit={canEdit}
                                                     />
                                                 </Stack>
+                                            </Box>
+
+                                            <Divider />
+                                            <Box>
+                                                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 2, color: 'primary.main' }}>
+                                                    Customer
+                                                </Typography>
+                                                {canEdit ? (
+                                                    <Stack spacing={2}>
+                                                        <CustomerFieldsEditor
+                                                            values={customerForm}
+                                                            country={lead.country}
+                                                            onChange={(field, value) => setCustomerForm((prev) => applyCustomerFieldChange(prev, field, value))}
+                                                        />
+                                                        <Box>
+                                                            <Button variant="contained" onClick={handleSaveCustomerFields} disabled={savingCustomer}>
+                                                                {savingCustomer ? "Saving..." : "Save customer details"}
+                                                            </Button>
+                                                        </Box>
+                                                    </Stack>
+                                                ) : (
+                                                    <CustomerFieldsView lead={lead} />
+                                                )}
                                             </Box>
 
                                             {/* Form submission / Source (when lead came from website form e.g. takebackanalytics) */}

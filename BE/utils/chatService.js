@@ -272,8 +272,51 @@ const listConversations = async (actor) => {
       delete item._countAfter;
     }
   }
-  return items.sort((a, b) => Number(b.pinned) - Number(a.pinned) || (b.activityAt || 0) - (a.activityAt || 0));
+  const sorted = items.sort((a, b) => Number(b.pinned) - Number(a.pinned) || (b.activityAt || 0) - (a.activityAt || 0));
+  const calls = await latestVisibleCalls(sorted.map((item) => item._id), actor._id);
+  return applyLatestCallActivity(sorted, calls);
 };
+
+const callActivityLabel = (status) => {
+  if (status === "completed") return "Answered";
+  if (status === "declined") return "Declined";
+  if (status === "cancelled") return "Cancelled";
+  if (status === "offline") return "Offline";
+  if (status === "busy") return "Busy";
+  return "Missed";
+};
+
+const latestVisibleCalls = async (conversationIds, hiddenForUserId) => {
+  const ids = [...new Set((conversationIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const getChatCallModel = require("../crmDB/models/chatCallModel");
+  const ChatCall = await getChatCallModel();
+  const match = { conversationId: { $in: ids } };
+  if (hiddenForUserId) match.hiddenFor = { $ne: String(hiddenForUserId) };
+  const rows = await ChatCall.aggregate([
+    { $match: match },
+    { $sort: { createdAt: -1 } },
+    { $group: { _id: "$conversationId", createdAt: { $first: "$createdAt" }, status: { $first: "$status" } } },
+  ]);
+  return new Map(rows.map((row) => [String(row._id), row]));
+};
+
+const applyLatestCallActivity = (items, calls) => items.map((item) => {
+  const call = calls.get(String(item._id));
+  if (!call?.createdAt) return { ...item, lastActivityKind: item.lastMessagePreview ? "message" : "" };
+  const callAt = new Date(call.createdAt).getTime();
+  const messageAt = new Date(item.lastMessageAt || 0).getTime();
+  if (callAt <= messageAt) return { ...item, lastActivityKind: item.lastMessagePreview ? "message" : "" };
+  return {
+    ...item,
+    lastActivityKind: "call",
+    lastMessageAt: call.createdAt,
+    lastMessagePreview: `Call · ${callActivityLabel(call.status)}`,
+    lastMessageSenderId: "",
+    lastMessageSenderName: "",
+    activityAt: Math.max(item.activityAt || 0, callAt),
+  };
+});
 
 const listUnreadPopups = async (actor) => {
   if (!hasChatAccess(actor) && !isSuperAdmin(actor)) return [];
@@ -577,6 +620,8 @@ const enrichReactions = async (items) => {
 const removeConversationForUser = async (actor, conversationId) => {
   const conversation = await requireConversation(actor, conversationId);
   const ChatMessage = await getChatMessageModel();
+  const getChatCallModel = require("../crmDB/models/chatCallModel");
+  const ChatCall = await getChatCallModel();
   const removedAt = new Date();
   conversation.removedBy = (conversation.removedBy || []).filter((item) => String(item.userId) !== String(actor._id));
   conversation.removedBy.push({ userId: actor._id, removedAt });
@@ -585,6 +630,10 @@ const removeConversationForUser = async (actor, conversationId) => {
   await ChatMessage.updateMany(
     { conversationId: conversation._id, purgedAt: null },
     { $addToSet: { hiddenFor: actor._id } }
+  );
+  await ChatCall.updateMany(
+    { conversationId: String(conversation._id) },
+    { $addToSet: { hiddenFor: String(actor._id) } }
   );
   return conversation;
 };
@@ -602,13 +651,17 @@ const listAllConversations = async () => {
   const ChatConversation = await getChatConversationModel();
   const conversations = await ChatConversation.find().sort({ lastMessageAt: -1 }).limit(300).lean();
   const users = await loadUsers(conversations.flatMap((item) => item.participantIds || []));
-  return conversations.map((conversation) => ({
+  const items = conversations.map((conversation) => ({
     _id: conversation._id,
     participants: (conversation.participantIds || []).map((id) => publicUser(users.get(String(id)) || { _id: id })),
     lastMessageAt: conversation.lastMessageAt || null,
     lastMessagePreview: conversation.lastMessagePreview || "",
     readOnly: true,
   }));
+  const calls = await latestVisibleCalls(items.map((item) => item._id));
+  return applyLatestCallActivity(items, calls).sort(
+    (a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0)
+  );
 };
 
 const listRecycleBin = async () => {

@@ -147,6 +147,8 @@ import useLiveCrmUser from './useLiveCrmUser';
 import SendLeadEmailDialog from './components/SendLeadEmailDialog';
 import LeadRemindersSection from './components/LeadRemindersSection';
 import ReminderModal from './components/ReminderModal';
+import { CustomerFieldsEditor, CustomerFieldsFilters, CustomerFieldsView } from './components/CustomerFields';
+import { applyCustomerFieldChange, emptyCustomerFields, customerFieldsFromLead } from './leadCustomerFields';
 
 // ... (Field mapping configuration and CreateLeadDialog component remain the same)
 // Field mapping configuration based on updated schema
@@ -158,15 +160,17 @@ const AVAILABLE_FIELDS = [
     { key: 'country', label: 'Country', required: false, description: 'Country name' },
     { key: 'Brand', label: 'Brand', required: false, description: 'Map a column, or type one brand for every lead', allowText: true },
     { key: 'source', label: 'Source', required: false, description: 'Type a source to assign to every lead', inputOnly: true },
+    { key: 'fileName', label: 'File Name', required: false, description: 'Type a file name to assign to every lead', inputOnly: true },
     { key: 'Address', label: 'Address', required: false, description: 'Physical address' },
     { key: 'status', label: 'Status', required: false, description: 'Lead status (uses your configured statuses)' },
 ];
 
 // Enhanced Create Lead Dialog Component - Memoized for performance
-const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUser, allowCsvUpload, allowManageStatuses, allowViewSource = false, allowViewBrand = false }) => {
+const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUser, allowCsvUpload, allowManageStatuses, allowViewSource = false, allowViewBrand = false, allowViewFileName = false }) => {
     const leadFields = AVAILABLE_FIELDS.filter((field) => {
         if (field.key === 'source' && !allowViewSource) return false;
         if (field.key === 'Brand' && !allowViewBrand) return false;
+        if (field.key === 'fileName' && !allowViewFileName) return false;
         return true;
     });
 
@@ -180,11 +184,14 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
         country: "",
         Brand: "",
         source: "",
+        fileName: "",
         Address: "",
         status: "New",
+        ...emptyCustomerFields(),
     });
     const [overrideBrand, setOverrideBrand] = useState("");
     const [overrideSource, setOverrideSource] = useState("");
+    const [overrideFileName, setOverrideFileName] = useState("");
     const [csvFile, setCsvFile] = useState(null);
     const [csvHeaders, setCsvHeaders] = useState([]);
     const [csvPreview, setCsvPreview] = useState([]);
@@ -244,10 +251,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
     }, []);
 
     const handleManualFormChange = (field, value) => {
-        setManualForm(prev => ({
-            ...prev,
-            [field]: value
-        }));
+        setManualForm((prev) => applyCustomerFieldChange(prev, field, value));
     };
 
     const handleFileUpload = (event) => {
@@ -447,6 +451,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
             formData.append('addPhonePlusPrefix', addPhonePlusPrefix ? 'true' : 'false');
             formData.append('overrideBrand', selectedFields.Brand ? overrideBrand.trim() : '');
             formData.append('source', selectedFields.source ? overrideSource.trim() : '');
+            formData.append('fileName', selectedFields.fileName ? overrideFileName.trim() : '');
             // Superadmin and manager can select agent for bulk upload
             if ((currentUser?.user?.role === 'superadmin' || currentUser?.user?.role === 'manager') && selectedAgentId) {
                 formData.append('agentId', selectedAgentId);
@@ -583,11 +588,14 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
             country: "",
             Brand: "",
             source: "",
+            fileName: "",
             Address: "",
             status: "New",
+            ...emptyCustomerFields(),
         });
         setOverrideBrand("");
         setOverrideSource("");
+        setOverrideFileName("");
         setCsvFile(null);
         setCsvHeaders([]);
         setCsvPreview([]);
@@ -825,6 +833,17 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                         />
                                     </Grid>
                                     )}
+                                    {allowViewFileName && (
+                                    <Grid item xs={12} sm={6}>
+                                        <TextField
+                                            fullWidth
+                                            label="File Name"
+                                            value={manualForm.fileName}
+                                            onChange={(e) => handleManualFormChange('fileName', e.target.value)}
+                                            placeholder="File name for this lead"
+                                        />
+                                    </Grid>
+                                    )}
                                     <Grid item xs={12}>
                                         <TextField
                                             fullWidth
@@ -838,6 +857,13 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                     </InputAdornment>
                                                 ),
                                             }}
+                                        />
+                                    </Grid>
+                                    <Grid item xs={12}>
+                                        <CustomerFieldsEditor
+                                            values={manualForm}
+                                            country={manualForm.country}
+                                            onChange={handleManualFormChange}
                                         />
                                     </Grid>
                                     <Grid item xs={12} sm={6}>
@@ -964,13 +990,23 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                                     sx={{ flex: '1 1 240px' }}
                                                                 />
                                                             )}
-                                                            {selectedFields[field.key] && field.inputOnly && (
+                                                            {selectedFields[field.key] && field.inputOnly && field.key === 'source' && (
                                                                 <TextField
                                                                     size="small"
                                                                     label="Type source for all leads"
                                                                     placeholder="Assigned to every lead"
                                                                     value={overrideSource}
                                                                     onChange={(e) => setOverrideSource(e.target.value)}
+                                                                    sx={{ flex: '1 1 240px' }}
+                                                                />
+                                                            )}
+                                                            {selectedFields[field.key] && field.inputOnly && field.key === 'fileName' && (
+                                                                <TextField
+                                                                    size="small"
+                                                                    label="Type file name for all leads"
+                                                                    placeholder="Assigned to every lead"
+                                                                    value={overrideFileName}
+                                                                    onChange={(e) => setOverrideFileName(e.target.value)}
                                                                     sx={{ flex: '1 1 240px' }}
                                                                 />
                                                             )}
@@ -1043,6 +1079,12 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                 <Grid item xs={6}>{manualForm.source}</Grid>
                                             </>
                                         )}
+                                        {allowViewFileName && (
+                                            <>
+                                                <Grid item xs={6}><strong>File Name:</strong></Grid>
+                                                <Grid item xs={6}>{manualForm.fileName}</Grid>
+                                            </>
+                                        )}
                                         <Grid item xs={6}><strong>Address:</strong></Grid>
                                         <Grid item xs={6}>{manualForm.Address}</Grid>
                                         <Grid item xs={6}><strong>Status:</strong></Grid>
@@ -1084,7 +1126,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                 You are about to upload <strong>{csvFile?.name}</strong> with the following mapping:
                                             </Typography>
 
-                                            {(overrideBrand.trim() || overrideSource.trim()) && (
+                                            {(overrideBrand.trim() || overrideSource.trim() || overrideFileName.trim()) && (
                                                 <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
                                                     <Typography variant="body2" sx={{ mb: 1 }}>
                                                         <strong>Applied to every lead</strong>
@@ -1095,8 +1137,13 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                         </Typography>
                                                     )}
                                                     {overrideSource.trim() && (
-                                                        <Typography variant="body2">
+                                                        <Typography variant="body2" sx={{ mb: 1 }}>
                                                             <strong>Source:</strong> {overrideSource.trim()}
+                                                        </Typography>
+                                                    )}
+                                                    {overrideFileName.trim() && (
+                                                        <Typography variant="body2">
+                                                            <strong>File Name:</strong> {overrideFileName.trim()}
                                                         </Typography>
                                                     )}
                                                 </Box>
@@ -1288,7 +1335,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
 });
 
 // View Details Component - Memoized for performance
-const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false, showBrand = false }) => {
+const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false, showBrand = false, showFileName = false }) => {
     if (!lead) return null;
 
     const handleViewStream = () => {
@@ -1380,6 +1427,12 @@ const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false, s
                         <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>{lead.source || 'Not provided'}</Typography>
                     </Grid>
                     )}
+                    {showFileName && (
+                    <Grid item xs={12} sm={6}>
+                        <Typography variant="subtitle2" color="text.secondary">File Name</Typography>
+                        <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>{lead.fileName || 'Not provided'}</Typography>
+                    </Grid>
+                    )}
                     {lead.remarks && (
                         <Grid item xs={12}>
                             <Typography variant="subtitle2" color="text.secondary">Remarks (Source)</Typography>
@@ -1402,6 +1455,9 @@ const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false, s
                             <LocationOn fontSize="small" />
                             {lead.Address || 'Not provided'}
                         </Typography>
+                    </Grid>
+                    <Grid item xs={12}>
+                        <CustomerFieldsView lead={lead} />
                     </Grid>
                     <Grid item xs={12} sm={6}>
                         <Typography variant="subtitle2" color="text.secondary">Status</Typography>
@@ -1456,7 +1512,7 @@ const LeadDetails = memo(({ lead, open, onClose, navigate, showSource = false, s
 });
 
 // Edit Lead Component - Memoized for performance
-const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageStatuses, allowViewBrand = false }) => {
+const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageStatuses, allowViewBrand = false, allowViewFileName = false }) => {
 
     const [editForm, setEditForm] = useState({
         firstName: "",
@@ -1465,10 +1521,12 @@ const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageSt
         phone: "",
         country: "",
         Brand: "",
+        fileName: "",
         Address: "",
         status: "New",
 
         remarks: "",
+        ...emptyCustomerFields(),
     });
     const [updating, setUpdating] = useState(false);
 
@@ -1481,18 +1539,17 @@ const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageSt
                 phone: lead.phone || "",
                 country: lead.country || "",
                 Brand: lead.Brand || "",
+                fileName: lead.fileName || "",
                 Address: lead.Address || "",
                 status: lead.status || "New",
                 remarks: lead.remarks || "",
+                ...customerFieldsFromLead(lead),
             });
         }
     }, [lead]);
 
     const handleEditFormChange = (field, value) => {
-        setEditForm(prev => ({
-            ...prev,
-            [field]: value
-        }));
+        setEditForm((prev) => applyCustomerFieldChange(prev, field, value));
     };
 
     const handleUpdateLead = async () => {
@@ -1501,7 +1558,7 @@ const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageSt
             const response = await updateLeadApi(lead._id, editForm);
             if (response.success) {
                 toast.success('Lead updated successfully!');
-                onLeadUpdated();
+                onLeadUpdated(response.data?.lead || { ...lead, ...editForm });
                 onClose();
             } else {
                 toast.error(response.msg || 'Failed to update lead');
@@ -1585,6 +1642,16 @@ const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageSt
                         />
                     </Grid>
                     )}
+                    {allowViewFileName && (
+                    <Grid item xs={12} sm={6}>
+                        <TextField
+                            fullWidth
+                            label="File Name"
+                            value={editForm.fileName}
+                            onChange={(e) => handleEditFormChange('fileName', e.target.value)}
+                        />
+                    </Grid>
+                    )}
                     <Grid item xs={12}>
                         <TextField
                             fullWidth
@@ -1607,6 +1674,13 @@ const EditLeadDialog = memo(({ lead, open, onClose, onLeadUpdated, allowManageSt
                                     </InputAdornment>
                                 ),
                             }}
+                        />
+                    </Grid>
+                    <Grid item xs={12}>
+                        <CustomerFieldsEditor
+                            values={editForm}
+                            country={editForm.country}
+                            onChange={handleEditFormChange}
                         />
                     </Grid>
                     <Grid item xs={12} sm={6}>
@@ -1709,7 +1783,17 @@ const LeadsPage = () => {
         countrySearch: "",
         brandSearch: "",
         agent: "",
-        callStatus: "", // Filter by call status: 'completed', 'failed', 'cancelled', 'no-answer', 'no-calls', 'in-progress', 'ringing'
+        callStatus: "",
+        customerAge: "",
+        amountLost: "",
+        amountLostWhen: "",
+        registeredToPlatform: "",
+        activeTradingPlatform: "",
+        customerBank: "",
+        additionalPhone: "",
+        screenSharing: "",
+        screenSharingId: "",
+        customerPotential: "",
     });
     // Temporary search values (not applied until Search button is clicked)
     const [tempSearch, setTempSearch] = useState("");
@@ -2537,7 +2621,8 @@ const LeadsPage = () => {
     const canManageStatuses = can('canManageLeadStatuses');
     const canViewLeadSource = can('canViewLeadSource');
     const canViewLeadBrand = can('canViewLeadBrand');
-    const leadColumnCount = 11 + (canViewLeadSource ? 1 : 0) + (canViewLeadBrand ? 1 : 0);
+    const canViewLeadFileName = can('canViewLeadFileName');
+    const leadColumnCount = 11 + (canViewLeadSource ? 1 : 0) + (canViewLeadBrand ? 1 : 0) + (canViewLeadFileName ? 1 : 0);
     const [filterLeadStatuses, setFilterLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
 
     useEffect(() => {
@@ -2647,8 +2732,24 @@ const LeadsPage = () => {
         fetchLeads(pagination.currentPage);
     };
 
-    const handleLeadUpdated = () => {
-        fetchLeads(pagination.currentPage);
+    const handleLeadUpdated = (updated) => {
+        if (!updated?._id) return;
+        const nextStatus = updated.status;
+        if (filters.status && nextStatus && nextStatus !== filters.status) {
+            setLeads((prev) => prev.filter((item) => item._id !== updated._id));
+            setPagination((prev) => ({
+                ...prev,
+                totalFiltered: Math.max(0, (prev.totalFiltered || 0) - 1),
+            }));
+            return;
+        }
+        setLeads((prev) => prev.map((item) => {
+            if (item._id !== updated._id) return item;
+            const agent = updated.agent && typeof updated.agent === "object" && updated.agent.firstName
+                ? updated.agent
+                : item.agent;
+            return { ...item, ...updated, agent, callSummary: item.callSummary };
+        }));
     };
 
     // Call handlers
@@ -3322,6 +3423,16 @@ const LeadsPage = () => {
             brandSearch: "",
             agent: "",
             callStatus: "",
+            customerAge: "",
+            amountLost: "",
+            amountLostWhen: "",
+            registeredToPlatform: "",
+            activeTradingPlatform: "",
+            customerBank: "",
+            additionalPhone: "",
+            screenSharing: "",
+            screenSharingId: "",
+            customerPotential: "",
         });
         setSearchParams((prev) => {
             const next = new URLSearchParams(prev);
@@ -4007,6 +4118,7 @@ const LeadsPage = () => {
                                         )}
                                     </Box>
                                 </Grid>
+                                <CustomerFieldsFilters filters={filters} onChange={handleFilterChange} />
                                 {/* Action Buttons Row */}
                                 <Grid item xs={12}>
                                     <Box sx={{
@@ -4231,6 +4343,11 @@ const LeadsPage = () => {
                                                     Source
                                                 </TableCell>
                                                 )}
+                                                {canViewLeadFileName && (
+                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 140 }}>
+                                                    File Name
+                                                </TableCell>
+                                                )}
                                                  <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 160 }}>
                                                     Remarks
                                                 </TableCell>
@@ -4363,6 +4480,13 @@ const LeadsPage = () => {
                                                         <TableCell>
                                                             <Typography variant="body2" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.source || ''}>
                                                                 {lead.source || '—'}
+                                                            </Typography>
+                                                        </TableCell>
+                                                        )}
+                                                        {canViewLeadFileName && (
+                                                        <TableCell>
+                                                            <Typography variant="body2" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.fileName || ''}>
+                                                                {lead.fileName || '—'}
                                                             </Typography>
                                                         </TableCell>
                                                         )}
@@ -4678,6 +4802,12 @@ const LeadsPage = () => {
                                                                             <Typography variant="body2">{lead.source || 'Not provided'}</Typography>
                                                                         </Grid>
                                                                         )}
+                                                                        {canViewLeadFileName && (
+                                                                        <Grid item xs={12} sm={6} md={3}>
+                                                                            <Typography variant="subtitle2" color="text.secondary">File Name</Typography>
+                                                                            <Typography variant="body2">{lead.fileName || 'Not provided'}</Typography>
+                                                                        </Grid>
+                                                                        )}
                                                                          {lead.remarks && (
                                                                             <Grid item xs={12}>
                                                                                 <Typography variant="subtitle2" color="text.secondary">Remarks (Source)</Typography>
@@ -4938,6 +5068,7 @@ const LeadsPage = () => {
                 allowManageStatuses={canManageStatuses}
                 allowViewSource={canViewLeadSource}
                 allowViewBrand={canViewLeadBrand}
+                allowViewFileName={canViewLeadFileName}
             />
 
             {/* View Details Dialog */}
@@ -4948,6 +5079,7 @@ const LeadsPage = () => {
                 navigate={navigate}
                 showSource={canViewLeadSource}
                 showBrand={canViewLeadBrand}
+                showFileName={canViewLeadFileName}
             />
 
             {/* Edit Lead Dialog */}
@@ -4958,6 +5090,7 @@ const LeadsPage = () => {
                 onLeadUpdated={handleLeadUpdated}
                 allowManageStatuses={canManageStatuses}
                 allowViewBrand={canViewLeadBrand}
+                allowViewFileName={canViewLeadFileName}
             />
 
             <SendLeadEmailDialog

@@ -46,6 +46,8 @@ import {
   markCrmNotificationReadApi,
 } from '../../../../Api/Service';
 import { getBackendUrl } from '../../../../config/appConfig';
+import { playNotificationSound } from '../notificationSound';
+import useLiveCrmUser from '../useLiveCrmUser';
 
 const timeAgo = (dateString) => {
   if (!dateString) return '';
@@ -110,6 +112,15 @@ const getActivityColor = (type) => {
 let sharedSocket = null;
 let sharedSocketUserId = null;
 
+const STREAM_LOG_TYPES = new Set([
+  "status_change",
+  "assignment_change",
+  "field_update",
+  "created",
+  "email_sent",
+  "call_logged",
+]);
+
 const getSharedSocket = (userId, backendUrl) => {
   if (sharedSocket && sharedSocketUserId === userId) {
     return sharedSocket;
@@ -140,6 +151,11 @@ const CrmNotificationBell = () => {
   const currentUserId = user?._id;
   const userRole = user?.role;
   const isSuperAdmin = userRole === 'superadmin';
+  const { can } = useLiveCrmUser();
+  const canViewStreamLogs = can("canViewStreamLogs");
+  const canViewStreamLogsRef = useRef(canViewStreamLogs);
+  canViewStreamLogsRef.current = canViewStreamLogs;
+  const hideStreamLog = (note) => !canViewStreamLogsRef.current && STREAM_LOG_TYPES.has(note?.activityType);
 
   const [anchorEl, setAnchorEl] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -171,7 +187,7 @@ const CrmNotificationBell = () => {
     try {
       const response = await getCrmNotificationsApi({ page: pageNum, limit: 15 });
       if (response.success) {
-        const incoming = response.notifications || [];
+        const incoming = (response.notifications || []).filter((item) => !hideStreamLog(item));
         setNotifications((prev) => (append ? [...prev, ...incoming] : incoming));
         setUnreadCount(response.unreadCount || 0);
         setPage(pageNum);
@@ -186,6 +202,12 @@ const CrmNotificationBell = () => {
   }, []);
 
   useEffect(() => {
+    if (canViewStreamLogs) return;
+    setNotifications((prev) => prev.filter((item) => !STREAM_LOG_TYPES.has(item.activityType)));
+    loadUnreadCount();
+  }, [canViewStreamLogs, loadUnreadCount]);
+
+  useEffect(() => {
     if (!currentUserId) return undefined;
 
     loadUnreadCount();
@@ -194,16 +216,25 @@ const CrmNotificationBell = () => {
     const backendUrl = getBackendUrl();
     const socket = getSharedSocket(currentUserId, backendUrl);
 
+    const heardNotifications = new Set();
     const handleCrmNotification = (payload) => {
       if (!payload?.notification) return;
       if (payload.userId && payload.userId !== currentUserId) return;
+      const note = payload.notification;
+      if (hideStreamLog(note)) return;
+      const noteId = String(note._id || "");
+      const fromMe = note.actorUserId && String(note.actorUserId) === String(currentUserId);
 
       setNotifications((prev) => {
-        const exists = prev.some((item) => item._id === payload.notification._id);
+        const exists = prev.some((item) => item._id === note._id);
         if (exists) return prev;
-        return [payload.notification, ...prev].slice(0, 50);
+        return [note, ...prev].slice(0, 50);
       });
       setUnreadCount((prev) => prev + 1);
+      if (!fromMe && noteId && !heardNotifications.has(noteId)) {
+        heardNotifications.add(noteId);
+        playNotificationSound("notification");
+      }
     };
 
     socket.off('crmActivityNotification', handleCrmNotification);
@@ -418,7 +449,7 @@ const CrmNotificationBell = () => {
             </Box>
           ) : (
             <List disablePadding>
-              {notifications.map((notification, index) => {
+              {notifications.filter((item) => !hideStreamLog(item)).map((notification, index) => {
                 const iconColor = getActivityColor(notification.activityType);
                 return (
                   <React.Fragment key={notification._id}>

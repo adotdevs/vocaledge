@@ -16,6 +16,7 @@ const hidePrivateLeadFields = (lead, user) => {
   const copy = { ...lead };
   if (!hasCrmPermission(user, "canViewLeadSource")) delete copy.source;
   if (!hasCrmPermission(user, "canViewLeadBrand")) delete copy.Brand;
+  if (!hasCrmPermission(user, "canViewLeadFileName")) delete copy.fileName;
   return copy;
 };
 

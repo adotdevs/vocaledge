@@ -254,8 +254,13 @@ exports.chatCallLogs = catchAsyncErrors(async (req, res) => {
   try {
     const getChatCallModel = require("../crmDB/models/chatCallModel");
     const ChatCall = await getChatCallModel();
-    const query = { participantIds: String(req.user._id) };
+    const query = {};
     if (req.query.conversationId) query.conversationId = String(req.query.conversationId);
+    const adminView = req.user.role === "superadmin" && req.query.admin === "1" && query.conversationId;
+    if (!adminView) {
+      query.participantIds = String(req.user._id);
+      query.hiddenFor = { $ne: String(req.user._id) };
+    }
     const calls = await ChatCall.find(query).sort({ createdAt: -1 }).limit(40).lean();
     res.json({ success: true, calls });
   } catch (error) {

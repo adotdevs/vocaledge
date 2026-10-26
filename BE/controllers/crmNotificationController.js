@@ -32,9 +32,10 @@ exports.getCrmNotifications = catchAsyncErrors(async (req, res) => {
     CrmNotification.countDocuments({ ...query, isRead: false }),
   ]);
 
+  const visible = notifications.filter((item) => hasCrmPermission(req.user, "canViewStreamLogs") || !STREAM_LOG_TYPES.includes(item.activityType));
   res.status(200).json({
     success: true,
-    notifications: formatNotifications(notifications),
+    notifications: formatNotifications(visible),
     unreadCount,
     pagination: {
       page: pageNum,

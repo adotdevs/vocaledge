@@ -11,6 +11,7 @@ const chatCallSchema = new mongoose.Schema({
   participantIds: [{ type: String }],
   status: { type: String, default: "missed" },
   durationSec: { type: Number, default: 0 },
+  hiddenFor: [{ type: String }],
   createdAt: { type: Date, default: Date.now },
 });
 

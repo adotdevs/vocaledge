@@ -267,18 +267,32 @@
   margin: 10px 0 6px;
   scroll-margin-top: 12px;
 }
-.crm-chat-line { display: flex; align-items: flex-end; gap: 6px; max-width: min(78%, 560px); position: relative; }
+.crm-chat-line {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  width: fit-content;
+  max-width: min(72%, 460px);
+  position: relative;
+}
 .crm-chat-line.menu-open { z-index: 12; }
 .crm-chat-line.mine { align-self: flex-end; }
 .crm-chat-line.theirs { align-self: flex-start; }
 .crm-chat-bubble {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
   min-width: 0;
-  padding: 8px 10px 5px;
+  padding: 7px 9px 4px;
   border-radius: 8px;
   position: relative;
-  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+  box-shadow: 0 1px 1px rgba(11, 20, 26, 0.08);
 }
+.crm-chat-line .crm-chat-info,
+.crm-chat-line .crm-chat-dots { opacity: 0; }
+.crm-chat-line:hover .crm-chat-info,
+.crm-chat-line:hover .crm-chat-dots,
+.crm-chat-line.menu-open .crm-chat-dots { opacity: 1; }
 .crm-chat-info {
   width: 28px;
   height: 28px;
@@ -323,7 +337,22 @@
 .crm-chat-bubble.theirs { background: #fff; color: #111b21; border-bottom-left-radius: 2px; }
 .crm-chat-bubble.deleted { background: #fff; color: #667781; font-style: italic; }
 .crm-chat-bubble.deleted.mine { background: #d9fdd3; color: #667781; }
-.crm-chat-bubble p { margin: 0; white-space: pre-wrap; line-height: 1.4; font-size: 14.5px; }
+.crm-chat, .crm-chat button, .crm-chat input, .crm-chat textarea {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: auto;
+}
+.crm-chat-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+  font-size: 14.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: #111b21;
+}
 .crm-chat-tool {
   width: 40px;
   height: 40px;

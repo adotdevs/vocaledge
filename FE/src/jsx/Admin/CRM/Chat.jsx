@@ -646,13 +646,13 @@ const ChatPage = () => {
   }, [active?._id]);
 
   useEffect(() => {
-    if (!active?._id || active.readOnly) {
+    if (!active?._id) {
       setCallLogs([]);
       return undefined;
     }
     let cancelled = false;
     const load = () => {
-      getChatCallsApi(active._id).then((response) => {
+      getChatCallsApi(active._id, { admin: active.readOnly ? "1" : "" }).then((response) => {
         if (!cancelled && response?.success) setCallLogs(response.calls || []);
       }).catch(() => {});
     };
@@ -712,7 +712,7 @@ const ChatPage = () => {
                       <strong>{title}</strong>
                       {item.lastMessageAt && <time className="crm-chat-row-time">{listTime(item.lastMessageAt)}</time>}
                     </div>
-                    <span>{item.lastMessagePreview || "No messages yet"}</span>
+                    <span>{item.lastActivityKind === "call" ? (item.lastMessagePreview || "Call") : (item.lastMessagePreview || "No messages yet")}</span>
                   </div>
                 </div>
               );
@@ -728,7 +728,9 @@ const ChatPage = () => {
                   <span className={typing && personId(item._id) === personId(active?._id) ? "crm-chat-row-typing" : ""}>
                     {typing && personId(item._id) === personId(active?._id)
                       ? "typing…"
-                      : item.lastMessagePreview
+                      : item.lastActivityKind === "call"
+                        ? item.lastMessagePreview
+                        : item.lastMessagePreview
                         ? `${personId(item.lastMessageSenderId) === myId ? "You" : (item.lastMessageSenderName || nameOf(item.other).split(" ")[0])}: ${item.lastMessagePreview}`
                         : lastSeenText(item.other)}
                   </span>
@@ -800,10 +802,13 @@ const ChatPage = () => {
                     const label = item.status === "completed" ? "Answered" : item.status === "declined" ? "Declined" : item.status === "cancelled" ? "Cancelled" : item.status === "offline" ? "Offline" : item.status === "busy" ? "Busy" : "Missed";
                     const mins = Math.floor((item.durationSec || 0) / 60);
                     const secs = String((item.durationSec || 0) % 60).padStart(2, "0");
+                    const who = active.readOnly
+                      ? `${item.fromName || "Agent"} called ${item.toName || "Agent"}`
+                      : (mine ? "Outgoing" : "Incoming") + " call";
                     return (
                       <div className={`crm-chat-call ${item.status || "missed"}`} key={item._id || item.callId}>
                         <Phone />
-                        <span>{mine ? "Outgoing" : "Incoming"} call · {label}{item.durationSec ? ` · ${mins}:${secs}` : ""}</span>
+                        <span>{who} · {label}{item.durationSec ? ` · ${mins}:${secs}` : ""}</span>
                         <time>{formatClock(item.createdAt)}</time>
                       </div>
                     );
@@ -811,8 +816,10 @@ const ChatPage = () => {
                   const message = entry.message;
                   const previous = list.slice(0, index).reverse().find((item) => item.kind === "message")?.message;
                   const showDay = !previous || dayLabel(previous.createdAt) !== dayLabel(message.createdAt);
-                  const onRight = Boolean(active.readOnly) && personId(message.senderId) === personId(active.participants?.[1]?._id);
-                  const alignedMine = message.mine || onRight;
+                  const onRight = active.readOnly
+                    ? personId(message.senderId) === personId(active.participants?.[1]?._id)
+                    : Boolean(message.mine);
+                  const alignedMine = active.readOnly ? onRight : Boolean(message.mine);
                   return (
                     <React.Fragment key={message._id}>
                       {showDay && <div className="crm-chat-day">{dayLabel(message.createdAt)}</div>}

@@ -6,6 +6,7 @@ import useLiveCrmUser from "../useLiveCrmUser";
 import { subscribeChatEvents } from "../chatEvents";
 import LiveStatusDot from "./LiveStatusDot";
 import { deliveredChatApi, getChatUnreadPopupsApi } from "../../../../Api/Service";
+import { playNotificationSound } from "../notificationSound";
 import "../Chat.css";
 
 const personId = (value) => {
@@ -22,15 +23,20 @@ const ChatNotifier = () => {
   const allowed = role === "superadmin" || can("canAccessChat");
   const crmRole = ["superadmin", "admin", "subadmin", "manager"].includes(role);
   const myIdRef = useRef("");
+  const heardRef = useRef(new Set());
   myIdRef.current = personId(authUser()?.user?._id || user?._id);
 
-  const pushPopup = (message) => {
+  const pushPopup = (message, options = {}) => {
     if (!message?._id) return;
     const senderId = personId(message.senderId);
     if (senderId && myIdRef.current && senderId === myIdRef.current) return;
     const viewing = personId(message.conversationId) === personId(window.__crmActiveChat)
       && window.location.pathname.startsWith("/admin/crm/chat")
       && document.visibilityState === "visible";
+    const id = String(message._id);
+    if (heardRef.current.has(id)) return;
+    heardRef.current.add(id);
+    if (options.sound) playNotificationSound(viewing ? "message" : "unseen");
     if (viewing) return;
     deliveredChatApi([message._id]);
     setPopups((current) => {
@@ -40,7 +46,7 @@ const ChatNotifier = () => {
   };
 
   useEffect(() => {
-    const onIncoming = (event) => pushPopup(event.detail);
+    const onIncoming = (event) => pushPopup(event.detail, { sound: true });
     const clearOpenChat = () => {
       if (document.visibilityState !== "visible") return;
       const openId = personId(window.__crmActiveChat);
@@ -65,8 +71,8 @@ const ChatNotifier = () => {
       (response.messages || []).forEach((message) => pushPopup(message));
     }).catch(() => {});
     const unsubscribe = subscribeChatEvents({
-      "chat.message.created": (payload) => pushPopup(payload?.message),
-      "chat.notification.created": (payload) => pushPopup(payload?.message),
+      "chat.message.created": (payload) => pushPopup(payload?.message, { sound: true }),
+      "chat.notification.created": (payload) => pushPopup(payload?.message, { sound: true }),
     });
     return () => {
       cancelled = true;

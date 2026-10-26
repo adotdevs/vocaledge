@@ -14,6 +14,7 @@ import {
   useMediaQuery,
   useTheme,
   Badge,
+  Button,
   Collapse,
 } from '@mui/material';
 import {
@@ -42,7 +43,7 @@ import {
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useAuthUser, useSignOut } from "react-auth-kit";
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { logoutApi, getEmailQueueStatusApi, getCallQueueStatusApi, getCallStatisticsApi, getReminderBadgeCountApi } from '../../../Api/Service';
+import { logoutApi, getEmailQueueStatusApi, getCallQueueStatusApi, getCallStatisticsApi, getReminderBadgeCountApi, getChatConversationsApi, getAdminChatConversationsApi } from '../../../Api/Service';
 import { toast } from 'react-toastify';
 import { getLiveSocket } from '../../../utils/liveSocket';
 import { endLiveSession } from '../../../utils/endLiveSession';
@@ -55,6 +56,31 @@ import { getStatusColor } from './components/leadStatusStyles';
 import useLiveCrmUser from './useLiveCrmUser';
 
 const LEADS_LINK = '/admin/dashboard/crm';
+
+const chatClock = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+
+const OnlineDot = ({ online }) => (
+  <Box
+    component="span"
+    sx={{
+      width: 8,
+      height: 8,
+      borderRadius: '50%',
+      bgcolor: online ? '#22c55e' : '#cbd5e1',
+      display: 'inline-block',
+      flex: 'none',
+    }}
+  />
+);
 
 const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobileMenu }) => {
   const user = useAuthUser();
@@ -72,6 +98,8 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const [cancelledCallsCount, setCancelledCallsCount] = useState(0);
   const [reminderBadgeCount, setReminderBadgeCount] = useState(0);
   const [callMenuOpen, setCallMenuOpen] = useState(false);
+  const [chatMenuOpen, setChatMenuOpen] = useState(true);
+  const [sidebarChats, setSidebarChats] = useState([]);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [leadStatuses, setLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
   const [internalMobileMenu, setInternalMobileMenu] = useState(false);
@@ -132,6 +160,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const isSuperadmin = role === 'superadmin';
   const hasCrmAccess = can('accessCrm');
   const canAccessCallDashboard = can('canAccessCallDashboard');
+  const canAccessChat = can('canAccessChat');
 
   // ✅ Fetch pending and failed calls counts for badges
   useEffect(() => {
@@ -228,14 +257,37 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
     previousPathRef.current = location.pathname;
   }, [location.pathname, canAccessCallDashboard, callMenuItems.length]);
 
-  // Add AI Instructions for superadmin and admin
+  useEffect(() => {
+    if (!canAccessChat) return undefined;
+    let stopped = false;
+    const load = async () => {
+      try {
+        const response = isSuperadmin ? await getAdminChatConversationsApi() : await getChatConversationsApi();
+        if (!stopped && response?.success) setSidebarChats(response.conversations || []);
+      } catch (error) {
+        if (!stopped) setSidebarChats([]);
+      }
+    };
+    load();
+    const timer = setInterval(load, 20000);
+    const onChat = (event) => {
+      if (event.detail?.event === 'chat.typing') return;
+      load();
+    };
+    window.addEventListener('crm-chat-stream', onChat);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener('crm-chat-stream', onChat);
+    };
+  }, [canAccessChat, isSuperadmin]);
   // if (canAccessAiInstructions) {
   //   menuItems.push({ icon: <Settings />, label: 'AI Instructions', link: "/admin/crm/ai-instructions" });
   // }
 
   // Admin Management (CRM) - superadmin only
-  if (can('canAccessChat')) {
-    menuItems.push({ icon: <Forum />, label: 'Chat', link: '/admin/crm/chat/chats' });
+  if (canAccessChat) {
+    menuItems.push({ icon: <Forum />, label: isSuperadmin ? 'All chats' : 'Chats', link: isSuperadmin ? '/admin/crm/chat/monitor' : '/admin/crm/chat/chats', chats: true });
   }
 
   if (isSuperadmin) {
@@ -394,9 +446,15 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
               <React.Fragment key={index}>
                 <ListItem disablePadding sx={{ mb: 0.5 }}>
                   <ListItemButton
-                    component={Link}
-                    to={item.link}
-                    onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}
+                    component={item.chats && !isCollapsed ? 'div' : Link}
+                    to={item.chats && !isCollapsed ? undefined : item.link}
+                    onClick={() => {
+                      if (item.chats && !isCollapsed) {
+                        setChatMenuOpen((prev) => !prev);
+                        return;
+                      }
+                      if (isMobile && setMobileMenuState) setMobileMenuState(false);
+                    }}
                     sx={{
                       borderRadius: 2,
                       color: isActiveLink(item.link) ? 'primary.main' : 'text.secondary',
@@ -448,8 +506,80 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                           max={99}
                         />
                       )}
+                    {!isCollapsed && item.chats && (chatMenuOpen ? <ExpandLess /> : <ExpandMore />)}
                   </ListItemButton>
                 </ListItem>
+
+                {item.chats && (
+                  <Collapse in={chatMenuOpen && !isCollapsed} timeout="auto" unmountOnExit>
+                    <List component="div" disablePadding sx={{ pl: 1, pr: 0.5, pb: 1 }}>
+                      {sidebarChats.length === 0 && (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 2, py: 1 }}>
+                          No chats yet
+                        </Typography>
+                      )}
+                      {sidebarChats.slice(0, 30).map((chat) => {
+                        const mine = !isSuperadmin;
+                        const people = mine ? [chat.other].filter(Boolean) : (chat.participants || []);
+                        const title = people.map((person) => person.firstName || 'Agent').join(' · ') || 'Chat';
+                        const preview = chat.lastActivityKind === "call"
+                          ? (chat.lastMessagePreview || "Call")
+                          : (mine && chat.lastMessageSenderName
+                            ? `${chat.lastMessageSenderName}: ${chat.lastMessagePreview || "No messages yet"}`
+                            : (chat.lastMessagePreview || "No messages yet"));
+                        const when = chatClock(chat.lastMessageAt || chat.activityAt);
+                        const href = isSuperadmin
+                          ? `/admin/crm/chat/monitor/${chat._id}`
+                          : `/admin/crm/chat/chats/${chat._id}`;
+                        const active = location.pathname.includes(String(chat._id));
+                        return (
+                          <ListItem key={chat._id} disablePadding sx={{ mb: 0.25 }}>
+                            <ListItemButton
+                              component={Link}
+                              to={href}
+                              onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}
+                              sx={{
+                                borderRadius: 2,
+                                alignItems: 'flex-start',
+                                py: 0.75,
+                                px: 1.25,
+                                color: active ? 'primary.main' : 'text.secondary',
+                                backgroundColor: active ? 'action.selected' : 'transparent',
+                              }}
+                            >
+                              <Box sx={{ minWidth: 0, flex: 1 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                                  {mine && <OnlineDot online={Boolean(people[0]?.online)} />}
+                                  <Typography noWrap sx={{ fontSize: '0.8rem', fontWeight: chat.unread ? 700 : 600, flex: 1 }}>
+                                    {title}
+                                  </Typography>
+                                  <Typography sx={{ fontSize: '0.68rem', color: 'text.disabled', flex: 'none' }}>{when}</Typography>
+                                </Box>
+                                <Typography noWrap sx={{ fontSize: '0.72rem', color: 'text.secondary', mt: 0.25 }}>
+                                  {preview}
+                                </Typography>
+                              </Box>
+                            </ListItemButton>
+                          </ListItem>
+                        );
+                      })}
+                      <Box sx={{ px: 1, pt: 1 }}>
+                        <Button
+                          component={Link}
+                          to={isSuperadmin ? '/admin/crm/chat/monitor' : '/admin/crm/chat/chats'}
+                          onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}
+                          fullWidth
+                          variant="contained"
+                          size="small"
+                          startIcon={<Forum />}
+                          sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
+                        >
+                          Open all chats
+                        </Button>
+                      </Box>
+                    </List>
+                  </Collapse>
+                )}
 
                 {item.link === LEADS_LINK && hasCrmAccess && (
                   <>

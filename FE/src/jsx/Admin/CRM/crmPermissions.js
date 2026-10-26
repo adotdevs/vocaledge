@@ -5,6 +5,7 @@ export const CRM_PERMISSIONS = [
   { key: "canEditLeads", label: "Edit lead details", detail: "Change a lead's name, phone, email, brand, and address.", group: "Leads", roles: ["admin", "subadmin"] },
   { key: "canViewLeadSource", label: "See lead source", detail: "Show the source field on leads. Hidden until you turn it on.", group: "Leads", roles: ["admin", "subadmin"] },
   { key: "canViewLeadBrand", label: "See lead brand", detail: "Show the brand field on leads. Hidden until you turn it on.", group: "Leads", roles: ["admin", "subadmin"] },
+  { key: "canViewLeadFileName", label: "See file name", detail: "Show the file name field on leads. Hidden until you turn it on.", group: "Leads", roles: ["admin", "subadmin"] },
   { key: "canViewStreamLogs", label: "See stream logs", detail: "See status, agent, field, email, and call changes on a lead stream. Hidden until you turn it on. Comments stay visible.", group: "Leads", roles: ["admin", "subadmin"] },
   { key: "canAccessChat", label: "Chat access", detail: "Send and receive messages with other agents. Hidden until you turn it on.", group: "Chat", roles: ["admin", "subadmin"] },
   { key: "canCreateLeads", label: "Create leads", detail: "Add one lead by hand.", group: "Leads", roles: ["admin", "subadmin"] },
