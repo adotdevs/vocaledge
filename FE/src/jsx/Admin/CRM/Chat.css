@@ -146,56 +146,140 @@
 .crm-chat-row-delete svg { font-size: 20px; }
 .crm-chat-popups {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
+  right: 18px;
+  bottom: 18px;
   z-index: 40000;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  width: min(380px, calc(100vw - 32px));
+  gap: 12px;
+  width: min(390px, calc(100vw - 28px));
 }
 .crm-chat-popup {
   background: #fff;
-  border: 1px solid #e7eaf3;
-  border-radius: 16px;
-  box-shadow: 0 16px 40px rgba(16, 24, 40, 0.16);
-  padding: 14px;
+  border-radius: 22px;
+  box-shadow: 0 16px 40px rgba(16, 24, 40, 0.14);
+  padding: 14px 14px 10px;
 }
-.crm-chat-popup header { display: flex; align-items: flex-start; gap: 10px; }
+.crm-chat-popup-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.crm-chat-popup-app {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: #7c6cf6;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+.crm-chat-popup-appname {
+  flex: 1;
+  color: #6b7289;
+  font-size: 13px;
+  font-weight: 600;
+}
+.crm-chat-popup-appname i { font-style: normal; margin: 0 4px; }
+.crm-chat-popup-x {
+  border: 0;
+  background: transparent;
+  color: #6b7289;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.crm-chat-popup-msg {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  display: flex;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
 .crm-chat-popup-avatar {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: #efe9ff;
-  color: #5b3df5;
+  background: #efeaff;
+  color: #7c6cf6;
   font-weight: 800;
-  flex: 0 0 auto;
+  font-size: 18px;
+  flex: none;
 }
-.crm-chat-popup-who { flex: 1; min-width: 0; }
-.crm-chat-popup-who strong { display: block; color: #1e2433; font-size: 15px; }
-.crm-chat-popup-who span { display: block; margin-top: 2px; color: #6b7289; font-size: 12px; font-weight: 600; }
-.crm-chat-popup header button, .crm-chat-popup > button {
+.crm-chat-popup-msg strong {
+  display: block;
+  color: #1f2430;
+  font-size: 15px;
+}
+.crm-chat-popup-msg em {
+  display: block;
+  margin-top: 2px;
+  color: #4b5568;
+  font-style: normal;
+  font-size: 14px;
+}
+.crm-chat-popup-reply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  border: 1px solid #e6e8ef;
+  border-radius: 14px;
+  padding: 4px 4px 4px 12px;
+}
+.crm-chat-popup-reply input {
+  flex: 1;
   border: 0;
-  background: #f3f5fa;
-  color: #3d465c;
-  border-radius: 999px;
+  outline: none;
+  height: 36px;
+  font: inherit;
+  font-size: 14px;
+  background: transparent;
+}
+.crm-chat-popup-reply button {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: #6d5efc;
+  color: #fff;
+  display: grid;
+  place-items: center;
   cursor: pointer;
-  font-weight: 800;
 }
-.crm-chat-popup header button { width: 28px; height: 28px; }
-.crm-chat-popup-body { margin: 10px 0 0; color: #1e2433; font-size: 14px; line-height: 1.45; }
-.crm-chat-popup-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.crm-chat-popup-meta span {
-  background: #f4f6fb;
-  color: #3d465c;
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 12px;
-  font-weight: 700;
+.crm-chat-popup-reply button:disabled { opacity: 0.45; cursor: default; }
+.crm-chat-popup-reply svg { font-size: 18px; }
+.crm-chat-popup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
-.crm-chat-popup > button { margin-top: 12px; padding: 7px 12px; color: #5b3df5; background: #efe9ff; }
+.crm-chat-popup-actions button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: #4b5568;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+.crm-chat-popup-actions button:hover { background: #f4f5f8; }
+.crm-chat-popup-actions svg { font-size: 18px; color: #6b7289; }
 .crm-chat-thread-line { margin: 0 0 6px; color: #1e2433; font-size: 13px; }
 .crm-chat-badge {
   background: #5b3df5;

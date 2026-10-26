@@ -74,7 +74,7 @@ const AdminManagementCRM = () => {
   const [isUsers, setIsUsers] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [globalSettings, setGlobalSettings] = useState({ walletEnabled: true });
+  const [globalSettings, setGlobalSettings] = useState({ walletEnabled: true, autoAssignNewLeads: true });
   const [updatingGlobalSettings, setUpdatingGlobalSettings] = useState(false);
 
   const authUser = useAuthUser();
@@ -252,11 +252,32 @@ const AdminManagementCRM = () => {
       const response = await getRestrictionsApi();
       if (response.success && response.data) {
         setGlobalSettings({
-          walletEnabled: response.data.walletEnabled !== false // Default to true if not set
+          walletEnabled: response.data.walletEnabled !== false,
+          autoAssignNewLeads: response.data.autoAssignNewLeads !== false,
         });
       }
     } catch (error) {
       console.error('Error fetching global settings:', error);
+    }
+  };
+
+  const handleAutoAssignToggle = async (enabled) => {
+    setUpdatingGlobalSettings(true);
+    try {
+      const response = await UpdateRestrictionsApi({ autoAssignNewLeads: enabled });
+      if (response.success) {
+        setGlobalSettings((prev) => ({ ...prev, autoAssignNewLeads: enabled }));
+        toast.success(enabled
+          ? "Automatic New lead assignment is on"
+          : "Automatic New lead assignment is off"
+        );
+      } else {
+        toast.error(response.msg || "Failed to update automatic assignment");
+      }
+    } catch (error) {
+      toast.error(error?.message || "Failed to update automatic assignment");
+    } finally {
+      setUpdatingGlobalSettings(false);
     }
   };
 
@@ -278,7 +299,7 @@ const AdminManagementCRM = () => {
         walletEnabled: enabled
       });
       if (response.success) {
-        setGlobalSettings({ walletEnabled: enabled });
+        setGlobalSettings((prev) => ({ ...prev, walletEnabled: enabled }));
         toast.success(enabled 
           ? 'Wallet platform enabled for all users' 
           : 'Wallet platform disabled for all users'
@@ -1063,6 +1084,34 @@ const AdminManagementCRM = () => {
                 </Button>
               </Box>
             </Box>
+
+            {/* Automatic New lead assignment */}
+            {(authUser().user.role === "superadmin") && (
+              <Box sx={{ mb: 4, p: 3, borderRadius: 2, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, p: 2, borderRadius: 1, bgcolor: 'background.default' }}>
+                  <Box>
+                    <Typography variant="h6" fontWeight="600" gutterBottom>
+                      Automatic New lead assignment
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {globalSettings.autoAssignNewLeads
+                        ? "On. An admin or subadmin with Open CRM gets up to 100 New leads when they are created, when Open CRM is turned on, or when they run out of New leads. If fewer than 100 are left, they get all of them."
+                        : "Off. Leads are not given out automatically. You assign them yourself."}
+                    </Typography>
+                  </Box>
+                  {updatingGlobalSettings ? (
+                    <CircularProgress size={24} />
+                  ) : (
+                    <Switch
+                      checked={globalSettings.autoAssignNewLeads}
+                      onChange={(e) => handleAutoAssignToggle(e.target.checked)}
+                      color="primary"
+                      inputProps={{ "aria-label": "Automatic New lead assignment" }}
+                    />
+                  )}
+                </Box>
+              </Box>
+            )}
 
             {/* Global Wallet Settings */}
             {(authUser().user.role === "superadmin") && (

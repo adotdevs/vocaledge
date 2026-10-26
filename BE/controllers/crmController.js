@@ -14,7 +14,7 @@ const { logActivity } = require('./activityController');
 const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = require('../utils/leadStatusHelpers');
 const { hasCrmPermission, denyCrmPermission, canViewLeadSource } = require('../utils/crmPermissions');
 const { addCustomerSearch, applyCustomerFilters, normalizeCustomerFields, bodyHasCustomerFields } = require('../utils/leadCustomerFields');
-const { isNewStatus, refillOwners, listRequestCanRefill } = require('../utils/leadRefill');
+const { isNewStatus, refillOwners, listRequestCanRefill, ownerIdOf } = require('../utils/leadRefill');
 
 const hidePrivateLeadFields = (lead, user) => {
   if (!lead) return lead;
@@ -98,6 +98,29 @@ function escapeRegex(text) {
     return text && typeof text === 'string'
         ? text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
         : text;
+}
+
+function plainAggregateMatch(value, key = "") {
+    if (value instanceof RegExp) {
+        const options = `${value.ignoreCase ? "i" : ""}${value.flags || ""}`.replace(/(.)(?=.*\1)/g, "");
+        return { $regex: value.source, $options: options };
+    }
+    if (typeof value === "string" && (key === "agent" || key === "_id") && mongoose.Types.ObjectId.isValid(value) && String(new mongoose.Types.ObjectId(value)) === value) {
+        return new mongoose.Types.ObjectId(value);
+    }
+    if (Array.isArray(value)) return value.map((item) => plainAggregateMatch(item, key));
+    if (value && typeof value === "object" && !(value instanceof mongoose.Types.ObjectId) && !(value instanceof Date)) {
+        const next = {};
+        Object.entries(value).forEach(([childKey, childValue]) => {
+            if ((childKey === "$in" || childKey === "$nin") && Array.isArray(childValue)) {
+                next[childKey] = childValue.map((item) => plainAggregateMatch(item, key));
+                return;
+            }
+            next[childKey] = plainAggregateMatch(childValue, childKey === "$eq" ? key : childKey);
+        });
+        return next;
+    }
+    return value;
 }
 
 function applyCountrySearchFilter(query, countrySearch) {
@@ -1124,8 +1147,8 @@ exports.getLeads = async (req, res) => {
 
         if (search) {
             const searchTrimmed = String(search).trim();
-            const regexGlobal = { $regex: searchTrimmed, $options: "i" };
-            const nameRegex = new RegExp(escapeRegex(searchTrimmed), 'i');
+            const safeSearch = escapeRegex(searchTrimmed);
+            const regexGlobal = { $regex: safeSearch, $options: "i" };
             const parts = searchTrimmed.split(/\s+/);
 
             query.$or = [
@@ -1136,8 +1159,6 @@ exports.getLeads = async (req, res) => {
                 ...(hasCrmPermission(req.user, "canViewLeadBrand") ? [{ Brand: regexGlobal }] : []),
                 ...(hasCrmPermission(req.user, "canViewLeadFileName") ? [{ fileName: regexGlobal }] : []),
                 { Address: regexGlobal },
-                // Full name contains search (e.g., "john doe")
-                { $expr: { $regexMatch: { input: { $concat: ['$firstName', ' ', '$lastName'] }, regex: nameRegex } } }
             ];
 
             if (parts.length >= 2) {
@@ -1163,7 +1184,8 @@ exports.getLeads = async (req, res) => {
 
         // Parse pagination parameters - OPTIMIZED: Enforce max limit
         const pageNum = parseInt(page);
-        const limitNum = Math.min(parseInt(limit), 100); // Max 100 items per page
+        const requestedLimit = parseInt(limit, 10);
+        const limitNum = Math.min(Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : 50, 500);
         const skip = (pageNum - 1) * limitNum;
 
         // Validate pagination
@@ -1264,13 +1286,13 @@ exports.getLeads = async (req, res) => {
         }
 
         let openedRefill = { leads: [], batchId: "" };
-        if ((req.user?.role === "admin" || req.user?.role === "subadmin") && listRequestCanRefill(req.query)) {
+        if ((req.user?.role === "admin" || req.user?.role === "subadmin") && listRequestCanRefill(req.query) && req.query.idsOnly !== "true") {
             openedRefill = await refillOwners([req.user._id], req.user);
         }
 
         const totalLeadsQuery = { isDeleted: false };
         await applyLeadVisibilityToQuery(totalLeadsQuery, req.user);
-        const statusCountMatch = { ...query };
+        const statusCountMatch = plainAggregateMatch({ ...query });
         delete statusCountMatch.status;
 
         // Fetch the page, both counts, and brand options together.
@@ -1403,75 +1425,97 @@ exports.getLeads = async (req, res) => {
 exports.assignLeadsToAgent = async (req, res) => {
     try {
         const Lead = await getLeadModel();
-      
         const { leadIds, agentId } = req.body;
+        const unassign = agentId === null || agentId === undefined || String(agentId).trim() === "" || String(agentId) === "unassign";
 
-        if (!Array.isArray(leadIds) || leadIds.length === 0 || !agentId) {
+        if (!Array.isArray(leadIds) || leadIds.length === 0) {
+            return res.status(400).json({ success: false, msg: 'leadIds are required' });
+        }
+        if (unassign && req.user?.role !== "superadmin") {
+            return res.status(403).json({ success: false, msg: 'Only a super admin can unassign leads' });
+        }
+        if (!unassign && !agentId) {
             return res.status(400).json({ success: false, msg: 'agentId and leadIds are required' });
         }
 
-        // Validate target agent exists and has appropriate role
-        const agentUser = await User.findById(agentId);
-        if (!agentUser) {
-            return res.status(404).json({ success: false, msg: 'Agent user not found' });
-        }
-        if (!['admin', 'subadmin', 'superadmin'].includes(agentUser.role)) {
-            return res.status(400).json({ success: false, msg: 'Agent must be an admin, subadmin, or superadmin' });
-        }
-
-        if (req.user && req.user.role !== 'superadmin' && !hasCrmPermission(req.user, 'canAssignLeads')) {
-            return denyCrmPermission(res, 'You do not have permission to assign leads');
-        }
-        if (req.user && req.user.role === 'admin') {
-            if (agentUser.role !== 'subadmin') {
+        let agentUser = null;
+        if (!unassign) {
+            agentUser = await User.findById(agentId);
+            if (!agentUser) {
+                return res.status(404).json({ success: false, msg: 'Agent user not found' });
+            }
+            if (!['admin', 'subadmin', 'superadmin'].includes(agentUser.role)) {
+                return res.status(400).json({ success: false, msg: 'Agent must be an admin, subadmin, or superadmin' });
+            }
+            if (req.user && req.user.role !== 'superadmin' && !hasCrmPermission(req.user, 'canAssignLeads')) {
+                return denyCrmPermission(res, 'You do not have permission to assign leads');
+            }
+            if (req.user && req.user.role === 'admin' && agentUser.role !== 'subadmin') {
                 return res.status(400).json({ success: false, msg: 'Admins can assign only to subadmins' });
             }
         }
 
-        // Get leads before update to track old agents
         const leadsToUpdate = await Lead.find({ _id: { $in: leadIds }, isDeleted: false }).select('_id agent status');
-
-        // Update leads in bulk
         const result = await Lead.updateMany(
             { _id: { $in: leadIds }, isDeleted: false },
-            { $set: { agent: agentId, updatedAt: new Date() } }
+            { $set: { agent: unassign ? null : agentId, updatedAt: new Date() } }
         );
 
-        // Log assignment change activities
-        for (const lead of leadsToUpdate) {
-            let oldAgentName = 'Unassigned';
-            if (lead.agent) {
-                const oldAgent = await User.findById(lead.agent).select('firstName lastName');
-                if (oldAgent) {
-                    oldAgentName = `${oldAgent.firstName} ${oldAgent.lastName}`;
-                }
+        if (unassign) {
+            try {
+                const getActivityModel = require("../crmDB/models/activityModel");
+                const Activity = await getActivityModel();
+                const actorName = `${req.user.firstName || ""} ${req.user.lastName || ""}`.trim() || "Super admin";
+                const docs = leadsToUpdate.filter((lead) => lead.agent).map((lead) => ({
+                    leadId: lead._id,
+                    type: "assignment_change",
+                    isSystemGenerated: true,
+                    createdBy: {
+                        userId: req.user._id,
+                        userName: actorName,
+                        userRole: req.user.role,
+                    },
+                    changes: {
+                        field: "agent",
+                        oldValue: "Assigned",
+                        newValue: "Unassigned",
+                        description: "Unassigned by super admin",
+                    },
+                }));
+                if (docs.length) await Activity.insertMany(docs, { ordered: false });
+            } catch (activityError) {
+                console.error("Unassign activity log failed:", activityError);
             }
-            
-            await logActivity({
-                leadId: lead._id,
-                type: 'assignment_change',
-                createdBy: req.user,
-                changes: {
-                    field: 'agent',
-                    oldValue: oldAgentName,
-                    newValue: `${agentUser.firstName} ${agentUser.lastName}`
+        } else {
+            for (const lead of leadsToUpdate) {
+                let oldAgentName = 'Unassigned';
+                if (lead.agent) {
+                    const oldAgent = await User.findById(lead.agent).select('firstName lastName');
+                    if (oldAgent) oldAgentName = `${oldAgent.firstName} ${oldAgent.lastName}`;
                 }
-            });
+                await logActivity({
+                    leadId: lead._id,
+                    type: 'assignment_change',
+                    createdBy: req.user,
+                    changes: {
+                        field: 'agent',
+                        oldValue: oldAgentName,
+                        newValue: `${agentUser.firstName} ${agentUser.lastName}`
+                    }
+                });
+            }
+            const lostNewOwners = leadsToUpdate
+                .filter((lead) => isNewStatus(lead.status) && lead.agent && String(lead.agent) !== String(agentId))
+                .map((lead) => lead.agent);
+            await refillOwners(lostNewOwners, req.user);
         }
-
-        const lostNewOwners = leadsToUpdate
-            .filter((lead) => isNewStatus(lead.status) && lead.agent && String(lead.agent) !== String(agentId))
-            .map((lead) => lead.agent);
-        const refilled = await refillOwners(lostNewOwners, req.user);
 
         return res.status(200).json({
             success: true,
-            msg: `${result.modifiedCount} lead(s) assigned to ${agentUser.firstName} ${agentUser.lastName}`,
-            data: {
-                modifiedCount: result.modifiedCount,
-                refilledLeads: refilled.leads,
-                refillBatchId: refilled.batchId,
-            }
+            msg: unassign
+                ? `${result.modifiedCount} lead(s) unassigned`
+                : `${result.modifiedCount} lead(s) assigned to ${agentUser.firstName} ${agentUser.lastName}`,
+            data: { modifiedCount: result.modifiedCount, unassigned: unassign }
         });
     } catch (err) {
         console.error('Error assigning leads:', err);
@@ -1525,7 +1569,8 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
         }
 
         const normalizedStatus = await normalizeLeadStatus(status);
-        const leads = await Lead.find({ _id: { $in: leadIds }, isDeleted: false }).select('_id agent status');
+        const requestedIds = [...new Set(leadIds.map((id) => String(id || "")).filter(Boolean))];
+        const leads = await Lead.find({ _id: { $in: requestedIds }, isDeleted: false }).select('_id agent status');
 
         if (leads.length === 0) {
             return res.status(404).json({
@@ -1545,41 +1590,67 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
 
         const authorizedLeadIds = authorizedLeads.map(lead => lead._id);
         const leadsWithStatusChange = authorizedLeads.filter(lead => lead.status !== normalizedStatus);
+        const foundIds = new Set(leads.map((lead) => String(lead._id)));
+        const missingCount = requestedIds.filter((id) => !foundIds.has(id)).length;
+        const deniedCount = leads.length - authorizedLeads.length;
 
         const result = await Lead.updateMany(
             { _id: { $in: authorizedLeadIds } },
             { $set: { status: normalizedStatus, updatedAt: new Date() } }
         );
 
-        for (const lead of leadsWithStatusChange) {
-            await logActivity({
-                leadId: lead._id,
-                type: 'status_change',
-                createdBy: req.user,
-                changes: {
-                    field: 'status',
-                    oldValue: lead.status,
-                    newValue: normalizedStatus,
-                },
-            });
+        if (leadsWithStatusChange.length) {
+            try {
+                const getActivityModel = require("../crmDB/models/activityModel");
+                const Activity = await getActivityModel();
+                const actorName = `${req.user.firstName || ""} ${req.user.lastName || ""}`.trim() || "User";
+                const activityDocs = leadsWithStatusChange.map((lead) => ({
+                    leadId: lead._id,
+                    type: "status_change",
+                    isSystemGenerated: true,
+                    createdBy: {
+                        userId: req.user._id,
+                        userName: actorName,
+                        userRole: req.user.role || "user",
+                    },
+                    changes: {
+                        field: "status",
+                        oldValue: lead.status,
+                        newValue: normalizedStatus,
+                    },
+                }));
+                const chunkSize = 1000;
+                for (let index = 0; index < activityDocs.length; index += chunkSize) {
+                    await Activity.insertMany(activityDocs.slice(index, index + chunkSize), { ordered: false });
+                }
+            } catch (activityError) {
+                console.error("Bulk status activity log failed:", activityError);
+            }
         }
 
-        const skippedCount = leadIds.length - authorizedLeadIds.length;
+        const changedByStatus = {};
+        leadsWithStatusChange.forEach((lead) => {
+            const label = lead.status || "New";
+            changedByStatus[label] = (changedByStatus[label] || 0) + 1;
+        });
         const lostNewOwners = leadsWithStatusChange
-            .filter((lead) => isNewStatus(lead.status) && !isNewStatus(normalizedStatus) && lead.agent)
-            .map((lead) => lead.agent);
+            .filter((lead) => isNewStatus(lead.status) && !isNewStatus(normalizedStatus) && ownerIdOf(lead.agent))
+            .map((lead) => ownerIdOf(lead.agent));
         const refilled = await refillOwners(lostNewOwners, req.user);
-        const message = skippedCount > 0
-            ? `${result.modifiedCount} lead(s) updated to "${normalizedStatus}" (${skippedCount} skipped due to permissions)`
-            : `${result.modifiedCount} lead(s) updated to "${normalizedStatus}"`;
+        const parts = [`${result.modifiedCount} lead(s) updated to "${normalizedStatus}"`];
+        if (deniedCount > 0) parts.push(`${deniedCount} skipped because they are not assigned to you`);
+        if (missingCount > 0) parts.push(`${missingCount} were not found`);
+        const message = parts.join(". ");
 
         return res.status(200).json({
             success: true,
             msg: message,
             data: {
                 modifiedCount: result.modifiedCount,
-                skippedCount,
+                skippedCount: deniedCount,
+                missingCount,
                 status: normalizedStatus,
+                changedByStatus,
                 refilledLeads: refilled.leads,
                 refillBatchId: refilled.batchId,
             },
@@ -1997,10 +2068,12 @@ exports.editLead = async (req, res) => {
             });
         }
 
+        const ownerId = ownerIdOf(lead.agent);
         let refilledLeads = [];
         let refillBatchId = "";
-        if (statusChanged && isNewStatus(oldStatus) && !isNewStatus(normalizedStatus) && lead.agent) {
-            const refilled = await refillOwners([lead.agent], req.user);
+        if (statusChanged && isNewStatus(oldStatus) && !isNewStatus(normalizedStatus) && ownerId) {
+            console.log(`Lead status left New by ${req.user.role}; checking refill for ${ownerId}`);
+            const refilled = await refillOwners([ownerId], req.user);
             refilledLeads = refilled.leads;
             refillBatchId = refilled.batchId;
         }

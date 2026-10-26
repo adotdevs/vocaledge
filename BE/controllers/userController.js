@@ -278,7 +278,12 @@ exports.RegisterSubAdmin = catchAsyncErrors(async (req, res, next) => {
     verified: true
   });
 
-
+  if (role === "admin" || role === "subadmin") {
+    const { refillIfEmpty } = require("../utils/leadRefill");
+    refillIfEmpty(createUser._id).catch((error) => {
+      console.error("New account lead assignment failed:", error);
+    });
+  }
 
   res.status(201).send({
     msg: "Data updated successfully",
@@ -3175,7 +3180,8 @@ exports.updateUsersRestrictions = catchAsyncErrors(async (req, res) => {
   const {
     withdrawal2Fa,
     requireEmailVerification,
-    walletEnabled
+    walletEnabled,
+    autoAssignNewLeads
   } = req.body;
 
   // Find the single settings doc or create if not exists
@@ -3191,6 +3197,9 @@ exports.updateUsersRestrictions = catchAsyncErrors(async (req, res) => {
 
   settings.walletEnabled =
     typeof walletEnabled === "boolean" ? walletEnabled : settings.walletEnabled;
+
+  settings.autoAssignNewLeads =
+    typeof autoAssignNewLeads === "boolean" ? autoAssignNewLeads : settings.autoAssignNewLeads;
 
 
 
@@ -3216,6 +3225,12 @@ exports.updateSubAdminPermissions = catchAsyncErrors(async (req, res) => {
   if (Object.prototype.hasOwnProperty.call(req.body, "canAccessChat") && global.chatControllerSync) {
     global.chatControllerSync(req.params.id, req.body.canAccessChat === true);
   }
+  if (req.body.accessCrm === true) {
+    const { refillIfEmpty } = require("../utils/leadRefill");
+    refillIfEmpty(updated._id).catch((error) => {
+      console.error("CRM access lead assignment failed:", error);
+    });
+  }
   require("../middlewares/auth").invalidateAuthUser(req.params.id);
   res.json({ success: true, msg: "Data updated successfully", updated });
 });
@@ -3233,6 +3248,12 @@ exports.updateAdminPermissions = catchAsyncErrors(async (req, res) => {
 
   if (Object.prototype.hasOwnProperty.call(req.body, "canAccessChat") && global.chatControllerSync) {
     global.chatControllerSync(req.params.id, req.body.canAccessChat === true);
+  }
+  if (req.body.accessCrm === true) {
+    const { refillIfEmpty } = require("../utils/leadRefill");
+    refillIfEmpty(updated._id).catch((error) => {
+      console.error("CRM access lead assignment failed:", error);
+    });
   }
   require("../middlewares/auth").invalidateAuthUser(req.params.id);
 

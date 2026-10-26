@@ -4,6 +4,7 @@ const User = require("../models/userModel");
 const getLeadModel = require("../crmDB/models/leadsModel");
 const getActivityModel = require("../crmDB/models/activityModel");
 const { hasCrmPermission } = require("./crmPermissions");
+const UserRestriction = require("../models/usersRestrictions");
 const { publishToUser } = require("./chatSse");
 
 const REFILL_SIZE = 100;
@@ -12,7 +13,28 @@ const inflight = new Map();
 
 const emptyResult = () => ({ batchId: "", leads: [], owner: null });
 
-const isNewStatus = (status) => !status || status === "New";
+const autoAssignEnabled = async () => {
+    const settings = await UserRestriction.findOne().select("autoAssignNewLeads").lean();
+    return !settings || settings.autoAssignNewLeads !== false;
+};
+
+const userCanOpenCrm = (user) => {
+    if (!user) return false;
+    if (user.role === "admin") return user.adminPermissions?.accessCrm === true;
+    if (user.role === "subadmin") return user.permissions?.accessCrm === true;
+    return false;
+};
+
+const isNewStatus = (status) => {
+    const label = String(status ?? "").trim().toLowerCase();
+    return !label || label === "new";
+};
+
+const ownerIdOf = (agent) => {
+    if (!agent) return "";
+    if (typeof agent === "object" && agent.firstName !== undefined && agent._id) return String(agent._id);
+    return String(agent);
+};
 
 let lockModelPromise = null;
 const getLockModel = () => {
@@ -57,16 +79,56 @@ const releaseLock = async (id) => {
     await Lock.updateOne({ _id: id }, { $set: { until: new Date(0) } });
 };
 
-const hasOwnNewLead = async (Lead, userId) => Lead.exists({
-    isDeleted: false,
-    agent: userId,
-    $or: [
-        { status: "New" },
-        { status: "" },
-        { status: null },
-        { status: { $exists: false } },
-    ],
-});
+const hasOwnNewLead = async (Lead, userId) => {
+    const count = await Lead.countDocuments({
+        isDeleted: false,
+        agent: userId,
+        status: "New",
+    });
+    return count;
+};
+
+const poolFilter = async (Lead) => {
+    const supers = await User.find({ role: "superadmin" }).select("_id").lean();
+    const superIds = supers.map((item) => item._id);
+    const rawAgents = await Lead.collection.distinct("agent", {
+        status: "New",
+        isDeleted: { $ne: true },
+    });
+    const objectIds = [];
+    let hasBlank = false;
+    rawAgents.forEach((agent) => {
+        if (agent === "") {
+            hasBlank = true;
+            return;
+        }
+        if (agent === null || agent === undefined) return;
+        if (mongoose.Types.ObjectId.isValid(agent)) objectIds.push(agent);
+    });
+    const existing = objectIds.length
+        ? await User.find({ _id: { $in: objectIds } }).select("_id").lean()
+        : [];
+    const existingIds = new Set(existing.map((item) => String(item._id)));
+    const orphanIds = objectIds.filter((id) => !existingIds.has(String(id)));
+    const heldBy = [...superIds, ...orphanIds];
+    return {
+        isDeleted: false,
+        status: "New",
+        $or: [
+            { agent: null },
+            { agent: { $exists: false } },
+            ...(hasBlank ? [{ agent: "" }] : []),
+            ...(heldBy.length ? [{ agent: { $in: heldBy } }] : []),
+        ],
+    };
+};
+
+const readPool = async (Lead, pool, limit) => {
+    const collection = Lead.collection;
+    const available = await collection.countDocuments(pool);
+    const picked = await collection.find(pool).project({ _id: 1 }).limit(limit).toArray();
+    return { available, ids: picked.map((item) => item._id) };
+};
 
 const presentLead = (lead, viewer, owner) => {
     const copy = { ...lead };
@@ -115,35 +177,33 @@ const claimNewLeads = async (owner) => {
 
     try {
         const Lead = await getLeadModel();
-        if (await hasOwnNewLead(Lead, owner._id)) return emptyResult();
+        const owned = await hasOwnNewLead(Lead, owner._id);
+        if (owned > 0) {
+            console.log(`Lead refill skipped: ${owner._id} still has ${owned} New leads`);
+            return emptyResult();
+        }
 
         const lockedPool = await acquireLock("pool");
         if (!lockedPool) return emptyResult();
 
         try {
             if (await hasOwnNewLead(Lead, owner._id)) return emptyResult();
-            const poolHasLead = await Lead.exists({ isDeleted: false, status: "New", agent: null });
-            if (!poolHasLead) return emptyResult();
-
+            const pool = await poolFilter(Lead);
+            const take = REFILL_SIZE;
+            const { available, ids } = await readPool(Lead, pool, take);
+            if (!available || !ids.length) {
+                console.log(`Lead refill skipped: no New leads in the super admin pool for ${owner._id}`);
+                return emptyResult();
+            }
             const batchId = new mongoose.Types.ObjectId();
-            const operations = Array.from({ length: REFILL_SIZE }, () => ({
-                updateOne: {
-                    filter: { isDeleted: false, status: "New", agent: null },
-                    update: {
-                        $set: {
-                            agent: owner._id,
-                            refillBatch: batchId,
-                            updatedAt: new Date(),
-                        },
-                    },
-                },
-            }));
-            const result = await Lead.bulkWrite(operations, { ordered: true });
-            const claimed = result.modifiedCount || result.nModified || 0;
-            if (!claimed) return emptyResult();
-
-            const leads = await Lead.find({ refillBatch: batchId }).lean();
-            await Lead.updateMany({ refillBatch: batchId }, { $unset: { refillBatch: "" } });
+            const now = new Date();
+            await Lead.updateMany(
+                { _id: { $in: ids }, isDeleted: false },
+                { $set: { agent: owner._id, updatedAt: now, createdAt: now } }
+            );
+            const leads = await Lead.find({ _id: { $in: ids }, agent: owner._id, isDeleted: false }).lean();
+            if (!leads.length) return emptyResult();
+            console.log(`Lead refill: assigned ${leads.length} New leads to ${owner._id}`);
             recordAssignments(leads, owner).catch((error) => {
                 console.error("Lead refill activity log failed:", error);
             });
@@ -169,10 +229,22 @@ const refillIfEmpty = (userId) => {
     if (inflight.has(key)) return inflight.get(key);
 
     const job = (async () => {
-        const Lead = await getLeadModel();
-        if (await hasOwnNewLead(Lead, key)) return emptyResult();
-        const owner = await User.findById(key).select("firstName lastName email role").lean();
+        if (!(await autoAssignEnabled())) {
+            console.log("Lead refill skipped: automatic assignment is turned off");
+            return emptyResult();
+        }
+        const owner = await User.findById(key).select("firstName lastName email role adminPermissions permissions").lean();
         if (!owner || (owner.role !== "admin" && owner.role !== "subadmin")) return emptyResult();
+        if (!userCanOpenCrm(owner)) {
+            console.log(`Lead refill skipped: ${key} does not have Open CRM`);
+            return emptyResult();
+        }
+        const Lead = await getLeadModel();
+        const owned = await hasOwnNewLead(Lead, key);
+        if (owned > 0) {
+            console.log(`Lead refill skipped: ${key} still has ${owned} New leads`);
+            return emptyResult();
+        }
         return claimNewLeads(owner);
     })().catch((error) => {
         console.error("Lead refill failed:", error);
@@ -232,6 +304,7 @@ const listRequestCanRefill = (query) => {
 module.exports = {
     REFILL_SIZE,
     isNewStatus,
+    ownerIdOf,
     refillIfEmpty,
     refillOwners,
     listRequestCanRefill,

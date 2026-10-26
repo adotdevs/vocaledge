@@ -14,6 +14,10 @@ const UserRestrictions = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    autoAssignNewLeads: {
+        type: Boolean,
+        default: true
+    },
 }, { timestamps: true });
 
 let UserRestriction = mongoose.model("UserRestriction", UserRestrictions);

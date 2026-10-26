@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, memo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, memo, useRef, startTransition } from "react";
 import {
     Box,
     AppBar,
@@ -1794,10 +1794,13 @@ const LeadsPage = () => {
 
     }, []);
     const [leads, setLeads] = useState([]);
+    const leadsRef = useRef(leads);
+    leadsRef.current = leads;
     const [crmAccessDenied, setCrmAccessDenied] = useState(false);
     const [allLeadsForFiltering, setAllLeadsForFiltering] = useState([]); // Store all leads when filtering by call status
     const [filteredLeads, setFilteredLeads] = useState([]); // Filtered leads for display
     const [loading, setLoading] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [filters, setFilters] = useState({
         search: "",
         status: "",
@@ -1970,10 +1973,6 @@ const LeadsPage = () => {
     useEffect(() => {
         finalizedGuardsRef.current = finalizedGuards;
     }, [finalizedGuards]);
-    const leadsRef = useRef([]);
-    useEffect(() => {
-        leadsRef.current = leads;
-    }, [leads]);
     const [socket, setSocket] = useState(null);
     const [expandedLead, setExpandedLead] = useState(null);
     const [latestAdminComments, setLatestAdminComments] = useState({});
@@ -2697,21 +2696,19 @@ const LeadsPage = () => {
 
     // OPTIMIZED: Fetch leads with filters and pagination - backend now handles callStatus filtering
     const fetchLeads = async (page = 1, limit = pagination.limit) => {
+        const showSpinner = leadsRef.current.length === 0;
         try {
-            setLoading(true);
+            if (showSpinner) setLoading(true);
+            else setRefreshing(true);
             loadingRef.current = true;
 
-            // Include callStatus in backend params - backend will handle filtering efficiently
             const params = {
-                ...filters, // Now includes callStatus
+                ...filters,
                 page,
                 limit
             };
 
-
-
             const res = await adminCrmLeadsApi({ params });
-
 
             if (res.success) {
                 const nextLeads = res.data.leads || [];
@@ -2727,44 +2724,63 @@ const LeadsPage = () => {
                     appliedRefillIds.current.add(id);
                     if (showRefill && !seen.has(id)) adding.push(lead);
                 });
-                setLeads(adding.length ? [...adding, ...nextLeads] : nextLeads);
                 const statusMap = {};
                 nextLeads.forEach((lead) => {
                     if (!lead?._id || !lead.callSummary) return;
                     statusMap[lead._id] = lead.callSummary;
                 });
-                setLeadCallStatuses(statusMap);
-                setLoadingCallStatuses(false);
-                setBrandOptions(Array.isArray(res.data.brands) ? res.data.brands : []);
-                setStatusCounts(res.data.statusCounts && typeof res.data.statusCounts === "object" ? res.data.statusCounts : {});
-                setStatusTotal(Number(res.data.statusTotal) || 0);
-                if (unseenRefill > 0) toast.success(`${unseenRefill.toLocaleString()} new leads added`);
-                setAllLeadsForFiltering([]); // Not needed anymore - backend handles filtering
-                setFilteredLeads([]); // Not needed anymore
-                setPagination(res.data.pagination || {
-                    currentPage: 1,
-                    totalPages: 1,
-                    totalLeads: 0,
-                    totalFiltered: 0,
-                    limit: limit,
-                    hasNextPage: false,
-                    hasPrevPage: false,
+                startTransition(() => {
+                    setLeads(adding.length ? [...adding, ...nextLeads] : nextLeads);
+                    setLeadCallStatuses(statusMap);
+                    setLoadingCallStatuses(false);
+                    setBrandOptions(Array.isArray(res.data.brands) ? res.data.brands : []);
+                    setStatusCounts((prev) => {
+                        const incomingCounts = res.data.statusCounts;
+                        if (!incomingCounts || typeof incomingCounts !== "object" || Array.isArray(incomingCounts)) return prev;
+                        if (!Object.keys(incomingCounts).length && nextLeads.length) return prev;
+                        return incomingCounts;
+                    });
+                    setStatusTotal((prev) => {
+                        const incomingTotal = Number(res.data.statusTotal);
+                        if (!Number.isFinite(incomingTotal)) return prev;
+                        if (incomingTotal === 0 && nextLeads.length) return prev;
+                        return incomingTotal;
+                    });
+                    setAllLeadsForFiltering([]);
+                    setFilteredLeads([]);
+                    setPagination(res.data.pagination || {
+                        currentPage: 1,
+                        totalPages: 1,
+                        totalLeads: 0,
+                        totalFiltered: 0,
+                        limit: limit,
+                        hasNextPage: false,
+                        hasPrevPage: false,
+                    });
+                    setLoading(false);
+                    setRefreshing(false);
                 });
+                if (unseenRefill > 0) toast.success(`${unseenRefill.toLocaleString()} new leads added`);
             } else {
-
                 toast.error(res.msg || 'Failed to fetch leads');
-                setLeads([]);
-                setPagination(prev => ({ ...prev, currentPage: 1, totalPages: 1 }));
+                startTransition(() => {
+                    setLeads([]);
+                    setPagination(prev => ({ ...prev, currentPage: 1, totalPages: 1 }));
+                    setLoading(false);
+                    setRefreshing(false);
+                });
             }
         } catch (err) {
-
             console.error("Error fetching leads:", err);
             toast.error('Error fetching leads');
-            setLeads([]);
-            setAllLeadsForFiltering([]);
-            setFilteredLeads([]);
+            startTransition(() => {
+                setLeads([]);
+                setAllLeadsForFiltering([]);
+                setFilteredLeads([]);
+                setLoading(false);
+                setRefreshing(false);
+            });
         } finally {
-            setLoading(false);
             loadingRef.current = false;
         }
     };
@@ -2981,20 +2997,22 @@ const LeadsPage = () => {
     const isAllPageSelected = leads.length > 0 && leads.every((lead) => selectedLeads.has(lead._id));
 
     const handleSelectAll = () => {
-        setAllFilteredSelected(false);
-        if (isAllPageSelected) {
-            setSelectedLeads((prev) => {
-                const next = new Set(prev);
-                leads.forEach((lead) => next.delete(lead._id));
-                return next;
-            });
-        } else {
-            setSelectedLeads((prev) => {
-                const next = new Set(prev);
-                leads.forEach((lead) => next.add(lead._id));
-                return next;
-            });
-        }
+        startTransition(() => {
+            setAllFilteredSelected(false);
+            if (isAllPageSelected) {
+                setSelectedLeads((prev) => {
+                    const next = new Set(prev);
+                    leads.forEach((lead) => next.delete(lead._id));
+                    return next;
+                });
+            } else {
+                setSelectedLeads((prev) => {
+                    const next = new Set(prev);
+                    leads.forEach((lead) => next.add(lead._id));
+                    return next;
+                });
+            }
+        });
     };
 
     const handleSelectAllInCrm = async () => {
@@ -3015,9 +3033,12 @@ const LeadsPage = () => {
             const res = await adminCrmLeadsApi({ params });
 
             if (res.success && Array.isArray(res.data?.leadIds)) {
-                setSelectedLeads(new Set(res.data.leadIds));
-                setAllFilteredSelected(true);
-                toast.success(`Selected ${res.data.leadIds.length} lead(s)`);
+                const nextIds = res.data.leadIds;
+                startTransition(() => {
+                    setSelectedLeads(new Set(nextIds));
+                    setAllFilteredSelected(true);
+                });
+                toast.success(`Selected ${nextIds.length} lead(s)`);
             } else {
                 toast.error(res.msg || 'Failed to select all leads');
             }
@@ -3031,16 +3052,49 @@ const LeadsPage = () => {
 
     const handleSelectLead = useCallback((leadId) => {
         setAllFilteredSelected(false);
-        setSelectedLeads(prev => {
-            const newSelected = new Set(prev);
-            if (newSelected.has(leadId)) {
-                newSelected.delete(leadId);
-            } else {
-                newSelected.add(leadId);
-            }
-            return newSelected;
+        startTransition(() => {
+            setSelectedLeads(prev => {
+                const next = new Set(prev);
+                if (next.has(leadId)) next.delete(leadId);
+                else next.add(leadId);
+                return next;
+            });
         });
     }, []);
+
+    const unassignSelectedLeads = async () => {
+        if (!isSuperAdmin || selectedLeads.size === 0) return;
+        try {
+            setAssigning(true);
+            const ids = Array.from(selectedLeads);
+            const res = await assignLeadsApi(ids, "unassign");
+            if (!res.success) {
+                toast.error(res.msg || "Failed to unassign leads");
+                return;
+            }
+            const idSet = new Set(ids.map(String));
+            setLeads((prev) => {
+                if (filters.agent) return prev.filter((lead) => !idSet.has(String(lead._id)));
+                return prev.map((lead) => idSet.has(String(lead._id)) ? { ...lead, agent: null } : lead);
+            });
+            if (filters.agent) {
+                setPagination((prev) => ({
+                    ...prev,
+                    totalFiltered: Math.max(0, (prev.totalFiltered || 0) - ids.length),
+                }));
+            }
+            toast.success(res.msg || "Leads unassigned");
+            setSelectedAgentId("");
+            setSelectedLeads(new Set());
+            setAllFilteredSelected(false);
+            setAssignDialogOpen(false);
+        } catch (err) {
+            console.error("Unassign error:", err);
+            toast.error("Error unassigning leads");
+        } finally {
+            setAssigning(false);
+        }
+    };
 
     // Delete handlers
     const handleDeleteClick = (type, lead = null) => {
@@ -3808,6 +3862,21 @@ const LeadsPage = () => {
                                             Assign
                                         </Button>
                                     )}
+                                    {isSuperAdmin && (
+                                        <Button
+                                            variant="contained"
+                                            color="warning"
+                                            onClick={() => unassignSelectedLeads()}
+                                            disabled={assigning}
+                                            size="small"
+                                            sx={{
+                                                flex: { xs: '1 1 auto', sm: '0 0 auto' },
+                                                fontWeight: 'bold',
+                                            }}
+                                        >
+                                            Unassign
+                                        </Button>
+                                    )}
                                     {can('canChangeLeadStatus') && (
                                     <Button
                                         variant="contained"
@@ -4288,12 +4357,21 @@ const LeadsPage = () => {
                                             size="small"
                                             value={pagination.limit}
                                             onChange={handleLimitChange}
-                                            sx={{ minWidth: 70 }}
+                                            sx={{ minWidth: 80 }}
+                                            MenuProps={{
+                                                sx: { zIndex: 1600 },
+                                                PaperProps: {
+                                                    sx: {
+                                                        maxHeight: 320,
+                                                        bgcolor: "background.paper",
+                                                        backgroundImage: "none",
+                                                    },
+                                                },
+                                            }}
                                         >
-                                            <MenuItem value={50}>50</MenuItem>
-                                            <MenuItem value={100}>100</MenuItem>
-                                            <MenuItem value={150}>150</MenuItem>
-                                            <MenuItem value={200}>200</MenuItem>
+                                            {[50, 100, 150, 200, 250, 500].map((size) => (
+                                                <MenuItem key={size} value={size}>{size}</MenuItem>
+                                            ))}
                                         </Select>
                                     </Box>
 
@@ -4382,7 +4460,8 @@ const LeadsPage = () => {
                             </Box>
                         )}
 
-                        <TableContainer sx={{ overflowX: 'auto' }}>
+                        <TableContainer sx={{ overflowX: 'auto', opacity: refreshing ? 0.72 : 1, transition: 'opacity 0.15s ease' }}>
+                            {refreshing && <LinearProgress />}
                             {loading ? (
                                 <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", height: 400, gap: 2 }}>
                                     <CircularProgress />
@@ -4482,7 +4561,14 @@ const LeadsPage = () => {
 
                                                 return (
                                                 <React.Fragment key={lead._id}>
-                                                    <TableRow hover={!isRemoving} sx={removingRowSx}>
+                                                    <TableRow
+                                                        hover={!isRemoving}
+                                                        sx={{
+                                                            ...removingRowSx,
+                                                            contentVisibility: 'auto',
+                                                            containIntrinsicSize: 'auto 72px',
+                                                        }}
+                                                    >
                                                         <TableCell padding="checkbox">
                                                             <MuiCheckbox
                                                                 checked={selectedLeads.has(lead._id)}
@@ -5445,38 +5531,36 @@ const LeadsPage = () => {
                                 const res = await bulkUpdateLeadStatusApi(Array.from(selectedLeads), bulkStatusValue);
                                 if (res.success) {
                                     const incoming = Array.isArray(res.data?.refilledLeads) ? res.data.refilledLeads : [];
-                                    if (allFilteredSelected) {
-                                        incoming.forEach((lead) => {
-                                            if (lead?._id) appliedRefillIds.current.add(String(lead._id));
+                                    const changed = res.data?.changedByStatus || {};
+                                    setStatusCounts((prev) => {
+                                        const next = { ...prev };
+                                        let moved = 0;
+                                        Object.entries(changed).forEach(([label, count]) => {
+                                            const amount = Number(count) || 0;
+                                            moved += amount;
+                                            next[label] = Math.max(0, (Number(next[label]) || 0) - amount);
                                         });
-                                        await fetchLeads(pagination.currentPage);
-                                        const showNew = !filters.status || filters.status === "New";
-                                        if (showNew && incoming.length) {
-                                            setLeads((prev) => {
-                                                const seen = new Set(prev.map((lead) => String(lead._id)));
-                                                const adding = incoming.filter((lead) => lead?._id && !seen.has(String(lead._id)));
-                                                return adding.length ? [...adding, ...prev] : prev;
-                                            });
-                                        }
-                                    } else {
-                                        const selectedOnPage = leads.filter((lead) => selectedLeads.has(lead._id));
-                                        selectedOnPage.forEach((lead) => {
-                                            if (lead.status !== bulkStatusValue) moveStatusCount(lead.status, bulkStatusValue);
-                                        });
-                                        const showUpdated = !filters.status || filters.status === bulkStatusValue;
-                                        setLeads((prev) => prev.flatMap((lead) => {
-                                            if (!selectedLeads.has(lead._id)) return [lead];
-                                            if (!showUpdated) return [];
-                                            return [{ ...lead, status: bulkStatusValue }];
+                                        if (moved) next[bulkStatusValue] = (Number(next[bulkStatusValue]) || 0) + moved;
+                                        return next;
+                                    });
+                                    const selectedIds = new Set(Array.from(selectedLeads).map(String));
+                                    const showUpdated = !filters.status || filters.status === bulkStatusValue;
+                                    const removedOnPage = leads.filter((lead) => selectedIds.has(String(lead._id))).length;
+                                    setLeads((prev) => prev.flatMap((lead) => {
+                                        if (!selectedIds.has(String(lead._id))) return [lead];
+                                        if (!showUpdated) return [];
+                                        return [{ ...lead, status: bulkStatusValue }];
+                                    }));
+                                    if (!showUpdated) {
+                                        const removed = allFilteredSelected
+                                            ? (Number(res.data?.modifiedCount) || removedOnPage)
+                                            : removedOnPage;
+                                        setPagination((prev) => ({
+                                            ...prev,
+                                            totalFiltered: Math.max(0, (prev.totalFiltered || 0) - removed),
                                         }));
-                                        if (!showUpdated) {
-                                            setPagination((prev) => ({
-                                                ...prev,
-                                                totalFiltered: Math.max(0, (prev.totalFiltered || 0) - selectedOnPage.length),
-                                            }));
-                                        }
-                                        applyRefilledLeads(incoming);
                                     }
+                                    applyRefilledLeads(incoming);
                                     toast.success(res.msg || 'Lead statuses updated successfully');
                                     setBulkStatusValue('');
                                     setSelectedLeads(new Set());
@@ -5528,6 +5612,15 @@ const LeadsPage = () => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setAssignDialogOpen(false)}>Cancel</Button>
+                    {isSuperAdmin && (
+                        <Button
+                            color="warning"
+                            onClick={unassignSelectedLeads}
+                            disabled={assigning || selectedLeads.size === 0}
+                        >
+                            Unassign
+                        </Button>
+                    )}
                     <Button
                         variant="contained"
                         onClick={async () => {

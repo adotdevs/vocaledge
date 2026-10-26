@@ -5,7 +5,8 @@ import { useAuthUser } from "react-auth-kit";
 import useLiveCrmUser from "../useLiveCrmUser";
 import { subscribeChatEvents } from "../chatEvents";
 import LiveStatusDot from "./LiveStatusDot";
-import { deliveredChatApi, getChatUnreadPopupsApi } from "../../../../Api/Service";
+import { CheckCircleOutline, NotificationsNone, Send } from "@mui/icons-material";
+import { deliveredChatApi, flagChatConversationApi, getChatUnreadPopupsApi, seenChatApi, sendChatMessageApi } from "../../../../Api/Service";
 import { playNotificationSound } from "../notificationSound";
 import "../Chat.css";
 
@@ -15,21 +16,17 @@ const personId = (value) => {
   return String(value);
 };
 
-const roleLabel = (role) => {
-  if (role === "superadmin") return "Super admin";
-  if (role === "subadmin") return "Sub admin";
-  if (role === "admin") return "Admin";
-  if (role === "manager") return "Manager";
-  return "";
-};
-
-const receivedAt = (value) => {
-  if (!value) return "";
+const timeAgo = (value) => {
+  if (!value) return "now";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  if (date.toDateString() === new Date().toDateString()) return time;
-  return `${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`;
+  if (Number.isNaN(date.getTime())) return "now";
+  const diff = Date.now() - date.getTime();
+  if (diff < 60 * 1000) return "now";
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 };
 
 const attachmentLabel = (message) => {
@@ -37,6 +34,63 @@ const attachmentLabel = (message) => {
   if (!files.length) return "";
   const first = files[0]?.originalName || (files[0]?.resourceType === "image" ? "Photo" : "File");
   return files.length > 1 ? `${first} +${files.length - 1}` : first;
+};
+
+const PopupCard = ({ message, onClose, onOpen }) => {
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+  const name = message.senderName || "New message";
+  const initial = name.trim().slice(0, 1).toUpperCase() || "M";
+  const file = attachmentLabel(message);
+  const preview = (message.body || "").trim() || (file ? `Sent ${file}` : "New message");
+
+  const sendReply = async (event) => {
+    event.preventDefault();
+    const text = reply.trim();
+    if (!text || !message.conversationId || busy) return;
+    setBusy(true);
+    const form = new FormData();
+    form.append("conversationId", message.conversationId);
+    form.append("body", text);
+    const response = await sendChatMessageApi(form);
+    setBusy(false);
+    if (response?.success) onClose();
+  };
+
+  const markRead = async () => {
+    if (message.conversationId) await seenChatApi(message.conversationId);
+    onClose();
+  };
+
+  const mute = async () => {
+    if (message.conversationId) await flagChatConversationApi(message.conversationId, "mutedBy");
+    onClose();
+  };
+
+  return (
+    <article className="crm-chat-popup">
+      <header className="crm-chat-popup-top">
+        <span className="crm-chat-popup-app" aria-hidden="true">V</span>
+        <span className="crm-chat-popup-appname">Vocaledge <i>•</i> {timeAgo(message.createdAt)}</span>
+        <button type="button" className="crm-chat-popup-x" aria-label="Close" onClick={onClose}>×</button>
+      </header>
+      <button type="button" className="crm-chat-popup-msg" onClick={() => onOpen(message)}>
+        <span className="crm-chat-popup-avatar" aria-hidden="true">{initial}</span>
+        <span>
+          <strong>{name}</strong>
+          <em>{preview.slice(0, 140)}</em>
+        </span>
+      </button>
+      <form className="crm-chat-popup-reply" onSubmit={sendReply}>
+        <input value={reply} placeholder="Reply..." onChange={(event) => setReply(event.target.value)} />
+        <button type="submit" aria-label="Send reply" disabled={busy || !reply.trim()}><Send /></button>
+      </form>
+      <div className="crm-chat-popup-actions">
+        <button type="button" onClick={markRead}><CheckCircleOutline /> Mark as read</button>
+        <button type="button" onClick={mute}><NotificationsNone /> Mute</button>
+      </div>
+    </article>
+  );
 };
 
 const ChatNotifier = () => {
@@ -113,32 +167,14 @@ const ChatNotifier = () => {
 
   const popupLayer = popups.length ? createPortal(
     <div className="crm-chat-popups">
-      {popups.map((message) => {
-        const name = message.senderName || "New message";
-        const role = roleLabel(message.senderRole);
-        const when = receivedAt(message.createdAt);
-        const file = attachmentLabel(message);
-        const preview = (message.body || "").trim();
-        return (
-          <article className="crm-chat-popup" key={message._id}>
-            <header>
-              <span className="crm-chat-popup-avatar" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
-              <div className="crm-chat-popup-who">
-                <strong>{name}</strong>
-                <span>{[role, when].filter(Boolean).join(" · ") || "New message"}</span>
-              </div>
-              <button type="button" aria-label="Close" onClick={() => closePopup(message._id)}>×</button>
-            </header>
-            <p className="crm-chat-popup-body">{preview ? preview.slice(0, 180) : (file ? "Sent an attachment" : "New message")}</p>
-            <div className="crm-chat-popup-meta">
-              {file && <span>{file}</span>}
-              {message.replyTo && <span>Reply</span>}
-              {when && <span>Received {when}</span>}
-            </div>
-            <button type="button" onClick={() => openChat(message)}>Open chat</button>
-          </article>
-        );
-      })}
+      {popups.map((message) => (
+        <PopupCard
+          key={message._id}
+          message={message}
+          onClose={() => closePopup(message._id)}
+          onOpen={openChat}
+        />
+      ))}
     </div>,
     document.body
   ) : null;
