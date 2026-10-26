@@ -3,7 +3,13 @@ const getLeadModel = require('../crmDB/models/leadsModel');
 const User = require('../models/userModel'); // Main database User model
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const { createNotificationsForActivity } = require('../utils/crmNotificationService');
-const { hasCrmPermission, redactSourceMention } = require('../utils/crmPermissions');
+const { hasCrmPermission, redactSourceMention, STREAM_LOG_TYPES } = require('../utils/crmPermissions');
+
+const visibleActivityQuery = (query, user) => (
+  hasCrmPermission(user, "canViewStreamLogs")
+    ? query
+    : { ...query, type: "comment" }
+);
 
 const hidePrivateLeadFields = (lead, user) => {
   if (!lead) return lead;
@@ -114,13 +120,14 @@ exports.getLeadActivities = catchAsyncErrors(async (req, res) => {
     }
 
     const Activity = await getActivityModel();
+    const activityQuery = visibleActivityQuery({ leadId }, currentUser);
     const [activities, total] = await Promise.all([
-        Activity.find({ leadId })
+        Activity.find(activityQuery)
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(parseInt(limit))
             .lean(),
-        Activity.countDocuments({ leadId })
+        Activity.countDocuments(activityQuery)
     ]);
 
     // Format activities for display
@@ -253,30 +260,24 @@ exports.getLeadWithActivity = catchAsyncErrors(async (req, res) => {
     const Activity = await getActivityModel();
     
     // Get lead and activities (exclude deleted & nested replies, sort pinned first)
+    const visibleQuery = visibleActivityQuery({
+        leadId,
+        isDeleted: { $ne: true },
+        $or: [
+            { parentCommentId: { $exists: false } },
+            { parentCommentId: null }
+        ]
+    }, currentUser);
     const [lead, recentActivities, totalActivities] = await Promise.all([
         Lead.findById(leadId).lean(),
-        Activity.find({ 
-            leadId,
-            isDeleted: { $ne: true },        // ✅ Exclude deleted comments
-            $or: [
-                { parentCommentId: { $exists: false } },  // Field doesn't exist
-                { parentCommentId: null }                  // Field is null
-            ]
-        })
+        Activity.find(visibleQuery)
             .sort({ 
                 isPinned: -1,      // ✅ Pinned comments first
                 createdAt: -1      // Then by date
             })
             .limit(100) // Increased limit
             .lean(),
-        Activity.countDocuments({ 
-            leadId, 
-            isDeleted: { $ne: true },
-            $or: [
-                { parentCommentId: { $exists: false } },
-                { parentCommentId: null }
-            ]
-        })
+        Activity.countDocuments(visibleQuery)
     ]);
     
     console.log('📊 Backend - Activities found:', recentActivities.length);

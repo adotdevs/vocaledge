@@ -250,6 +250,19 @@ exports.flagChatConversation = catchAsyncErrors(async (req, res) => {
   }
 });
 
+exports.chatCallLogs = catchAsyncErrors(async (req, res) => {
+  try {
+    const getChatCallModel = require("../crmDB/models/chatCallModel");
+    const ChatCall = await getChatCallModel();
+    const query = { participantIds: String(req.user._id) };
+    if (req.query.conversationId) query.conversationId = String(req.query.conversationId);
+    const calls = await ChatCall.find(query).sort({ createdAt: -1 }).limit(40).lean();
+    res.json({ success: true, calls });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
 exports.adminConversations = catchAsyncErrors(async (req, res) => {
   if (req.user.role !== "superadmin") return res.status(403).json({ success: false, msg: "Super admin only" });
   const conversations = await chat.listAllConversations();

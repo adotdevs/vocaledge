@@ -387,7 +387,7 @@ exports.loginUser = catchAsyncErrors(async (req, res, next) => {
   }
 
   if (UserAuth.password != password) {
-    return next(new errorHandler("Invalid Email or Password"));
+    return next(new errorHandler("Invalid email or password", 400));
   }
   if (!UserAuth.verified) {
     let token = await Token.findOne({ userId: UserAuth._id });
@@ -632,8 +632,27 @@ exports.logoutUser = catchAsyncErrors(async (req, res, next) => {
   res.clearCookie('jwttoken', { path: '/', httpOnly: true, secure, sameSite });
   res.clearCookie('jwttoken', { path: '/', domain: '.vocaledge.io', httpOnly: true, secure, sameSite });
 
-  // Set the main cookie to null with proper options
   res.cookie("jwttoken", null, cookieOptions);
+
+  try {
+    const jwt = require("jsonwebtoken");
+    let token = req.cookies?.jwttoken;
+    if (!token && req.headers.authorization) {
+      token = String(req.headers.authorization).replace(/^Bearer\s+/i, "");
+    }
+    if (token && process.env.SECRET_JWT) {
+      const decoded = jwt.verify(token, process.env.SECRET_JWT);
+      const userId = decoded?._id ? String(decoded._id) : "";
+      if (userId) {
+        require("../utils/chatSse").disconnectUser(userId);
+        require("../utils/voiceSignal").dropUser(userId);
+        if (global.io) global.io.in(`user:${userId}`).disconnectSockets(true);
+        await UserModel.updateOne({ _id: userId }, { $set: { online: false, lastOnline: new Date() } });
+      }
+    }
+  } catch (error) {
+    // The cookie is already cleared. Presence cleanup is best-effort.
+  }
 
   res.status(200).send({
     success: true,

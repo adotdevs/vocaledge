@@ -1,10 +1,15 @@
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const ErrorHandler = require('../utils/errorHandler');
 const getCrmNotificationModel = require('../crmDB/models/crmNotificationModel');
+const { hasCrmPermission, STREAM_LOG_TYPES } = require('../utils/crmPermissions');
 
-const buildVisibilityQuery = (user) => ({
-  recipientUserId: user._id,
-});
+const buildVisibilityQuery = (user) => {
+  const query = { recipientUserId: user._id };
+  if (!hasCrmPermission(user, 'canViewStreamLogs')) {
+    query.activityType = { $nin: STREAM_LOG_TYPES };
+  }
+  return query;
+};
 
 const formatNotifications = (notifications) =>
   notifications.map((item) => ({

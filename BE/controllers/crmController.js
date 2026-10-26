@@ -176,12 +176,20 @@ async function getDistinctLeadBrands(user) {
 
 exports.loginCRM = catchAsyncErrors(async (req, res, next) => {
     try {
-        const { email, password } = req.body;
-        const admin = await User.findOne({ email, role: { $in: ['admin', 'superadmin', 'subadmin', 'manager'] } });
+        const email = String(req.body.email || "").trim();
+        const password = req.body.password;
+        if (!email || !password) {
+            return next(new ErrorHandler("Please enter email and password", 400));
+        }
 
-        if (!admin) return next(new ErrorHandler('Access denied', 400))
-        if (admin.password != password) {
-            return next(new ErrorHandler("Invalid Email or Password", 500));
+        const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const admin = await User.findOne({
+            email: new RegExp(`^${escapedEmail}$`, "i"),
+            role: { $in: ["admin", "superadmin", "subadmin", "manager"] },
+        });
+
+        if (!admin || String(admin.password) !== String(password)) {
+            return next(new ErrorHandler("Invalid email or password", 400));
         }
 
         jwtToken(admin, 200, res, req);

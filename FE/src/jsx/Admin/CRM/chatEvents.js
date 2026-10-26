@@ -1,4 +1,5 @@
 import { getBackendUrl, isBackendLocalhost, isElectronApp } from "../../../config/appConfig";
+import { allowLiveSession } from "../../../utils/liveSocket";
 
 const listeners = new Map();
 const statusListeners = new Set();
@@ -8,6 +9,7 @@ let reconnectTimer = null;
 let reconnectDelay = 1000;
 let chatStatus = "offline";
 let statusDetail = "Not connected";
+let manualStop = false;
 
 const emit = (type, payload) => {
   const handlers = listeners.get(type);
@@ -77,6 +79,7 @@ const closeSource = () => {
 };
 
 const openStream = () => {
+  if (manualStop) return;
   clearTimeout(reconnectTimer);
   closeSource();
   const url = streamUrl();
@@ -112,8 +115,17 @@ const openStream = () => {
 };
 
 export const startChatStream = () => {
+  allowLiveSession();
+  manualStop = false;
   if (source && source.readyState !== EventSource.CLOSED) return;
   openStream();
+};
+
+export const stopChatStream = () => {
+  manualStop = true;
+  clearTimeout(reconnectTimer);
+  closeSource();
+  setChatStatus("offline", "Signed out");
 };
 
 export const restartChatStream = () => {
@@ -144,6 +156,7 @@ if (typeof window !== "undefined") {
 
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
+    if (manualStop) return;
     if (document.visibilityState === "visible" && chatStatus !== "open" && (source || statusListeners.size || listeners.size)) {
       startChatStream();
     }

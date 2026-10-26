@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useDarkMode } from "../../../context/DarkModeContext";
 import { isBackendLocalhost } from "../../../config/appConfig";
+import PasswordField from "./components/PasswordField";
 
 const LoginPage = () => {
     const [loading, setLoading] = React.useState(false);
@@ -125,7 +126,8 @@ const LoginPage = () => {
                     toast.info(updateHeader.msg);return
                 } else {
                     toast.dismiss();
-                    toast.error(updateHeader.msg);}
+                    toast.error(updateHeader.msg || updateHeader.message || "Invalid email or password");
+                }
 
             } catch (err) {
                 toast.error("❌ " + err.message);
@@ -186,10 +188,9 @@ const LoginPage = () => {
                         helperText={formik.touched.email && formik.errors.email}
                     />
 
-                    <TextField
+                    <PasswordField
                         fullWidth
                         label="Password"
-                        type="password"
                         variant="outlined"
                         margin="normal"
                         name="password"

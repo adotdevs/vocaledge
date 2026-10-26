@@ -45,6 +45,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { logoutApi, getEmailQueueStatusApi, getCallQueueStatusApi, getCallStatisticsApi, getReminderBadgeCountApi } from '../../../Api/Service';
 import { toast } from 'react-toastify';
 import { getLiveSocket } from '../../../utils/liveSocket';
+import { endLiveSession } from '../../../utils/endLiveSession';
 import {
   fetchLeadStatuses,
   getCachedLeadStatuses,
@@ -298,6 +299,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
           }
         }
         signOut();
+        endLiveSession();
         navigate("/auth/login/crm");
       } else {
         toast.error(logout.msg);

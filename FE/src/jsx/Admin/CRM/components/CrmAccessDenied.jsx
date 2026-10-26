@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useSignOut } from "react-auth-kit";
 import { toast } from "react-toastify";
 import { logoutApi } from "../../../../Api/Service";
+import { endLiveSession } from "../../../../utils/endLiveSession";
 import useLiveCrmUser from "../useLiveCrmUser";
 
 const CrmAccessDenied = () => {
@@ -28,6 +29,7 @@ const CrmAccessDenied = () => {
         localStorage.removeItem("jwttoken");
       }
       signOut();
+      endLiveSession();
       navigate("/auth/login/crm");
     } catch (error) {
       toast.error(error?.message || "Logout failed");

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Sidebar from "./Sidebar.js";
 import CrmAppBarActions from './components/CrmAppBarActions';
+import PasswordField from "./components/PasswordField";
 import {
   allUsersApi,
   bypassSingleUserApi,
@@ -1277,11 +1278,10 @@ const AdminManagementCRM = () => {
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
-                    <TextField
+                    <PasswordField
                       size="small"
                       fullWidth
                       label="Password"
-                      type="text"
                       value={newAdmin.password}
                       onChange={(e) => setNewAdmin({ ...newAdmin, password: e.target.value })}
                       required
@@ -1418,14 +1418,13 @@ const AdminManagementCRM = () => {
                   
                   {vapiConfig.enabled && (
                     <>
-                      <TextField
+                      <PasswordField
                         fullWidth
                         label="Vapi API Key"
                         value={vapiConfig.apiKey}
                         onChange={(e) => setVapiConfig(prev => ({ ...prev, apiKey: e.target.value }))}
                         required
                         helperText="Required: Vapi API key for this admin"
-                        type="password"
                       />
                       
                       <TextField
@@ -1529,14 +1528,13 @@ const AdminManagementCRM = () => {
                         helperText="Required: SIP username for authentication"
                       />
                       
-                      <TextField
+                      <PasswordField
                         fullWidth
                         label="SIP Password"
                         value={sipConfig.password}
                         onChange={(e) => setSipConfig(prev => ({ ...prev, password: e.target.value }))}
                         required
                         helperText="Required: SIP password for authentication"
-                        type="password"
                       />
                       
                       <TextField
@@ -1635,11 +1633,10 @@ const AdminManagementCRM = () => {
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
-                    <TextField
+                    <PasswordField
                       size="small"
                       fullWidth
                       label="Password (optional)"
-                      type="text"
                       value={editAdmin.password}
                       onChange={(e) => setEditAdmin({ ...editAdmin, password: e.target.value })}
                     />

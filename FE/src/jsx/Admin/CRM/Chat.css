@@ -590,7 +590,44 @@
   font-weight: 700;
   cursor: pointer;
 }
-.crm-chat-drawer header { display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 1px solid #eef0f6; }
+.crm-chat-call {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 90%;
+  margin: 10px auto;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #fff;
+  color: #111b21;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+}
+.crm-chat-call svg { font-size: 16px; color: #128c7e; }
+.crm-chat-call.missed svg, .crm-chat-call.declined svg, .crm-chat-call.offline svg { color: #e11d48; }
+.crm-chat-call time { color: #667085; font-weight: 600; font-size: 12px; }
+.crm-call-log {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #eef0f6;
+}
+.crm-call-log strong { display: block; font-size: 14px; }
+.crm-call-log p { margin: 4px 0 0; color: #667085; font-size: 12px; }
+.crm-call-log button {
+  border: 0;
+  background: #efe9ff;
+  color: #5b3df5;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
 .crm-chat-drawer section { padding: 16px; }
 .crm-chat-emoji {
   position: absolute;

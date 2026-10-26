@@ -297,6 +297,7 @@ const LeadStream = () => {
     const canManageReminders = can('canManageReminders');
     const canViewLeadSource = can('canViewLeadSource');
     const canViewLeadBrand = can('canViewLeadBrand');
+    const canViewStreamLogs = can('canViewStreamLogs');
     const [loading, setLoading] = useState(true);
     const [lead, setLead] = useState(null);
     const [activities, setActivities] = useState([]);
@@ -1992,6 +1993,7 @@ const LeadStream = () => {
     const streamItems = useMemo(() => {
         const activityItems = activities
             .filter(isTopLevelActivity)
+            .filter((activity) => canViewStreamLogs || activity.type === 'comment')
             .map((activity) => ({
                 ...activity,
                 isReminder: false,
@@ -2014,7 +2016,7 @@ const LeadStream = () => {
         return [...activityItems, ...reminderItems].sort(
             (a, b) => new Date(b.streamTimestamp) - new Date(a.streamTimestamp)
         );
-    }, [activities, reminders]);
+    }, [activities, reminders, canViewStreamLogs]);
     
     const filteredStreamItems = showSearchResults 
         ? searchResults 
@@ -2913,7 +2915,7 @@ const LeadStream = () => {
                                                     Activity Breakdown
                                                 </Typography>
                                                 <Stack spacing={1}>
-                                                    {['comment', 'status_change', 'assignment_change', 'field_update', 'created', 'reminder'].map(type => {
+                                                    {['comment', ...(canViewStreamLogs ? ['status_change', 'assignment_change', 'field_update', 'created'] : []), 'reminder'].map(type => {
                                                         const count = type === 'reminder'
                                                             ? reminders.length
                                                             : activities.filter(a => a.type === type).length;
@@ -3011,10 +3013,10 @@ const LeadStream = () => {
                                                     <MenuItem value="all">All ({streamItems.length})</MenuItem>
                                                     <MenuItem value="comment">Comments ({activities.filter(a => a.type === 'comment').length})</MenuItem>
                                                     <MenuItem value="reminder">Reminders ({reminders.length})</MenuItem>
-                                                    <MenuItem value="status_change">Status Changes ({activities.filter(a => a.type === 'status_change').length})</MenuItem>
-                                                    <MenuItem value="assignment_change">Agent Changes ({activities.filter(a => a.type === 'assignment_change').length})</MenuItem>
-                                                    <MenuItem value="field_update">Field Updates ({activities.filter(a => a.type === 'field_update').length})</MenuItem>
-                                                    <MenuItem value="created">Created ({activities.filter(a => a.type === 'created').length})</MenuItem>
+                                                    {canViewStreamLogs && <MenuItem value="status_change">Status Changes ({activities.filter(a => a.type === 'status_change').length})</MenuItem>}
+                                                    {canViewStreamLogs && <MenuItem value="assignment_change">Agent Changes ({activities.filter(a => a.type === 'assignment_change').length})</MenuItem>}
+                                                    {canViewStreamLogs && <MenuItem value="field_update">Field Updates ({activities.filter(a => a.type === 'field_update').length})</MenuItem>}
+                                                    {canViewStreamLogs && <MenuItem value="created">Created ({activities.filter(a => a.type === 'created').length})</MenuItem>}
                                                 </Select>
                                             </FormControl>
                                             {/* ✅ Export Button */}

@@ -2,6 +2,7 @@ const getCrmNotificationModel = require('../crmDB/models/crmNotificationModel');
 const getLeadModel = require('../crmDB/models/leadsModel');
 const User = require('../models/userModel');
 const { formatReminderDateTime } = require('./reminderTimezone');
+const { hasCrmPermission, STREAM_LOG_TYPES } = require('./crmPermissions');
 
 const getCrmAccessHelpers = () => require('../controllers/crmController');
 
@@ -153,12 +154,21 @@ const persistCrmNotifications = async ({
   mentions = [],
   metadata = {},
 }) => {
-  const recipientIds = await resolveNotificationRecipients({
+  let recipientIds = await resolveNotificationRecipients({
     lead,
     actorUserId,
     actorRole,
     mentions,
   });
+
+  if (STREAM_LOG_TYPES.includes(activityType) && recipientIds.length) {
+    const users = await User.find({ _id: { $in: recipientIds } })
+      .select('role permissions adminPermissions')
+      .lean();
+    recipientIds = users
+      .filter((user) => hasCrmPermission(user, 'canViewStreamLogs'))
+      .map((user) => user._id.toString());
+  }
 
   if (!recipientIds.length) return [];
 

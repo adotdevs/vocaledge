@@ -519,6 +519,7 @@ export const deliveredChatApi = (messageIds) => postApi(`/crm/chat/receipts/deli
 export const removeChatConversationApi = (id) => postApi(`/crm/chat/conversations/${id}/remove`);
 export const flagChatConversationApi = (id, field) => postApi(`/crm/chat/conversations/${id}/flag`, { field });
 export const getAdminChatConversationsApi = () => getApi(`/crm/chat/admin/conversations`);
+export const getChatCallsApi = (conversationId) => getApi(`/crm/chat/calls${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ""}`);
 export const getChatRecycleApi = () => getApi(`/crm/chat/admin/recycle`);
 export const clearChatRecycleConversationApi = (id) => deleteApi(`/crm/chat/admin/recycle/conversations/${id}`);
 export const restoreChatMessageApi = (id) => postApi(`/crm/chat/admin/messages/${id}/restore`);

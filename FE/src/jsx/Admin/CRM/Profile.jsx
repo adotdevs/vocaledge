@@ -18,6 +18,7 @@ import { toast } from "react-toastify";
 
 import Sidebar from "./Sidebar";
 import CrmAppBarActions from './components/CrmAppBarActions';
+import PasswordField from "./components/PasswordField";
 import {
   signleUsersApi,
   updateSignleUsersApi,
@@ -490,10 +491,9 @@ const CrmProfile = () => {
                         />
                       </Grid>
                       <Grid item xs={12}>
-                        <TextField
+                        <PasswordField
                           label="Password (leave empty to keep current)"
                           name="password"
-                          type="password"
                           value={userData.password}
                           onChange={handleInput}
                           fullWidth
@@ -775,9 +775,8 @@ const CrmProfile = () => {
             </Box>
 
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <TextField
+              <PasswordField
                 label="API Key *"
-                type="password"
                 value={vapiConfig.apiKey}
                 onChange={(e) =>
                   setVapiConfig((prev) => ({ ...prev, apiKey: e.target.value }))
@@ -928,9 +927,8 @@ const CrmProfile = () => {
                     size="small"
                     disabled={sipConfigLoading}
                   />
-                  <TextField
+                  <PasswordField
                     label="SIP Password *"
-                    type="password"
                     value={sipConfig.password}
                     onChange={(e) =>
                       setSipConfig((prev) => ({ ...prev, password: e.target.value }))

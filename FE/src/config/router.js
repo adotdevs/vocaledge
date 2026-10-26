@@ -4,6 +4,7 @@ import { APP_CONFIG } from "./appConfig";
 import { AuthProvider, RequireAuth, useSignOut } from "react-auth-kit";
 import ScrollToTop from "./top.js";
 import axiosService from "../Api/axiosService.js";
+import { endLiveSession } from "../utils/endLiveSession";
 import UserOnlineStatus from "./userOnlineStatus.js";
 
 // CRM Imports
@@ -27,6 +28,7 @@ import DocumentLibrary from "../jsx/Admin/CRM/DocumentLibrary.jsx";
 import AdminReminderNotifier from "../jsx/Admin/CRM/components/AdminReminderNotifier";
 import StaffMessagePopup from "../jsx/Admin/CRM/components/StaffMessagePopup";
 import ChatNotifier from "../jsx/Admin/CRM/components/ChatNotifier";
+import VoiceCall from "../jsx/Admin/CRM/components/VoiceCall";
 import StaffMessages from "../jsx/Admin/CRM/StaffMessages";
 import ChatPage from "../jsx/Admin/CRM/Chat";
 
@@ -53,6 +55,7 @@ function AppRouter() {
       },
       (error) => {
         if (error.response?.status === 401 || error.response?.status === 405) {
+          endLiveSession();
           signOut(); // clear react-auth-kit session
           localStorage.removeItem("token");
           localStorage.removeItem("authToken");
@@ -121,6 +124,7 @@ export default function Router() {
           <AdminReminderNotifier />
           <StaffMessagePopup />
           <ChatNotifier />
+          <VoiceCall />
           <ScrollToTop />
           <UserOnlineStatus />
           <AppRouter />

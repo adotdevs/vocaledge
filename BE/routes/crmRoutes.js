@@ -542,6 +542,7 @@ const {
   chatStream,
   chatTyping,
   chatConversations,
+  chatCallLogs,
   chatUnreadPopups,
   openChat,
   chatMessages,
@@ -573,6 +574,7 @@ router.route("/crm/chat/stream").get(attachChatSseToken, isAuthorizedUser, chatR
 router.route("/crm/chat/conversations/:id/typing").post(isAuthorizedUser, chatRoles, chatTyping);
 router.route("/crm/chat/agents").get(isAuthorizedUser, chatRoles, chatAgents);
 router.route("/crm/chat/conversations").get(isAuthorizedUser, chatRoles, chatConversations);
+router.route("/crm/chat/calls").get(isAuthorizedUser, chatRoles, chatCallLogs);
 router.route("/crm/chat/unread-popups").get(isAuthorizedUser, chatRoles, chatUnreadPopups);
 router.route("/crm/chat/conversations").post(isAuthorizedUser, chatRoles, openChat);
 router.route("/crm/chat/conversations/:id/messages").get(isAuthorizedUser, chatRoles, chatMessages);

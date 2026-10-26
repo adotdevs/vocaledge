@@ -98,16 +98,25 @@ const removeClient = (userId, res) => {
 };
 
 const disconnectUser = (userId) => {
-  const sockets = clients.get(String(userId));
-  if (!sockets) return;
-  sockets.forEach((res) => {
-    try {
-      res.end();
-    } catch (error) {
-      // The browser already closed this stream.
-    }
+  const key = String(userId);
+  const sockets = clients.get(key);
+  if (sockets) {
+    sockets.forEach((res) => {
+      try {
+        res.end();
+      } catch (error) {
+        // The browser already closed this stream.
+      }
+    });
+    clients.delete(key);
+  }
+  const lastOnline = new Date();
+  User.findByIdAndUpdate(key, { lastOnline, online: false }).catch(() => {});
+  publishToUsers([...clients.keys()], "chat.presence.updated", {
+    userId: key,
+    online: false,
+    lastOnline: lastOnline.toISOString(),
   });
-  clients.delete(String(userId));
 };
 
 module.exports = {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AttachFile, DeleteOutline, Done, DoneAll, EmojiEmotions, InfoOutlined, MoreVert, Send } from "@mui/icons-material";
+import { AttachFile, DeleteOutline, Done, DoneAll, EmojiEmotions, History, InfoOutlined, MoreVert, Phone, Send } from "@mui/icons-material";
 import { useAuthUser } from "react-auth-kit";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -18,6 +18,7 @@ import {
   getChatConversationsApi,
   getChatMessagesApi,
   getChatRecycleApi,
+  getChatCallsApi,
   clearChatRecycleConversationApi,
   hideChatMessageApi,
   openChatApi,
@@ -226,6 +227,8 @@ const ChatPage = () => {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [menuId, setMenuId] = useState(null);
   const [info, setInfo] = useState(null);
+  const [callLogOpen, setCallLogOpen] = useState(false);
+  const [callLogs, setCallLogs] = useState([]);
   const [contactOpen, setContactOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -642,6 +645,25 @@ const ChatPage = () => {
     };
   }, [active?._id]);
 
+  useEffect(() => {
+    if (!active?._id || active.readOnly) {
+      setCallLogs([]);
+      return undefined;
+    }
+    let cancelled = false;
+    const load = () => {
+      getChatCallsApi(active._id).then((response) => {
+        if (!cancelled && response?.success) setCallLogs(response.calls || []);
+      }).catch(() => {});
+    };
+    load();
+    window.addEventListener("crm-voice-logged", load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("crm-voice-logged", load);
+    };
+  }, [active?._id, active?.readOnly]);
+
   if (ready && !allowed) {
     return (
       <div className={`crm-chat ${collapsed ? "is-collapsed" : ""}`}>
@@ -743,14 +765,51 @@ const ChatPage = () => {
                     ) : `${active.other?.role || "Agent"} · ${lastSeenText(active.other)}`}
                   </p>
                 </div>
+                {!active.readOnly && active.other?._id && (
+                  <button
+                    type="button"
+                    className="crm-chat-icon"
+                    title="Call log"
+                    aria-label="Call log"
+                    onClick={() => setCallLogOpen(true)}
+                  >
+                    <History />
+                  </button>
+                )}
+                {!active.readOnly && active.other?._id && (
+                  <button
+                    type="button"
+                    className="crm-chat-icon"
+                    title="Voice call"
+                    aria-label="Voice call"
+                    onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || "") } }))}
+                  >
+                    <Phone />
+                  </button>
+                )}
                 {!active.readOnly && <button type="button" className="crm-chat-row-delete" aria-label="Delete conversation" title="Delete conversation" onClick={() => deleteConversation(active)}><DeleteOutline /></button>}
                 {!active.readOnly && <button className="crm-chat-icon" title="Contact info" onClick={() => { setContactOpen(true); setInfo(null); }}>ⓘ</button>}
               </header>
               <div className="crm-chat-stream" ref={streamRef}>
                 {loadingThread && <ThreadSkeleton />}
-                {!loadingThread && messages.length === 0 && <div className="crm-chat-empty"><h2>{active.readOnly ? "No messages in this chat" : `Start your conversation with ${nameOf(active.other)}`}</h2><p>{active.readOnly ? "This conversation is empty." : "Send your first message to get started."}</p></div>}
-                {!loadingThread && messages.map((message, index) => {
-                  const previous = messages[index - 1];
+                {!loadingThread && messages.length === 0 && callLogs.length === 0 && <div className="crm-chat-empty"><h2>{active.readOnly ? "No messages in this chat" : `Start your conversation with ${nameOf(active.other)}`}</h2><p>{active.readOnly ? "This conversation is empty." : "Send your first message to get started."}</p></div>}
+                {!loadingThread && [...messages.map((message) => ({ kind: "message", at: new Date(message.createdAt).getTime() || 0, message })), ...callLogs.map((item) => ({ kind: "call", at: new Date(item.createdAt).getTime() || 0, call: item }))].sort((a, b) => a.at - b.at).map((entry, index, list) => {
+                  if (entry.kind === "call") {
+                    const item = entry.call;
+                    const mine = personId(item.fromId) === myId;
+                    const label = item.status === "completed" ? "Answered" : item.status === "declined" ? "Declined" : item.status === "cancelled" ? "Cancelled" : item.status === "offline" ? "Offline" : item.status === "busy" ? "Busy" : "Missed";
+                    const mins = Math.floor((item.durationSec || 0) / 60);
+                    const secs = String((item.durationSec || 0) % 60).padStart(2, "0");
+                    return (
+                      <div className={`crm-chat-call ${item.status || "missed"}`} key={item._id || item.callId}>
+                        <Phone />
+                        <span>{mine ? "Outgoing" : "Incoming"} call · {label}{item.durationSec ? ` · ${mins}:${secs}` : ""}</span>
+                        <time>{formatClock(item.createdAt)}</time>
+                      </div>
+                    );
+                  }
+                  const message = entry.message;
+                  const previous = list.slice(0, index).reverse().find((item) => item.kind === "message")?.message;
                   const showDay = !previous || dayLabel(previous.createdAt) !== dayLabel(message.createdAt);
                   const onRight = Boolean(active.readOnly) && personId(message.senderId) === personId(active.participants?.[1]?._id);
                   const alignedMine = message.mine || onRight;
@@ -873,6 +932,32 @@ const ChatPage = () => {
                     <button className="crm-chat-send" type="submit" aria-label="Send" disabled={sending || (!draft.trim() && files.length === 0)}><Send /></button>
                   </form>
                 </>
+              )}
+              {callLogOpen && !active.readOnly && (
+                <aside className="crm-chat-drawer">
+                  <header>
+                    <strong>Call log</strong>
+                    <button type="button" className="crm-chat-icon" onClick={() => setCallLogOpen(false)}>×</button>
+                  </header>
+                  <section>
+                    {callLogs.length === 0 && <p className="crm-chat-empty-note">No calls with {nameOf(active.other)} yet.</p>}
+                    {callLogs.map((item) => {
+                      const mine = personId(item.fromId) === myId;
+                      const label = item.status === "completed" ? "Answered" : item.status === "declined" ? "Declined" : item.status === "cancelled" ? "Cancelled" : item.status === "offline" ? "Offline" : item.status === "busy" ? "Busy" : "Missed";
+                      const mins = Math.floor((item.durationSec || 0) / 60);
+                      const secs = String((item.durationSec || 0) % 60).padStart(2, "0");
+                      return (
+                        <article className="crm-call-log" key={item._id}>
+                          <div>
+                            <strong>{mine ? "Outgoing" : "Incoming"} · {label}</strong>
+                            <p>{new Date(item.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{item.durationSec ? ` · ${mins}:${secs}` : ""}</p>
+                          </div>
+                          <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || "") } }))}>Call</button>
+                        </article>
+                      );
+                    })}
+                  </section>
+                </aside>
               )}
               {info && (
                 <aside className="crm-chat-drawer">

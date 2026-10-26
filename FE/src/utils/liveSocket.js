@@ -4,6 +4,7 @@ import { getBackendUrl, isBackendLocalhost, isElectronApp } from "../config/appC
 let socket = null;
 let socketStatus = "offline";
 let socketDetail = "Not connected";
+let sessionClosed = false;
 const listeners = new Set();
 
 const publish = (state, detail) => {
@@ -19,6 +20,7 @@ export function subscribeSocketStatus(listener) {
 }
 
 export function getLiveSocket() {
+  if (sessionClosed) return null;
   if (socket) return socket;
   const token = localStorage.getItem("jwttoken") || localStorage.getItem("token") || "";
   const cleanToken = token.startsWith("Bearer ") ? token.slice(7) : token;
@@ -52,5 +54,20 @@ export function getLiveSocket() {
     console.warn("[live] socket error", error?.message || error);
     publish("offline", error?.message || "Socket error");
   });
+  window.dispatchEvent(new CustomEvent("crm-live-socket-ready"));
   return socket;
+}
+
+export function endLiveSocket() {
+  sessionClosed = true;
+  if (!socket) return;
+  socket.io.reconnection(false);
+  socket.removeAllListeners();
+  socket.disconnect();
+  socket = null;
+  publish("offline", "Signed out");
+}
+
+export function allowLiveSession() {
+  sessionClosed = false;
 }

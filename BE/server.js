@@ -99,6 +99,8 @@ const io = new Server(server, {
   pingTimeout: 25000,
 });
 
+const { attachVoice } = require("./utils/voiceSignal");
+
 io.on("connection", (socket) => {
   try {
     const headerToken = String(socket.handshake?.auth?.token || "").replace(/^Bearer\s+/i, "");
@@ -107,11 +109,16 @@ io.on("connection", (socket) => {
     const token = headerToken || (cookieMatch ? decodeURIComponent(cookieMatch[1]) : "");
     if (token && process.env.SECRET_JWT) {
       const decoded = jwt.verify(token, process.env.SECRET_JWT);
-      if (decoded?._id) socket.join(`user:${decoded._id}`);
+      if (decoded?._id) {
+        const userId = String(decoded._id);
+        socket.data.userId = userId;
+        socket.join(`user:${userId}`);
+      }
     }
   } catch (error) {
     // A missing token still allows the other live features. Chat events stay in the user room.
   }
+  attachVoice(io, socket);
 });
 
 // Make io available globally for emitting events

@@ -1,4 +1,5 @@
 const DEFAULT_ON = new Set(["canCommentOnLeads", "canChangeLeadStatus"]);
+const STREAM_LOG_TYPES = ["status_change", "assignment_change", "field_update", "created", "email_sent", "call_logged"];
 
 const isOn = (value) => value === true || value === "true";
 const isOff = (value) => value === false || value === "false";
@@ -56,6 +57,7 @@ const redactSourceMention = (text, user) => {
 
 module.exports = {
   DEFAULT_ON,
+  STREAM_LOG_TYPES,
   hasCrmPermission,
   denyCrmPermission,
   canViewLeadSource,
