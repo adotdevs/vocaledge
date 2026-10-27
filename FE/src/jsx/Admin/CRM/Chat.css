@@ -753,6 +753,7 @@
 }
 .crm-call-log strong { display: block; font-size: 14px; }
 .crm-call-log p { margin: 4px 0 0; color: #667085; font-size: 12px; }
+.crm-call-log-actions { display: flex; gap: 8px; flex: none; }
 .crm-call-log button {
   border: 0;
   background: #efe9ff;

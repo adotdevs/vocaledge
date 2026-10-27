@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useAuthUser } from "react-auth-kit";
-import { CallEnd, ChatBubbleOutline, CloseFullscreen, Mic, MicOff, Phone } from "@mui/icons-material";
+import { CallEnd, ChatBubbleOutline, CloseFullscreen, Mic, MicOff, Phone, Videocam, VideocamOff } from "@mui/icons-material";
 import useLiveCrmUser from "../useLiveCrmUser";
 import {
   acceptVoiceCall,
@@ -12,7 +12,9 @@ import {
   hangUp,
   listenForVoice,
   retryMicrophone,
+  subscribeCallMedia,
   subscribeVoice,
+  toggleCamera,
   toggleMute,
   toggleVoiceMinimized,
 } from "../voiceCall";
@@ -93,6 +95,8 @@ const VoiceCall = () => {
   const [call, setCall] = useState(getVoiceState());
   const [clock, setClock] = useState("00:00");
   const person = authUser()?.user;
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
 
   useEffect(() => {
     window.__crmCanVoiceCall = voiceAllowed;
@@ -108,6 +112,20 @@ const VoiceCall = () => {
   }, [person?._id, person?.firstName, person?.lastName]);
 
   useEffect(() => subscribeVoice(setCall), []);
+
+  useEffect(() => {
+    const attach = (media) => {
+      if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== media.remote) {
+        remoteVideoRef.current.srcObject = media.remote || null;
+        remoteVideoRef.current.play?.().catch(() => {});
+      }
+      if (localVideoRef.current && localVideoRef.current.srcObject !== media.local) {
+        localVideoRef.current.srcObject = media.local || null;
+        localVideoRef.current.play?.().catch(() => {});
+      }
+    };
+    return subscribeCallMedia(attach);
+  }, [call.cameraOn, call.peerCameraOn, call.phase]);
 
   useEffect(() => {
     if (call.phase !== "active") return undefined;
@@ -129,8 +147,10 @@ const VoiceCall = () => {
     await acceptVoiceCall();
     openChat();
   };
+  const videoLive = Boolean(call.cameraOn || call.peerCameraOn);
+  const remoteVisible = Boolean(call.peerCameraOn && (call.phase === "active" || call.phase === "connecting"));
   const headline = call.phase === "incoming"
-    ? "Incoming call..."
+    ? (call.peerCameraOn ? "Incoming video call..." : "Incoming call...")
     : call.phase === "outgoing"
       ? (call.statusText === "Offline" ? "Not connected" : call.statusText === "Ringing" ? "Ringing..." : "Calling...")
       : call.phase === "connecting"
@@ -138,11 +158,18 @@ const VoiceCall = () => {
         : call.phase === "ended"
           ? (call.statusText || "Call ended")
           : "";
+  const showVideo = (call.cameraOn || remoteVisible) && call.phase !== "mic" && call.phase !== "ended";
+  const cameraButton = !call.rejoined ? (
+    <button type="button" className={`crm-voice-btn camera ${call.cameraOn ? "is-on" : ""}`} onClick={toggleCamera}>
+      <span className="crm-voice-orb">{call.cameraOn ? <Videocam /> : <VideocamOff />}</span>
+      <em>{call.cameraOn ? "Camera on" : "Camera off"}</em>
+    </button>
+  ) : null;
 
   if (call.minimized && canFold) {
     return createPortal(
       <button type="button" className="crm-voice-mini" onClick={toggleVoiceMinimized}>
-        <Phone />
+        {videoLive ? <Videocam /> : <Phone />}
         <span>{call.name}</span>
         <strong>
           {call.peerMuted ? "Muted" : call.peerSpeaking ? "Speaking" : call.phase === "active" ? clock : "Connecting"}
@@ -153,7 +180,7 @@ const VoiceCall = () => {
   }
 
   return createPortal(
-    <section className={`crm-voice ${dark ? "is-dark" : "is-light"} is-${call.phase}`} role="dialog" aria-label="Voice call">
+    <section className={`crm-voice ${dark ? "is-dark" : "is-light"} is-${call.phase} ${showVideo ? "has-video" : ""}`} role="dialog" aria-label={videoLive ? "Video call" : "Voice call"}>
       {canFold && (
         <button type="button" className="crm-voice-fold" aria-label="Minimize call" onClick={toggleVoiceMinimized}>
           <CloseFullscreen />
@@ -161,9 +188,36 @@ const VoiceCall = () => {
       )}
       {call.phase !== "mic" && (
         <div className="crm-voice-person">
-          <div className={`crm-voice-avatar ${call.phase === "incoming" || call.statusText === "Ringing" ? "is-ringing" : ""} ${call.peerSpeaking ? "is-speaking" : ""} ${call.statusText === "Offline" ? "is-offline" : ""}`}>{initial}</div>
-          <p className="crm-voice-name">{call.name || "Agent"}</p>
-          {call.phase === "active" ? <p className="crm-voice-clock">{clock}</p> : headline && <p className="crm-voice-sub">{headline}</p>}
+          {showVideo && (
+            <div className="crm-video-stage">
+              {remoteVisible && (
+                <video key="remote" ref={remoteVideoRef} className="crm-video-remote" autoPlay playsInline webkit-playsinline="" muted />
+              )}
+              {call.cameraOn && (
+                <video
+                  key="local"
+                  ref={localVideoRef}
+                  className={remoteVisible ? "crm-video-local" : "crm-video-remote is-self"}
+                  autoPlay
+                  playsInline
+                  webkit-playsinline=""
+                  muted
+                />
+              )}
+              <div className="crm-video-meta">
+                <strong>{call.name || "Agent"}</strong>
+                <span>{call.phase === "active" ? clock : (headline || "Video")}</span>
+              </div>
+            </div>
+          )}
+          {!showVideo && (
+            <>
+              <div className={`crm-voice-avatar ${call.phase === "incoming" || call.statusText === "Ringing" ? "is-ringing" : ""} ${call.peerSpeaking ? "is-speaking" : ""} ${call.statusText === "Offline" ? "is-offline" : ""}`}>{initial}</div>
+              <p className="crm-voice-name">{call.name || "Agent"}</p>
+            </>
+          )}
+          {!showVideo && (call.phase === "active" ? <p className="crm-voice-clock">{clock}</p> : headline && <p className="crm-voice-sub">{headline}</p>)}
+          {showVideo && call.phase !== "active" && headline && <p className="crm-voice-sub">{headline}</p>}
           {call.phase === "active" && (
             <p className={`crm-voice-live ${call.peerMuted ? "is-muted" : ""} ${call.peerSpeaking ? "is-speaking" : ""}`}>
               <span className="crm-voice-bars" aria-hidden="true"><i /><i /><i /><i /></span>
@@ -171,9 +225,10 @@ const VoiceCall = () => {
             </p>
           )}
           {call.phase !== "active" && call.phase !== "ended" && (
-            <p className="crm-voice-kind"><Phone /> Audio call</p>
+            <p className="crm-voice-kind">{videoLive ? <Videocam /> : <Phone />} {videoLive ? "Video call" : "Audio call"}</p>
           )}
           {call.phase === "active" && call.muted && <p className="crm-voice-you-mute">Your microphone is muted</p>}
+          {call.videoError && <p className="crm-voice-you-mute">{call.videoError}</p>}
         </div>
       )}
       {call.phase === "mic" && <MicGuide kind={call.micKind} name={call.name} />}
@@ -187,6 +242,7 @@ const VoiceCall = () => {
               <span className="crm-voice-orb"><CallEnd /></span>
               <em>Decline</em>
             </button>
+            {cameraButton}
             <button type="button" className="crm-voice-btn accept" onClick={accept}>
               <span className="crm-voice-orb"><Phone /></span>
               <em>Accept</em>
@@ -211,6 +267,7 @@ const VoiceCall = () => {
                 <em>{call.muted ? "Unmute" : "Mute"}</em>
               </button>
             ) : null}
+            {cameraButton}
             <button type="button" className="crm-voice-btn decline" onClick={call.phase === "outgoing" ? declineVoiceCall : hangUp}>
               <span className="crm-voice-orb"><CallEnd /></span>
               <em>End call</em>

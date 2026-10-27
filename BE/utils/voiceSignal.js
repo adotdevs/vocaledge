@@ -174,6 +174,11 @@ const attachVoice = (io, socket) => {
       return;
     }
 
+    if (type === "camera") {
+      send(peer, { type: "camera", callId, on: Boolean(message.on) });
+      return;
+    }
+
     if (type === "offer" || type === "answer" || type === "ice") {
       if (call.status !== "active" && type !== "ice") return;
       send(peer, {
@@ -200,7 +205,7 @@ const attachVoice = (io, socket) => {
       if (userOnline(io, userId)) return;
       if (!calls.has(call.id)) return;
       finish(call.id, "ended");
-    }, 12000);
+    }, 30000);
   });
 };
 

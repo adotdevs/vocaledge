@@ -3,7 +3,7 @@
   right: 24px;
   bottom: 24px;
   z-index: 60000;
-  width: 320px;
+  width: 440px;
   padding: 28px 18px 18px;
   border-radius: 28px;
   text-align: center;
@@ -147,15 +147,76 @@
   font-size: 12px;
   font-weight: 700;
 }
+.crm-voice.has-video { width: 440px; padding: 14px 14px 16px; }
+.crm-voice.has-video .crm-voice-fold {
+  top: 22px;
+  right: 22px;
+  z-index: 3;
+  background: rgba(17, 23, 34, 0.45);
+  color: #fff;
+}
+.crm-voice.has-video .crm-video-meta { right: 52px; }
+.crm-video-stage {
+  position: relative;
+  height: 320px;
+  margin: 0 0 12px;
+  border-radius: 22px;
+  overflow: hidden;
+  background: #121722;
+}
+.crm-video-remote {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #121722;
+}
+.crm-video-remote.is-self { transform: scaleX(-1); }
+.crm-video-local {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 108px;
+  height: 144px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.88);
+  transform: scaleX(-1);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  background: #111;
+}
+.crm-video-meta {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #fff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
+}
+.crm-video-meta strong {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.crm-video-meta span {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .crm-voice-actions {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  gap: 22px;
+  gap: 14px;
   margin-top: 22px;
 }
 .crm-voice-btn {
-  width: 72px;
+  width: 80px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -172,6 +233,7 @@
   font-size: 12px;
   font-weight: 700;
   color: #667085;
+  white-space: nowrap;
 }
 .crm-voice.is-dark .crm-voice-btn em { color: rgba(255, 255, 255, 0.86); }
 .crm-voice-orb {
@@ -189,17 +251,29 @@
 .crm-voice-btn.decline .crm-voice-orb { width: 64px; height: 64px; background: #ff4d4f; color: #fff; box-shadow: 0 8px 18px rgba(255, 77, 79, 0.35); }
 .crm-voice-btn.accept .crm-voice-orb { background: #22c55e; color: #fff; box-shadow: 0 8px 18px rgba(34, 197, 94, 0.35); }
 .crm-voice-btn.chat .crm-voice-orb,
-.crm-voice-btn.mute .crm-voice-orb {
+.crm-voice-btn.mute .crm-voice-orb,
+.crm-voice-btn.camera .crm-voice-orb {
   background: rgba(255, 255, 255, 0.92);
   border: 1.5px solid rgba(29, 36, 51, 0.18);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
+.crm-voice-btn.camera.is-on .crm-voice-orb {
+  background: #6d4aff;
+  color: #fff;
+  border-color: #6d4aff;
+}
 .crm-voice-btn.mute.is-muted .crm-voice-orb { background: #f59e0b; color: #fff; border-color: #f59e0b; }
 .crm-voice-btn.decline .crm-voice-orb svg { font-size: 30px; }
 .crm-voice.is-dark .crm-voice-btn.chat .crm-voice-orb,
-.crm-voice.is-dark .crm-voice-btn.mute .crm-voice-orb {
+.crm-voice.is-dark .crm-voice-btn.mute .crm-voice-orb,
+.crm-voice.is-dark .crm-voice-btn.camera .crm-voice-orb {
   background: rgba(255, 255, 255, 0.16);
   color: #fff;
+}
+.crm-voice.is-dark .crm-voice-btn.camera.is-on .crm-voice-orb {
+  background: #6d4aff;
+  color: #fff;
+  border-color: #6d4aff;
 }
 .crm-voice.is-ended { opacity: 0.92; }
 .crm-voice.is-mic { width: 420px; text-align: left; }

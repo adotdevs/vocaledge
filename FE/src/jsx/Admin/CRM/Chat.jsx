@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AttachFile, DeleteOutline, Done, DoneAll, EmojiEmotions, History, InfoOutlined, MoreVert, Phone, Send } from "@mui/icons-material";
+import { AttachFile, DeleteOutline, Done, DoneAll, EmojiEmotions, History, InfoOutlined, MoreVert, Phone, Send, Videocam } from "@mui/icons-material";
 import { useAuthUser } from "react-auth-kit";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -789,6 +789,17 @@ const ChatPage = () => {
                     <Phone />
                   </button>
                 )}
+                {!active.readOnly && active.other?._id && !unavailable && (
+                  <button
+                    type="button"
+                    className="crm-chat-icon"
+                    title="Video call"
+                    aria-label="Video call"
+                    onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || ""), video: true } }))}
+                  >
+                    <Videocam />
+                  </button>
+                )}
                 {!active.readOnly && <button type="button" className="crm-chat-row-delete" aria-label="Delete conversation" title="Delete conversation" onClick={() => deleteConversation(active)}><DeleteOutline /></button>}
                 {!active.readOnly && <button className="crm-chat-icon" title="Contact info" onClick={() => { setContactOpen(true); setInfo(null); }}>ⓘ</button>}
               </header>
@@ -959,7 +970,12 @@ const ChatPage = () => {
                             <strong>{mine ? "Outgoing" : "Incoming"} · {label}</strong>
                             <p>{new Date(item.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{item.durationSec ? ` · ${mins}:${secs}` : ""}</p>
                           </div>
-                          {!unavailable && <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || "") } }))}>Call</button>}
+                          {!unavailable && (
+                            <div className="crm-call-log-actions">
+                              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || "") } }))}>Call</button>
+                              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || ""), video: true } }))}>Video</button>
+                            </div>
+                          )}
                         </article>
                       );
                     })}

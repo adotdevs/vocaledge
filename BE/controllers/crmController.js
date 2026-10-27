@@ -174,6 +174,40 @@ async function applyLeadVisibilityToQuery(query, user) {
     }
 }
 
+async function applyAgentFilterToQuery(query, agent, user) {
+    const selected = String(agent || "").trim();
+    if (!selected) return;
+
+    if (selected === "unassigned") {
+        if (user?.role === "superadmin") {
+            query.agent = null;
+            return;
+        }
+        if (user?.role === "admin") {
+            const userPerms = await getCachedUserPermissions(user._id);
+            if (userPerms?.adminPermissions?.canManageCrmLeads) {
+                query.agent = null;
+                return;
+            }
+        }
+        query.agent = { $in: [] };
+        return;
+    }
+
+    if (query.agent && query.agent.$in) {
+        const allowed = query.agent.$in.map((id) => String(id));
+        query.agent = allowed.includes(selected) ? selected : { $in: [] };
+        return;
+    }
+
+    if (query.agent && String(query.agent) !== selected) {
+        query.agent = { $in: [] };
+        return;
+    }
+
+    query.agent = selected;
+}
+
 const brandCache = new Map();
 const BRAND_CACHE_MS = 60 * 1000;
 
@@ -1174,9 +1208,9 @@ exports.getLeads = async (req, res) => {
         if (status && status !== '') query.status = status;
         applyCountryFilter(query, country);
         applyCountrySearchFilter(query, countrySearch);
-        if (agent && agent !== '') query.agent = agent;
 
         await applyLeadVisibilityToQuery(query, req.user);
+        await applyAgentFilterToQuery(query, agent, req.user);
         if (hasCrmPermission(req.user, "canViewLeadBrand")) applyBrandSearchFilter(query, brandSearch);
         applyCustomerFilters(query, req.query);
 

@@ -3074,7 +3074,9 @@ const LeadsPage = () => {
             }
             const idSet = new Set(ids.map(String));
             setLeads((prev) => {
-                if (filters.agent) return prev.filter((lead) => !idSet.has(String(lead._id)));
+                if (filters.agent && filters.agent !== "unassigned") {
+                    return prev.filter((lead) => !idSet.has(String(lead._id)));
+                }
                 return prev.map((lead) => idSet.has(String(lead._id)) ? { ...lead, agent: null } : lead);
             });
             if (filters.agent) {
@@ -4194,6 +4196,7 @@ const LeadsPage = () => {
                                             onChange={(e) => handleFilterChange("agent", e.target.value)}
                                         >
                                             <MenuItem value="">All Agents</MenuItem>
+                                            <MenuItem value="unassigned">Unassigned</MenuItem>
                                             {agents.map((agent) => (
                                                 <MenuItem key={agent._id} value={agent._id}>
                                                     {agent.firstName} {agent.lastName} ({agent.role}) - {agent.email}
