@@ -1211,7 +1211,29 @@ exports.getLeads = async (req, res) => {
 
         await applyLeadVisibilityToQuery(query, req.user);
         await applyAgentFilterToQuery(query, agent, req.user);
-        if (hasCrmPermission(req.user, "canViewLeadBrand")) applyBrandSearchFilter(query, brandSearch);
+        if (hasCrmPermission(req.user, "canViewLeadBrand")) {
+            if (req.query.brand && String(req.query.brand).trim()) {
+                query.Brand = new RegExp(`^${escapeRegex(String(req.query.brand).trim())}$`, 'i');
+            } else {
+                applyBrandSearchFilter(query, brandSearch);
+            }
+        }
+        if (canViewLeadSource(req.user) && req.query.source && String(req.query.source).trim()) {
+            query.source = new RegExp(`^${escapeRegex(String(req.query.source).trim())}$`, 'i');
+        }
+        const listFilter = req.query.list || req.query.listName;
+        if (listFilter && String(listFilter).trim()) {
+            const listVal = String(listFilter).trim();
+            if (mongoose.Types.ObjectId.isValid(listVal)) {
+                query.$or = query.$or || [];
+                query.$or.push(
+                    { uploadBatchId: new mongoose.Types.ObjectId(listVal) },
+                    { fileName: new RegExp(`^${escapeRegex(listVal)}$`, 'i') }
+                );
+            } else {
+                query.fileName = new RegExp(`^${escapeRegex(listVal)}$`, 'i');
+            }
+        }
         applyCustomerFilters(query, req.query);
 
       
@@ -2668,28 +2690,190 @@ exports.leadListStatistics = async (req, res) => {
         const Lead = await getLeadModel();
         const getLeadStatusModel = require("../crmDB/models/leadStatusModel");
         const LeadStatus = await getLeadStatusModel();
+        const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+        const LeadUpload = await getLeadUploadModel();
+
         const statuses = await LeadStatus.find().sort({ sortOrder: 1, label: 1 }).select("label color").lean();
 
-        const match = { isDeleted: false };
-        await applyLeadVisibilityToQuery(match, req.user);
+        // Build filtering conditions safely using $and array
+        const andConditions = [{ isDeleted: false }];
 
-        const rows = await Lead.aggregate([
+        // Visibility
+        const visibilityQuery = {};
+        await applyLeadVisibilityToQuery(visibilityQuery, req.user);
+        if (Object.keys(visibilityQuery).length > 0) {
+            andConditions.push(visibilityQuery);
+        }
+
+        // 1. Filter by Brand
+        const brandFilter = req.query.brand || req.query.brandSearch;
+        if (brandFilter && String(brandFilter).trim() && hasCrmPermission(req.user, "canViewLeadBrand")) {
+            const brandVal = String(brandFilter).trim();
+            if (brandVal === "__unbranded__" || brandVal === "Unbranded") {
+                andConditions.push({
+                    $or: [{ Brand: null }, { Brand: "" }, { Brand: { $exists: false } }]
+                });
+            } else {
+                andConditions.push({ Brand: new RegExp(`^${escapeRegex(brandVal)}$`, "i") });
+            }
+        }
+
+        // 2. Filter by Country
+        const countryFilter = req.query.country || req.query.countrySearch;
+        if (countryFilter && String(countryFilter).trim()) {
+            const countryVal = String(countryFilter).trim();
+            if (countryVal === "__unknown__" || countryVal === "Unknown / No Country") {
+                andConditions.push({
+                    $or: [{ country: null }, { country: "" }, { country: { $exists: false } }]
+                });
+            } else {
+                const countryQuery = {};
+                applyCountryFilter(countryQuery, countryVal);
+                if (countryQuery.country) {
+                    andConditions.push(countryQuery);
+                }
+            }
+        }
+
+        // 3. Filter by Source
+        if (req.query.source && String(req.query.source).trim() && canViewLeadSource(req.user)) {
+            const sourceVal = String(req.query.source).trim();
+            if (sourceVal === "__direct__" || sourceVal === "Direct / None") {
+                andConditions.push({
+                    $or: [{ source: null }, { source: "" }, { source: { $exists: false } }]
+                });
+            } else {
+                andConditions.push({ source: new RegExp(`^${escapeRegex(sourceVal)}$`, "i") });
+            }
+        }
+
+        // 4. Filter by Agent
+        if (req.query.agent && String(req.query.agent).trim()) {
+            const agentQuery = {};
+            await applyAgentFilterToQuery(agentQuery, req.query.agent, req.user);
+            if (agentQuery.agent !== undefined) {
+                andConditions.push(agentQuery);
+            }
+        }
+
+        // 5. Filter by List / List Name / UploadBatch
+        const listVal = String(req.query.list || req.query.listName || "").trim();
+        if (listVal) {
+            if (mongoose.Types.ObjectId.isValid(listVal)) {
+                andConditions.push({
+                    $or: [
+                        { uploadBatchId: new mongoose.Types.ObjectId(listVal) },
+                        { fileName: new RegExp(`^${escapeRegex(listVal)}$`, "i") }
+                    ]
+                });
+            } else {
+                // Find matching upload batches for this file name
+                const matchedUploads = await LeadUpload.find({
+                    fileName: new RegExp(`^${escapeRegex(listVal)}$`, "i")
+                }).select("_id").lean();
+                const uploadIds = matchedUploads.map(u => u._id);
+                if (uploadIds.length > 0) {
+                    andConditions.push({
+                        $or: [
+                            { fileName: new RegExp(`^${escapeRegex(listVal)}$`, "i") },
+                            { uploadBatchId: { $in: uploadIds } }
+                        ]
+                    });
+                } else {
+                    andConditions.push({ fileName: new RegExp(`^${escapeRegex(listVal)}$`, "i") });
+                }
+            }
+        }
+
+        const match = andConditions.length === 1 ? andConditions[0] : { $and: andConditions };
+
+        // Aggregate statistics in a single pipeline
+        const [result] = await Lead.aggregate([
             { $match: match },
             {
-                $group: {
-                    _id: {
-                        $cond: [
-                            { $or: [{ $eq: ["$status", null] }, { $eq: ["$status", ""] }] },
-                            "New",
-                            "$status",
-                        ],
-                    },
-                    count: { $sum: 1 },
-                },
-            },
+                $facet: {
+                    byStatus: [
+                        {
+                            $group: {
+                                _id: {
+                                    $cond: [
+                                        { $or: [{ $eq: ["$status", null] }, { $eq: ["$status", ""] }] },
+                                        "New",
+                                        "$status",
+                                    ],
+                                },
+                                count: { $sum: 1 },
+                            },
+                        },
+                    ],
+                    byBrand: [
+                        {
+                            $group: {
+                                _id: {
+                                    $cond: [
+                                        { $or: [{ $eq: ["$Brand", null] }, { $eq: ["$Brand", ""] }] },
+                                        "Unbranded",
+                                        "$Brand",
+                                    ],
+                                },
+                                count: { $sum: 1 },
+                            },
+                        },
+                        { $sort: { count: -1 } },
+                        { $limit: 200 },
+                    ],
+                    byAgent: [
+                        {
+                            $group: {
+                                _id: "$agent",
+                                count: { $sum: 1 },
+                            },
+                        },
+                        { $sort: { count: -1 } },
+                    ],
+                    byCountry: [
+                        {
+                            $group: {
+                                _id: {
+                                    $cond: [
+                                        { $or: [{ $eq: ["$country", null] }, { $eq: ["$country", ""] }] },
+                                        "Unknown / No Country",
+                                        "$country",
+                                    ],
+                                },
+                                count: { $sum: 1 },
+                            },
+                        },
+                        { $sort: { count: -1 } },
+                        { $limit: 200 },
+                    ],
+                    bySource: [
+                        {
+                            $group: {
+                                _id: {
+                                    $cond: [
+                                        { $or: [{ $eq: ["$source", null] }, { $eq: ["$source", ""] }] },
+                                        "Direct / None",
+                                        "$source",
+                                    ],
+                                },
+                                count: { $sum: 1 },
+                            },
+                        },
+                        { $sort: { count: -1 } },
+                        { $limit: 100 },
+                    ],
+                    totalCount: [
+                        { $count: "total" }
+                    ]
+                }
+            }
         ]);
 
-        const counts = new Map(rows.map((row) => [String(row._id || "New"), row.count || 0]));
+        const total = result?.totalCount?.[0]?.total || 0;
+
+        // 1. Process statuses
+        const counts = new Map((result?.byStatus || []).map((row) => [String(row._id || "New"), row.count || 0]));
         const known = new Set(statuses.map((status) => status.label));
         const statusRows = statuses.map((status) => ({
             label: status.label,
@@ -2699,9 +2883,139 @@ exports.leadListStatistics = async (req, res) => {
         counts.forEach((count, label) => {
             if (!known.has(label)) statusRows.push({ label, color: "", count });
         });
-        const total = statusRows.reduce((sum, status) => sum + status.count, 0);
 
-        res.json({ success: true, total, statuses: statusRows });
+        // 2. Process Brands
+        const brandRows = hasCrmPermission(req.user, "canViewLeadBrand")
+            ? (result?.byBrand || []).map((row) => ({
+                brand: String(row._id || "Unbranded"),
+                count: row.count || 0,
+                percentage: total > 0 ? Number(((row.count / total) * 100).toFixed(1)) : 0,
+            }))
+            : [];
+
+        // 3. Process Agents
+        const agentRawRows = result?.byAgent || [];
+        const agentIds = agentRawRows
+            .map((r) => r._id)
+            .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+        const agentUsers = agentIds.length > 0
+            ? await User.find({ _id: { $in: agentIds } }).select("firstName lastName role email").lean()
+            : [];
+        const agentMap = new Map(agentUsers.map((u) => [String(u._id), u]));
+
+        const agentRows = agentRawRows.map((row) => {
+            if (!row._id) {
+                return {
+                    agentId: "unassigned",
+                    name: "Unassigned",
+                    email: "",
+                    role: "",
+                    count: row.count || 0,
+                    percentage: total > 0 ? Number(((row.count / total) * 100).toFixed(1)) : 0,
+                };
+            }
+            const user = agentMap.get(String(row._id));
+            const name = user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email : "Unknown Agent";
+            return {
+                agentId: String(row._id),
+                name,
+                email: user?.email || "",
+                role: user?.role || "",
+                count: row.count || 0,
+                percentage: total > 0 ? Number(((row.count / total) * 100).toFixed(1)) : 0,
+            };
+        });
+
+        // 4. Process Countries
+        const countryRows = (result?.byCountry || []).map((row) => ({
+            country: String(row._id || "Unknown / No Country"),
+            count: row.count || 0,
+            percentage: total > 0 ? Number(((row.count / total) * 100).toFixed(1)) : 0,
+        }));
+
+        // 5. Process Sources
+        const sourceRows = canViewLeadSource(req.user)
+            ? (result?.bySource || []).map((row) => ({
+                source: String(row._id || "Direct / None"),
+                count: row.count || 0,
+                percentage: total > 0 ? Number(((row.count / total) * 100).toFixed(1)) : 0,
+            }))
+            : [];
+
+        // 6. Fetch filter options for dropdowns
+        const [availableBrands, uploadsList, distinctSources, distinctCountries, agentList] = await Promise.all([
+            hasCrmPermission(req.user, "canViewLeadBrand") ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
+            LeadUpload.find({ deletedAt: null }).sort({ createdAt: -1 }).limit(100).select("_id fileName leadCount createdAt").lean(),
+            canViewLeadSource(req.user) ? Lead.distinct("source", { isDeleted: false, source: { $nin: [null, ""] } }) : Promise.resolve([]),
+            Lead.distinct("country", { isDeleted: false, country: { $nin: [null, ""] } }),
+            (async () => {
+                let agentsQuery = {};
+                if (req.user.role === "superadmin") {
+                    agentsQuery = { role: { $in: ["admin", "subadmin", "superadmin"] } };
+                } else if (req.user.role === "admin") {
+                    const subadminIds = await getCachedSubadmins();
+                    agentsQuery = { _id: { $in: [req.user._id, ...subadminIds] } };
+                } else if (req.user.role === "manager") {
+                    agentsQuery = { role: "admin", assignedManager: req.user._id };
+                } else {
+                    agentsQuery = { _id: req.user._id };
+                }
+                return User.find(agentsQuery).select("firstName lastName role email").sort({ firstName: 1, lastName: 1 }).lean();
+            })(),
+        ]);
+
+        // Build list options
+        const distinctLeadFileNames = hasCrmPermission(req.user, "canViewLeadFileName")
+            ? await Lead.distinct("fileName", { isDeleted: false, fileName: { $nin: [null, ""] } })
+            : [];
+        const seenListNames = new Set();
+        const listOptions = [];
+
+        (uploadsList || []).forEach((u) => {
+            const name = u.fileName || "Uploaded CSV";
+            listOptions.push({
+                id: String(u._id),
+                name,
+                leadCount: u.leadCount || 0,
+                createdAt: u.createdAt,
+            });
+            seenListNames.add(name.toLowerCase());
+        });
+
+        (distinctLeadFileNames || []).forEach((name) => {
+            if (name && !seenListNames.has(name.toLowerCase())) {
+                listOptions.push({
+                    id: name,
+                    name,
+                    leadCount: 0,
+                });
+                seenListNames.add(name.toLowerCase());
+            }
+        });
+
+        const filterOptions = {
+            brands: availableBrands || [],
+            lists: listOptions,
+            sources: (distinctSources || []).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+            countries: (distinctCountries || []).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+            agents: (agentList || []).map((u) => ({
+                id: String(u._id),
+                name: `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.email,
+                role: u.role,
+                email: u.email,
+            })),
+        };
+
+        res.json({
+            success: true,
+            total,
+            statuses: statusRows,
+            byBrand: brandRows,
+            byAgent: agentRows,
+            byCountry: countryRows,
+            bySource: sourceRows,
+            filterOptions,
+        });
     } catch (err) {
         console.error("Lead statistics failed:", err);
         res.status(500).json({ success: false, msg: "Could not load statistics" });

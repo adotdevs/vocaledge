@@ -2806,12 +2806,49 @@ const LeadsPage = () => {
 
     useEffect(() => {
         const statusFromUrl = searchParams.get('status') || '';
+        const brandFromUrl = searchParams.get('brandSearch') || searchParams.get('brand') || '';
+        const countryFromUrl = searchParams.get('countrySearch') || searchParams.get('country') || '';
+        const agentFromUrl = searchParams.get('agent') || '';
+        const listFromUrl = searchParams.get('list') || searchParams.get('listName') || '';
+        const sourceFromUrl = searchParams.get('source') || '';
+        const searchFromUrl = searchParams.get('search') || '';
+
         setFilters((prev) => {
-            if (prev.status === statusFromUrl) {
-                return prev;
+            const next = { ...prev };
+            let changed = false;
+            if (next.status !== statusFromUrl) {
+                next.status = statusFromUrl;
+                changed = true;
             }
-            return { ...prev, status: statusFromUrl };
+            if (brandFromUrl && next.brandSearch !== brandFromUrl) {
+                next.brandSearch = brandFromUrl;
+                changed = true;
+            }
+            if (countryFromUrl && next.countrySearch !== countryFromUrl) {
+                next.countrySearch = countryFromUrl;
+                changed = true;
+            }
+            if (agentFromUrl && next.agent !== agentFromUrl) {
+                next.agent = agentFromUrl;
+                changed = true;
+            }
+            if (listFromUrl && next.list !== listFromUrl) {
+                next.list = listFromUrl;
+                changed = true;
+            }
+            if (sourceFromUrl && next.source !== sourceFromUrl) {
+                next.source = sourceFromUrl;
+                changed = true;
+            }
+            if (searchFromUrl && next.search !== searchFromUrl) {
+                next.search = searchFromUrl;
+                changed = true;
+            }
+            return changed ? next : prev;
         });
+        if (brandFromUrl) setTempBrandSearch(brandFromUrl);
+        if (countryFromUrl) setTempCountrySearch(countryFromUrl);
+        if (searchFromUrl) setTempSearch(searchFromUrl);
     }, [searchParams]);
 
     // REMOVED: Frontend filtering is no longer needed - backend handles all filtering efficiently
