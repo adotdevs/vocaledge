@@ -13,7 +13,7 @@ const displayName = (user) =>
 
 const firstNameOf = (user) => (user?.firstName || "").trim() || displayName(user).split(/\s+/)[0] || "";
 
-const hasChatAccess = (user) => Boolean(user) && (isSuperAdmin(user) || hasCrmPermission(user, "canAccessChat"));
+const hasChatAccess = (user) => Boolean(user) && (isSuperAdmin(user) || user.role === "manager" || hasCrmPermission(user, "canAccessChat"));
 
 const pairKeyFor = (a, b) => [String(a), String(b)].sort().join(":");
 
@@ -26,6 +26,7 @@ const publicUser = (user, onlineIds) => {
     lastName: user.lastName || "",
     email: user.email || "",
     role: user.role,
+    avatar: user.avatar || null,
     online: socketOnline || user.online === true,
     lastOnline: user.lastOnline
       ? new Date(user.lastOnline).toISOString()
@@ -39,7 +40,7 @@ const loadUsers = async (ids) => {
   const unique = [...new Set(ids.map(String))];
   if (!unique.length) return new Map();
   const users = await User.find({ _id: { $in: unique } })
-    .select("firstName lastName email role adminPermissions permissions lastOnline lastActivity online status")
+    .select("firstName lastName email role avatar adminPermissions permissions lastOnline lastActivity online status")
     .lean();
   return new Map(users.map((user) => [String(user._id), user]));
 };
@@ -70,7 +71,7 @@ const listEligibleAgents = async (actor, search = "") => {
     throw error;
   }
   const users = await User.find(eligibleQuery(String(search || "").trim()))
-    .select("firstName lastName email role lastOnline lastActivity online")
+    .select("firstName lastName email role avatar lastOnline lastActivity online")
     .limit(40)
     .lean();
   return users
@@ -90,7 +91,7 @@ const assertChatPair = async (actor, otherId) => {
     throw error;
   }
   const other = await User.findById(otherId)
-    .select("firstName lastName email role adminPermissions permissions lastOnline lastActivity")
+    .select("firstName lastName email role avatar adminPermissions permissions lastOnline lastActivity")
     .lean();
   if (!other || !hasChatAccess(other)) {
     const error = new Error(UNAVAILABLE);
@@ -347,12 +348,14 @@ const listUnreadPopups = async (actor) => {
     if (seenConversation.has(key)) continue;
     seenConversation.add(key);
     const sender = users.get(String(message.senderId));
+    const senderAvatar = sender?.avatar?.url || (typeof sender?.avatar === "string" ? sender.avatar : (sender?.profilePic || ""));
     popups.push({
       _id: message._id,
       conversationId: message.conversationId,
       senderId: message.senderId,
       senderName: message.senderName || "",
       senderRole: sender?.role || "",
+      senderAvatar: senderAvatar || "",
       body: message.body || "",
       createdAt: message.createdAt,
       replyTo: message.replyTo || null,
@@ -442,7 +445,8 @@ const sendMessage = async (actor, { conversationId, recipientId, body, clientKey
     (item) => new Date(conversation.lastMessageAt) <= new Date(item.removedAt)
   );
   await conversation.save();
-  return { conversation, message: { ...serializeMessage(message.toObject(), actor._id), senderRole: actor.role || "" }, duplicate: false };
+  const senderAvatar = actor?.avatar?.url || (typeof actor?.avatar === "string" ? actor.avatar : (actor?.profilePic || ""));
+  return { conversation, message: { ...serializeMessage(message.toObject(), actor._id), senderRole: actor.role || "", senderAvatar: senderAvatar || "" }, duplicate: false };
 };
 
 const editMessage = async (actor, messageId, body, reason) => {

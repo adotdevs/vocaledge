@@ -70,6 +70,8 @@ const {
   requestWalletIntegration,
   updateWalletIntegrationStatus,
   getWalletIntegrationStatus,
+  updateUserAvatar,
+  removeUserAvatar,
 } = require("../controllers/userController");
 const {
   verifyReferralCode,
@@ -252,5 +254,11 @@ router.route("/updateWalletIntegrationStatus/:id")
   .put(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), updateWalletIntegrationStatus)
   .patch(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), updateWalletIntegrationStatus);
 router.route("/walletIntegrationStatus/:id").get(isAuthorizedUser, getWalletIntegrationStatus);
+
+// User avatar (profile picture) routes - upload, change, remove
+router.route("/user/avatar/:id?")
+  .post(isAuthorizedUser, singleUpload, updateUserAvatar)
+  .put(isAuthorizedUser, singleUpload, updateUserAvatar)
+  .delete(isAuthorizedUser, removeUserAvatar);
 
 module.exports = router;

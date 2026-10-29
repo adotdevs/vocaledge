@@ -67,6 +67,16 @@ let userSchema = new mongoose.Schema({
     trim: true,
     default: "",
   },
+  avatar: {
+    public_id: {
+      type: String,
+      default: "",
+    },
+    url: {
+      type: String,
+      default: "",
+    },
+  },
 
   ticket: [
     {

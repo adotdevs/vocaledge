@@ -1,5 +1,5 @@
 import { io } from "socket.io-client";
-import { getBackendUrl, isBackendLocalhost, isElectronApp } from "../config/appConfig";
+import { getBackendUrl } from "../config/appConfig";
 
 let socket = null;
 let socketStatus = "offline";
@@ -22,9 +22,12 @@ export function subscribeSocketStatus(listener) {
 export function getLiveSocket() {
   if (sessionClosed) return null;
   if (socket) return socket;
-  const token = localStorage.getItem("jwttoken") || localStorage.getItem("token") || "";
+  const cookieMatch = typeof document !== "undefined"
+    ? document.cookie.match(/(?:^|;\s*)(?:jwttoken|_auth)=([^;]+)/)
+    : null;
+  const cookieToken = cookieMatch ? decodeURIComponent(cookieMatch[1]) : "";
+  const token = localStorage.getItem("jwttoken") || localStorage.getItem("token") || cookieToken || "";
   const cleanToken = token.startsWith("Bearer ") ? token.slice(7) : token;
-  const useToken = isBackendLocalhost() || isElectronApp();
   const url = getBackendUrl();
   console.log("[live] socket connecting", url);
   publish("connecting", "Connecting");
@@ -36,7 +39,8 @@ export function getLiveSocket() {
     reconnection: true,
     reconnectionAttempts: Infinity,
     timeout: 20000,
-    auth: useToken && cleanToken ? { token: `Bearer ${cleanToken}` } : {},
+    auth: cleanToken ? { token: `Bearer ${cleanToken}` } : {},
+    query: cleanToken ? { token: cleanToken } : {},
   });
   const forwardChat = (data) => {
     window.dispatchEvent(new CustomEvent("crm-chat-stream", { detail: data }));

@@ -103,9 +103,10 @@ const { attachVoice } = require("./utils/voiceSignal");
 
 io.on("connection", (socket) => {
   try {
-    const headerToken = String(socket.handshake?.auth?.token || "").replace(/^Bearer\s+/i, "");
+    const rawHeader = socket.handshake?.auth?.token || socket.handshake?.query?.token || socket.handshake?.headers?.authorization || "";
+    const headerToken = String(rawHeader).replace(/^Bearer\s+/i, "");
     const cookie = String(socket.handshake?.headers?.cookie || "");
-    const cookieMatch = cookie.match(/(?:^|;\s*)jwttoken=([^;]+)/);
+    const cookieMatch = cookie.match(/(?:^|;\s*)(?:jwttoken|_auth)=([^;]+)/);
     const token = headerToken || (cookieMatch ? decodeURIComponent(cookieMatch[1]) : "");
     if (token && process.env.SECRET_JWT) {
       const decoded = jwt.verify(token, process.env.SECRET_JWT);

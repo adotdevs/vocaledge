@@ -13,7 +13,7 @@ const permissionBag = (user) => {
 const hasCrmPermission = (user, key) => {
   if (!user) return false;
   if (user.role === "superadmin") return true;
-  if (user.role !== "admin" && user.role !== "subadmin") return false;
+  if (user.role !== "admin" && user.role !== "subadmin" && user.role !== "manager") return false;
 
   const value = permissionBag(user)[key];
   if (isOn(value)) return true;

@@ -69,8 +69,10 @@ const socket = () => getLiveSocket();
 const send = (payload) => {
   const live = socket();
   if (!live) return;
-  if (live.connected) live.emit("voice:signal", payload);
-  else live.once("connect", () => live.emit("voice:signal", payload));
+  const data = { ...payload };
+  if (myId && !data.from) data.from = myId;
+  if (live.connected) live.emit("voice:signal", data);
+  else live.once("connect", () => live.emit("voice:signal", data));
 };
 
 let ringToken = 0;
@@ -640,7 +642,7 @@ export async function toggleCamera() {
 export const startVoiceCall = async ({ userId, name, conversationId, video }) => {
   unlockCallAudio();
   if (window.__crmCanVoiceCall === false) return;
-  if (!userId || userId === myId) return;
+  if (!userId || (myId && userId === myId)) return;
   if (["outgoing", "active", "connecting", "incoming"].includes(state.phase) || (state.phase === "mic" && state.callId)) {
     publish({ minimized: false });
     return;
@@ -692,6 +694,7 @@ export const startVoiceCall = async ({ userId, name, conversationId, video }) =>
     type: "invite",
     callId,
     to: userId,
+    from: myId,
     fromName: window.__crmVoiceName || "Agent",
     toName: name || "Agent",
     conversationId: conversationId || "",
@@ -938,6 +941,9 @@ const onSignal = async (message) => {
 export const bindVoiceIdentity = (userId, name) => {
   myId = String(userId || "");
   window.__crmVoiceName = name || "Agent";
+  if (myId) {
+    send({ type: "bind", userId: myId, name: window.__crmVoiceName });
+  }
 };
 
 let listening = false;
@@ -950,11 +956,13 @@ const attachSignal = () => {
   live.on("voice:signal", onSignal);
 };
 export const listenForVoice = () => {
+  attachSignal();
+  if (myId) send({ type: "bind", userId: myId, name: window.__crmVoiceName });
   if (listening || typeof window === "undefined") return;
   listening = true;
-  attachSignal();
   window.addEventListener("crm-live-socket-ready", () => {
     attachSignal();
+    if (myId) send({ type: "bind", userId: myId, name: window.__crmVoiceName });
     send({ type: "sync" });
   });
   send({ type: "sync" });

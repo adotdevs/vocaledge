@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Sidebar from "./Sidebar.js";
 import CrmAppBarActions from './components/CrmAppBarActions';
 import PasswordField from "./components/PasswordField";
+import AvatarEditorModal from "./components/AvatarEditorModal";
 import {
   allUsersApi,
   bypassSingleUserApi,
@@ -14,7 +15,9 @@ import {
   UpdateAdminSipConfigApi,
   restartServerApi,
   getRestrictionsApi,
-  UpdateRestrictionsApi
+  UpdateRestrictionsApi,
+  uploadUserAvatarApi,
+  removeUserAvatarApi
 } from "../../../Api/Service";
 import { updateSignleUsersApi } from "../../../Api/Service";
 import { Link, useNavigate } from "react-router-dom";
@@ -51,7 +54,8 @@ import {
   Security as SecurityIcon,
   People as PeopleIcon,
   Settings as SettingsIcon,
-  RestartAlt as RestartIcon
+  RestartAlt as RestartIcon,
+  PhotoCamera as PhotoCameraIcon
 } from '@mui/icons-material';
 import {
   Dialog,
@@ -86,6 +90,9 @@ const AdminManagementCRM = () => {
   // Add Admin dialog state
   const [addOpen, setAddOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [createAvatarModalOpen, setCreateAvatarModalOpen] = useState(false);
+  const [newAdminAvatar, setNewAdminAvatar] = useState(null);
+  const [editAvatarModalOpen, setEditAvatarModalOpen] = useState(false);
   const [newAdmin, setNewAdmin] = useState({
     firstName: "",
     lastName: "",
@@ -116,7 +123,9 @@ const AdminManagementCRM = () => {
     country: "",
     postalCode: "",
     currency: "USD",
-    AiTradingPercentage: 1.25
+    AiTradingPercentage: 1.25,
+    avatar: null,
+    profilePic: ""
   });
   
   // Vapi Config dialog state
@@ -594,6 +603,7 @@ const AdminManagementCRM = () => {
       <CardHeader
         avatar={
           <Avatar
+            src={user.avatar?.url || user.avatar || ""}
             sx={{
               width: 60,
               height: 60,
@@ -602,7 +612,7 @@ const AdminManagementCRM = () => {
               bgcolor: isUnverified ? 'warning.dark' : 'primary.dark'
             }}
           >
-            <AdminIcon />
+            {user.avatar?.url || user.avatar ? null : `${user.firstName?.[0] || ""}${user.lastName?.[0] || ""}`.toUpperCase() || <AdminIcon />}
           </Avatar>
         }
         title={
@@ -659,7 +669,9 @@ const AdminManagementCRM = () => {
                   country: user.country || "",
                   postalCode: user.postalCode || "",
                   currency: user.currency || "USD",
-                  AiTradingPercentage: typeof user.AiTradingPercentage === 'number' ? user.AiTradingPercentage : 1.25
+                  AiTradingPercentage: typeof user.AiTradingPercentage === 'number' ? user.AiTradingPercentage : 1.25,
+                  avatar: user.avatar || user.profilePic || null,
+                  profilePic: user.profilePic || user.avatar?.url || ""
                 });
                 setManageOpen(true);
               }}
@@ -862,6 +874,7 @@ const AdminManagementCRM = () => {
       <CardHeader
         avatar={
           <Avatar
+            src={user.avatar?.url || user.avatar || ""}
             sx={{
               width: 60,
               height: 60,
@@ -870,7 +883,7 @@ const AdminManagementCRM = () => {
               bgcolor: isUnverified ? 'warning.dark' : 'secondary.dark'
             }}
           >
-            <PeopleIcon />
+            {user.avatar?.url || user.avatar ? null : `${user.firstName?.[0] || ""}${user.lastName?.[0] || ""}`.toUpperCase() || <PeopleIcon />}
           </Avatar>
         }
         title={
@@ -927,7 +940,9 @@ const AdminManagementCRM = () => {
                   country: user.country || "",
                   postalCode: user.postalCode || "",
                   currency: user.currency || "USD",
-                  AiTradingPercentage: typeof user.AiTradingPercentage === 'number' ? user.AiTradingPercentage : 1.25
+                  AiTradingPercentage: typeof user.AiTradingPercentage === 'number' ? user.AiTradingPercentage : 1.25,
+                  avatar: user.avatar || user.profilePic || null,
+                  profilePic: user.profilePic || user.avatar?.url || ""
                 });
                 setManageOpen(true);
               }}
@@ -1295,6 +1310,59 @@ const AdminManagementCRM = () => {
               <DialogTitle>Add New Admin</DialogTitle>
               <DialogContent dividers>
                 <Grid container spacing={2}>
+                  {/* Profile Picture Upload / Select for New Admin */}
+                  <Grid item xs={12}>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 2,
+                        p: 1.5,
+                        borderRadius: 2,
+                        bgcolor: "action.hover",
+                        border: "1px dashed",
+                        borderColor: "divider",
+                      }}
+                    >
+                      <Avatar
+                        src={newAdminAvatar?.previewUrl || ""}
+                        sx={{ width: 56, height: 56, bgcolor: "primary.main", fontWeight: 700 }}
+                      >
+                        {`${newAdmin.firstName?.[0] || ""}${newAdmin.lastName?.[0] || ""}`.toUpperCase() || <AdminIcon />}
+                      </Avatar>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="subtitle2" fontWeight={600}>
+                          Profile Picture
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                          Crop custom photo or select a default avatar preset
+                        </Typography>
+                        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<PhotoCameraIcon />}
+                            onClick={() => setCreateAvatarModalOpen(true)}
+                            sx={{ textTransform: "none", fontSize: "0.75rem", borderRadius: 1.5 }}
+                          >
+                            {newAdminAvatar?.previewUrl ? "Change Photo" : "Upload / Choose Avatar"}
+                          </Button>
+                          {newAdminAvatar?.previewUrl && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              startIcon={<DeleteIcon />}
+                              onClick={() => setNewAdminAvatar(null)}
+                              sx={{ textTransform: "none", fontSize: "0.75rem", borderRadius: 1.5 }}
+                            >
+                              Remove
+                            </Button>
+                          )}
+                        </Box>
+                      </Box>
+                    </Box>
+                  </Grid>
                   <Grid item xs={12} sm={6}>
                     <TextField
                       size="small"
@@ -1415,15 +1483,30 @@ const AdminManagementCRM = () => {
                         return;
                       }
                       setAdding(true);
-                      const body = { ...newAdmin, role: 'admin' };
+                      const body = {
+                        ...newAdmin,
+                        role: 'admin',
+                        avatarUrl: newAdminAvatar?.avatarUrl || undefined,
+                      };
                       const res = await registerSubAdminApi(body);
                       if (res.success) {
+                        const newUserId = res.userId || res.user?._id;
+                        if (newAdminAvatar?.file && newUserId) {
+                          try {
+                            const formData = new FormData();
+                            formData.append("file", newAdminAvatar.file);
+                            await uploadUserAvatarApi(newUserId, formData);
+                          } catch (avErr) {
+                            console.error("Avatar upload after creating admin failed:", avErr);
+                          }
+                        }
                         toast.info(res.msg || 'Admin created');
                         setAddOpen(false);
                         setNewAdmin({
                           firstName: "", lastName: "", email: "", password: "",
                           phone: "", note: "", address: "", city: "", country: "", postalCode: ""
                         });
+                        setNewAdminAvatar(null);
                         getAllUsers();
                       } else {
                         toast.error(res.msg || 'Failed to create admin');
@@ -1650,6 +1733,84 @@ const AdminManagementCRM = () => {
               <DialogTitle>Edit Admin</DialogTitle>
               <DialogContent dividers>
                 <Grid container spacing={2}>
+                  {/* Avatar Upload in Edit Dialog */}
+                  <Grid item xs={12}>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 2,
+                        p: 1.5,
+                        borderRadius: 2,
+                        bgcolor: "background.default",
+                        border: "1px dashed",
+                        borderColor: "divider",
+                      }}
+                    >
+                      <Avatar
+                        src={
+                          editAdmin.avatar?.url ||
+                          (typeof editAdmin.avatar === "string" ? editAdmin.avatar : "") ||
+                          editAdmin.profilePic ||
+                          ""
+                        }
+                        sx={{ width: 56, height: 56, bgcolor: "primary.main", fontWeight: 700 }}
+                      >
+                        {`${editAdmin.firstName?.[0] || ""}${editAdmin.lastName?.[0] || ""}`.toUpperCase() || <AdminIcon />}
+                      </Avatar>
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="subtitle2" fontWeight={600}>
+                          Profile Picture
+                        </Typography>
+                        <Box sx={{ display: "flex", gap: 1, mt: 0.5, flexWrap: "wrap" }}>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<PhotoCameraIcon />}
+                            onClick={() => setEditAvatarModalOpen(true)}
+                            sx={{ textTransform: "none", fontSize: "0.75rem", borderRadius: 1.5 }}
+                          >
+                            {editAdmin.avatar?.url || (typeof editAdmin.avatar === "string" && editAdmin.avatar.trim()) || editAdmin.profilePic
+                              ? "Change Photo"
+                              : "Upload Photo"}
+                          </Button>
+                          {(editAdmin.avatar?.url || (typeof editAdmin.avatar === "string" && editAdmin.avatar.trim()) || editAdmin.profilePic) && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              startIcon={<DeleteIcon />}
+                              onClick={async () => {
+                                if (!window.confirm("Remove this user's profile picture?")) return;
+                                try {
+                                  const res = await removeUserAvatarApi(editAdmin._id);
+                                  if (res.success) {
+                                    toast.success("Profile picture removed");
+                                    const empty = { url: "", public_id: "" };
+                                    setEditAdmin((prev) => ({ ...prev, avatar: empty, profilePic: "" }));
+                                    setUsers((prev) => prev.map((u) => u._id === editAdmin._id ? { ...u, avatar: empty, profilePic: "" } : u));
+                                    setSubAdmins((prev) => prev.map((u) => u._id === editAdmin._id ? { ...u, avatar: empty, profilePic: "" } : u));
+                                    window.dispatchEvent(
+                                      new CustomEvent("crm-user-profile-updated", {
+                                        detail: { _id: editAdmin._id, avatar: empty },
+                                      })
+                                    );
+                                  } else {
+                                    toast.error(res.msg || "Failed to remove");
+                                  }
+                                } catch (err) {
+                                  toast.error(err?.message || "Failed to remove");
+                                }
+                              }}
+                              sx={{ textTransform: "none", fontSize: "0.75rem", borderRadius: 1.5 }}
+                            >
+                              Remove
+                            </Button>
+                          )}
+                        </Box>
+                      </Box>
+                    </Box>
+                  </Grid>
                   <Grid item xs={12} sm={6}>
                     <TextField
                       size="small"
@@ -1810,6 +1971,74 @@ const AdminManagementCRM = () => {
         onClose={() => setPermUserId(null)}
         onToggle={handlePermissionToggle}
         savingKey={permLoad && permUser && permLoad.userId === permUser._id ? permLoad.key : null}
+      />
+
+      {/* Avatar Editor Modal for Creating Admin */}
+      <AvatarEditorModal
+        open={createAvatarModalOpen}
+        onClose={() => setCreateAvatarModalOpen(false)}
+        initialAvatar={newAdminAvatar?.previewUrl || ""}
+        userName={`${newAdmin.firstName || ""} ${newAdmin.lastName || ""}`}
+        title="Choose Admin Profile Picture"
+        onSave={({ file, avatarUrl, previewUrl }) => {
+          setNewAdminAvatar({ file, avatarUrl, previewUrl });
+        }}
+      />
+
+      {/* Avatar Editor Modal for Editing Admin */}
+      <AvatarEditorModal
+        open={editAvatarModalOpen}
+        onClose={() => setEditAvatarModalOpen(false)}
+        initialAvatar={
+          editAdmin.avatar?.url ||
+          (typeof editAdmin.avatar === "string" ? editAdmin.avatar : "") ||
+          editAdmin.profilePic ||
+          ""
+        }
+        userName={`${editAdmin.firstName || ""} ${editAdmin.lastName || ""}`}
+        title="Adjust Admin Profile Picture"
+        onSave={async ({ file, avatarUrl, previewUrl }) => {
+          const prevAvatar = editAdmin.avatar;
+          const tempUrl = previewUrl || avatarUrl;
+          if (tempUrl) {
+            const optimistic = { url: tempUrl, public_id: "" };
+            setEditAdmin((prev) => ({ ...prev, avatar: optimistic }));
+            setUsers((prev) => prev.map((u) => (u._id === editAdmin._id ? { ...u, avatar: optimistic } : u)));
+            setSubAdmins((prev) => prev.map((u) => (u._id === editAdmin._id ? { ...u, avatar: optimistic } : u)));
+          }
+          try {
+            let res;
+            if (file) {
+              const formData = new FormData();
+              formData.append("file", file);
+              res = await uploadUserAvatarApi(editAdmin._id, formData);
+            } else if (avatarUrl) {
+              res = await uploadUserAvatarApi(editAdmin._id, { avatarUrl });
+            }
+            if (res?.success) {
+              toast.success("Profile picture updated");
+              const updatedAvatar = res.avatar || { url: res.user?.avatar?.url, public_id: res.user?.avatar?.public_id };
+              setEditAdmin((prev) => ({ ...prev, avatar: updatedAvatar }));
+              setUsers((prev) => prev.map((u) => (u._id === editAdmin._id ? { ...u, avatar: updatedAvatar } : u)));
+              setSubAdmins((prev) => prev.map((u) => (u._id === editAdmin._id ? { ...u, avatar: updatedAvatar } : u)));
+              window.dispatchEvent(
+                new CustomEvent("crm-user-profile-updated", {
+                  detail: { _id: editAdmin._id, avatar: updatedAvatar },
+                })
+              );
+            } else {
+              setEditAdmin((prev) => ({ ...prev, avatar: prevAvatar }));
+              setUsers((prev) => prev.map((u) => (u._id === editAdmin._id ? { ...u, avatar: prevAvatar } : u)));
+              setSubAdmins((prev) => prev.map((u) => (u._id === editAdmin._id ? { ...u, avatar: prevAvatar } : u)));
+              toast.error(res?.msg || "Failed to update profile picture");
+            }
+          } catch (err) {
+            setEditAdmin((prev) => ({ ...prev, avatar: prevAvatar }));
+            setUsers((prev) => prev.map((u) => (u._id === editAdmin._id ? { ...u, avatar: prevAvatar } : u)));
+            setSubAdmins((prev) => prev.map((u) => (u._id === editAdmin._id ? { ...u, avatar: prevAvatar } : u)));
+            toast.error(err?.message || "Failed to upload avatar");
+          }
+        }}
       />
     </Box>
   );

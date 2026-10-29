@@ -1,11 +1,37 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AttachFile, DeleteOutline, Done, DoneAll, EmojiEmotions, History, InfoOutlined, MoreVert, Phone, Send, Videocam } from "@mui/icons-material";
+import {
+  ArrowBack,
+  AttachFile,
+  Call,
+  Close,
+  ContentCopy,
+  DeleteForever,
+  DeleteOutline,
+  DeleteSweep,
+  Done,
+  DoneAll,
+  Edit,
+  EmojiEmotions,
+  ForumOutlined,
+  History,
+  InfoOutlined,
+  MailOutline,
+  MoreVert,
+  NotificationsOff,
+  Phone,
+  PushPin,
+  RestoreFromTrash,
+  Search,
+  Send,
+  Videocam,
+} from "@mui/icons-material";
 import { useAuthUser } from "react-auth-kit";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-toastify";
 import Sidebar from "./Sidebar";
 import useLiveCrmUser from "./useLiveCrmUser";
 import { subscribeChatEvents } from "./chatEvents";
+import { bindVoiceIdentity, listenForVoice, startVoiceCall } from "./voiceCall";
 import LiveStatusDot from "./components/LiveStatusDot";
 import "./Chat.css";
 import {
@@ -37,8 +63,139 @@ const chatPath = (tab, conversationId) => {
   const safeTab = tab === "monitor" || CHAT_TABS.includes(tab) ? tab : "chats";
   return conversationId ? `/admin/crm/chat/${safeTab}/${conversationId}` : `/admin/crm/chat/${safeTab}`;
 };
-const nameOf = (user) => `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "Agent";
+const nameOf = (user) => {
+  const full = `${user?.firstName || ""} ${user?.lastName || ""}`.trim();
+  return full || user?.name || "Agent";
+};
 const initials = (user) => nameOf(user).slice(0, 1).toUpperCase();
+
+const AVATAR_GRADIENTS = [
+  "linear-gradient(135deg, #6366f1 0%, #4338ca 100%)",
+  "linear-gradient(135deg, #0ea5e9 0%, #0369a1 100%)",
+  "linear-gradient(135deg, #10b981 0%, #047857 100%)",
+  "linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)",
+  "linear-gradient(135deg, #f43f5e 0%, #be123c 100%)",
+  "linear-gradient(135deg, #f59e0b 0%, #b45309 100%)",
+  "linear-gradient(135deg, #06b6d4 0%, #0e7490 100%)",
+  "linear-gradient(135deg, #ec4899 0%, #be185d 100%)",
+];
+
+const getAvatarStyle = (user) => {
+  const key = String(user?._id || user?.id || nameOf(user) || "crm");
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash << 5) - hash + key.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % AVATAR_GRADIENTS.length;
+  return { background: AVATAR_GRADIENTS[idx] };
+};
+
+const ChatAvatar = ({ person, style, className = "", showOnline = true }) => {
+  const [erroredSrc, setErroredSrc] = useState(null);
+  const rawUrl =
+    person?.avatar?.url ||
+    (typeof person?.avatar === "string" ? person.avatar : "") ||
+    person?.profilePic ||
+    "";
+  const avatarUrl = rawUrl && erroredSrc !== rawUrl ? rawUrl : "";
+  const bgStyle = avatarUrl ? { background: "transparent" } : getAvatarStyle(person);
+  return (
+    <div className={`crm-chat-avatar ${className}`.trim()} style={style}>
+      <div className="crm-chat-avatar-inner" style={bgStyle}>
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={nameOf(person)}
+            className="crm-chat-avatar-img"
+            onError={() => setErroredSrc(rawUrl)}
+          />
+        ) : (
+          initials(person)
+        )}
+      </div>
+      {showOnline && person?.online && <i className="dot pulse" />}
+    </div>
+  );
+};
+
+const EMAIL_REGEX = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/;
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+const parseLeadLine = (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  const emailMatch = trimmed.match(EMAIL_REGEX);
+  if (!emailMatch) return null;
+
+  const email = emailMatch[0];
+  const withoutEmail = trimmed.replace(email, "").trim();
+  const phoneMatch = withoutEmail.match(/(?:\+?\d[\d\s\-().]{6,16}\d)/);
+  const phone = phoneMatch ? phoneMatch[0].trim() : "";
+  const remainder = withoutEmail.replace(phone, "").trim().replace(/\s+/g, " ");
+
+  return {
+    raw: trimmed,
+    email,
+    phone,
+    nameOrDetails: remainder,
+  };
+};
+
+const LeadLine = ({ lead }) => (
+  <div className="crm-lead-line">
+    {lead.nameOrDetails && <span className="crm-lead-name">{lead.nameOrDetails}</span>}
+    <div className="crm-lead-meta">
+      <a href={`mailto:${lead.email}`} className="crm-lead-link email" onClick={(e) => e.stopPropagation()}>
+        <MailOutline style={{ fontSize: 13 }} />
+        <span>{lead.email}</span>
+      </a>
+      {lead.phone && (
+        <a href={`tel:${lead.phone}`} className="crm-lead-link phone" onClick={(e) => e.stopPropagation()}>
+          <Call style={{ fontSize: 13 }} />
+          <span>{lead.phone}</span>
+        </a>
+      )}
+    </div>
+  </div>
+);
+
+const renderFormattedText = (text) => {
+  const parts = text.split(URL_REGEX);
+  return parts.map((part, i) => {
+    if (part.match(URL_REGEX)) {
+      return (
+        <a key={i} href={part} target="_blank" rel="noopener noreferrer">
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+};
+
+const MessageBody = ({ body }) => {
+  if (!body) return null;
+  const lines = body.split("\n");
+  const hasLeads = lines.some((l) => parseLeadLine(l));
+
+  if (hasLeads) {
+    return (
+      <div className="crm-lead-text-list">
+        {lines.map((line, idx) => {
+          const lead = parseLeadLine(line);
+          if (!line.trim()) return null;
+          if (lead) {
+            return <LeadLine key={idx} lead={lead} />;
+          }
+          return <div key={idx} className="crm-lead-text-plain">{renderFormattedText(line)}</div>;
+        })}
+      </div>
+    );
+  }
+
+  return <p>{renderFormattedText(body)}</p>;
+};
 
 const systemTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -196,7 +353,7 @@ const FileChip = ({ file, sending, uploadProgress, onRemove }) => {
         <strong>{file.name}</strong>
         <em>{Math.max(1, Math.round(file.size / 1024))} KB{sending ? ` · ${uploadProgress}%` : ""}</em>
       </span>
-      <button type="button" aria-label="Remove file" onClick={onRemove}>×</button>
+      <button type="button" aria-label="Remove file" onClick={onRemove}><Close style={{ fontSize: 14 }} /></button>
     </div>
   );
 };
@@ -209,7 +366,8 @@ const ChatPage = () => {
   const signedIn = authUser()?.user || null;
   const { can, role, ready, user } = useLiveCrmUser();
   const myId = personId(signedIn?._id || user?._id);
-  const allowed = role === "superadmin" || can("canAccessChat");
+  const allowed = role === "superadmin" || role === "manager" || can("canAccessChat");
+
   const [collapsed, setCollapsed] = useState(false);
   const [mobile, setMobile] = useState(false);
   const [loadingList, setLoadingList] = useState(true);
@@ -218,6 +376,29 @@ const ChatPage = () => {
   const [monitored, setMonitored] = useState([]);
   const [agents, setAgents] = useState([]);
   const [active, setActive] = useState(null);
+
+  useEffect(() => {
+    const currentMyId = personId(signedIn?._id || signedIn?.id || user?._id || user?.id);
+    const myName = `${signedIn?.firstName || user?.firstName || ""} ${signedIn?.lastName || user?.lastName || ""}`.trim() || "Agent";
+    if (currentMyId) bindVoiceIdentity(currentMyId, myName);
+    listenForVoice();
+  }, [signedIn?._id, signedIn?.id, signedIn?.firstName, signedIn?.lastName, user?._id, user?.id, user?.firstName, user?.lastName]);
+
+  const startCall = useCallback((video = false) => {
+    if (!active?.other?._id) return;
+    const currentMyId = personId(signedIn?._id || signedIn?.id || user?._id || user?.id);
+    const myName = `${signedIn?.firstName || user?.firstName || ""} ${signedIn?.lastName || user?.lastName || ""}`.trim() || "Agent";
+    if (currentMyId) bindVoiceIdentity(currentMyId, myName);
+    listenForVoice();
+    const detail = {
+      userId: String(active.other._id),
+      name: nameOf(active.other),
+      conversationId: String(active._id || ""),
+      video: Boolean(video),
+    };
+    startVoiceCall(detail);
+    window.dispatchEvent(new CustomEvent("crm-voice-start", { detail }));
+  }, [active, signedIn, user]);
   const [messages, setMessages] = useState([]);
   const [unavailable, setUnavailable] = useState(false);
   const [draft, setDraft] = useState("");
@@ -235,6 +416,8 @@ const ChatPage = () => {
   const [error, setError] = useState("");
   const [recycleOpen, setRecycleOpen] = useState(false);
   const [recycle, setRecycle] = useState([]);
+  const [recycleSearch, setRecycleSearch] = useState("");
+  const [recycleTab, setRecycleTab] = useState("all");
   const activeRef = useRef(null);
   const meRef = useRef(null);
   const bottomRef = useRef(null);
@@ -244,6 +427,22 @@ const ChatPage = () => {
   const requestRef = useRef(0);
   const typingOut = useRef({ on: false, timer: null, ping: 0, id: "" });
   const typingHide = useRef(null);
+
+  const adjustTextareaHeight = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const minHeight = 24;
+    const maxHeight = 140;
+    const scrollH = el.scrollHeight;
+    const nextHeight = Math.min(Math.max(scrollH, minHeight), maxHeight);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = scrollH > maxHeight ? "auto" : "hidden";
+  }, []);
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [draft, adjustTextareaHeight]);
 
   const loadLists = useCallback(async () => {
     setError("");
@@ -256,6 +455,17 @@ const ChatPage = () => {
     if (role === "superadmin") setMonitored(all?.conversations || []);
     setLoadingList(false);
   }, [role]);
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    const prevHeight = document.body.style.height;
+    document.body.style.overflow = "hidden";
+    document.body.style.height = "100vh";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.height = prevHeight;
+    };
+  }, []);
 
   const openThread = useCallback(async (conversation, person, destinationTab) => {
     const requestId = requestRef.current + 1;
@@ -439,11 +649,16 @@ const ChatPage = () => {
     };
     document.addEventListener("visibilitychange", markSeen);
     window.addEventListener("focus", markSeen);
+    const onProfileUpdated = () => {
+      loadLists();
+    };
+    window.addEventListener("crm-user-profile-updated", onProfileUpdated);
     return () => {
       document.removeEventListener("visibilitychange", markSeen);
       window.removeEventListener("focus", markSeen);
+      window.removeEventListener("crm-user-profile-updated", onProfileUpdated);
     };
-  }, []);
+  }, [loadLists]);
   useEffect(() => {
     if (!menuId && !emojiOpen) return undefined;
     const close = (event) => {
@@ -478,6 +693,20 @@ const ChatPage = () => {
     add(user);
     return map;
   }, [agents, conversations, active, signedIn, user]);
+
+  const filteredRecycle = useMemo(() => {
+    const query = recycleSearch.trim().toLowerCase();
+    return recycle.filter((item) => {
+      if (recycleTab === "conversations" && item.type !== "conversation") return false;
+      if (recycleTab === "messages" && item.type === "conversation") return false;
+      if (!query) return true;
+      if (item.type === "conversation") {
+        return (item.participants || []).some((p) => String(p).toLowerCase().includes(query))
+          || (item.thread || []).some((t) => (t.body || "").toLowerCase().includes(query));
+      }
+      return (item.senderName || "").toLowerCase().includes(query) || (item.body || "").toLowerCase().includes(query);
+    });
+  }, [recycle, recycleSearch, recycleTab]);
 
   const rows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -543,6 +772,10 @@ const ChatPage = () => {
     stopTyping(active._id);
     setDraft("");
     setFiles([]);
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+      inputRef.current.style.overflowY = "hidden";
+    }
     await submitMessage({
       clientKey,
       body,
@@ -636,12 +869,12 @@ const ChatPage = () => {
 
   useEffect(() => {
     setTyping("");
+    const typingRefObj = typingOut.current;
     return () => {
-      const state = typingOut.current;
-      clearTimeout(state.timer);
-      if (state.on && state.id) typingChatApi(state.id, false);
-      state.on = false;
-      state.id = "";
+      clearTimeout(typingRefObj.timer);
+      if (typingRefObj.on && typingRefObj.id) typingChatApi(typingRefObj.id, false);
+      typingRefObj.on = false;
+      typingRefObj.id = "";
     };
   }, [active?._id]);
 
@@ -682,13 +915,52 @@ const ChatPage = () => {
         <aside className="crm-chat-list">
           <div className="crm-chat-list-head">
             <h1>{tab === "monitor" ? "All chats" : "Chats"}</h1>
-            <LiveStatusDot variant="inline" />
-            {role === "superadmin" && <button className="crm-chat-icon" title="Recycle bin" onClick={async () => { const response = await getChatRecycleApi(); setRecycle(response.messages || []); setRecycleOpen(true); }}>⌫</button>}
+            <div className="crm-chat-list-head-actions">
+              <LiveStatusDot variant="inline" />
+              {role === "superadmin" && (
+                <button
+                  type="button"
+                  className="crm-chat-icon"
+                  title="Recycle bin"
+                  aria-label="Recycle bin"
+                  onClick={async () => {
+                    const response = await getChatRecycleApi();
+                    setRecycle(response.messages || []);
+                    setRecycleOpen(true);
+                  }}
+                >
+                  <DeleteSweep style={{ fontSize: 20 }} />
+                </button>
+              )}
+            </div>
           </div>
-          <label className="crm-chat-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tab === "monitor" ? "Search agent chats" : "Search people or chats"} /></label>
+          <div className="crm-chat-search">
+            <span className="crm-chat-search-icon"><Search style={{ fontSize: 18 }} /></span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={tab === "monitor" ? "Search agent chats..." : "Search people or chats..."}
+            />
+            {search && (
+              <button
+                type="button"
+                className="crm-chat-search-clear"
+                aria-label="Clear search"
+                onClick={() => setSearch("")}
+              >
+                <Close style={{ fontSize: 14 }} />
+              </button>
+            )}
+          </div>
           <div className="crm-chat-tabs">
             {(role === "superadmin" ? ["chats", "people", "unread", "monitor"] : ["chats", "people", "unread"]).map((item) => (
-              <button key={item} className={tab === item ? "active" : ""} onClick={() => navigate((item === "monitor" || tab === "monitor") ? chatPath(item) : chatPath(item, active?._id))}>{item === "monitor" ? "All" : item[0].toUpperCase() + item.slice(1)}</button>
+              <button
+                key={item}
+                className={tab === item ? "active" : ""}
+                onClick={() => navigate((item === "monitor" || tab === "monitor") ? chatPath(item) : chatPath(item, active?._id))}
+              >
+                {item === "monitor" ? "All" : item[0].toUpperCase() + item.slice(1)}
+              </button>
             ))}
           </div>
           <div className="crm-chat-rows">
@@ -697,8 +969,14 @@ const ChatPage = () => {
             {ready && !loadingList && !error && rows.length === 0 && <div className="crm-chat-center"><p>{tab === "unread" ? "No unread chats" : tab === "monitor" ? "No agent chats yet" : "No people available"}</p></div>}
             {ready && !loadingList && tab === "people" && rows.map((agent) => (
               <button className="crm-chat-row" key={agent._id} onClick={() => openThread(conversations.find((item) => String(item.other?._id) === String(agent._id)), agent, "chats")}>
-                <div className="crm-chat-avatar">{initials(agent)}{agent.online && <i className="dot" />}</div>
-                <div className="crm-chat-row-copy"><strong>{nameOf(agent)}</strong><span>{agent.role} · {lastSeenText(agent)}</span></div>
+                <ChatAvatar person={agent} />
+                <div className="crm-chat-row-copy">
+                  <div className="crm-chat-row-top">
+                    <strong>{nameOf(agent)}</strong>
+                    {agent.role && <span className={`crm-chat-row-role ${String(agent.role).toLowerCase()}`}>{agent.role}</span>}
+                  </div>
+                  <span className="crm-chat-row-preview">{lastSeenText(agent)}</span>
+                </div>
               </button>
             ))}
             {ready && !loadingList && tab === "monitor" && rows.map((item) => {
@@ -706,26 +984,27 @@ const ChatPage = () => {
               const title = pair.map((person) => nameOf(person)).filter(Boolean).join(" · ") || "Chat";
               return (
                 <div className={`crm-chat-row ${String(active?._id) === String(item._id) ? "selected" : ""}`} key={item._id} role="button" tabIndex={0} onClick={() => openThread(item, null, "monitor")} onKeyDown={(event) => { if (event.key === "Enter") openThread(item, null, "monitor"); }}>
-                  <div className="crm-chat-avatar">{initials(pair[0])}{pair[0]?.online && <i className="dot" />}</div>
+                  <ChatAvatar person={pair[0]} />
                   <div className="crm-chat-row-copy">
                     <div className="crm-chat-row-top">
                       <strong>{title}</strong>
                       {item.lastMessageAt && <time className="crm-chat-row-time">{listTime(item.lastMessageAt)}</time>}
                     </div>
-                    <span>{item.lastActivityKind === "call" ? (item.lastMessagePreview || "Call") : (item.lastMessagePreview || "No messages yet")}</span>
+                    <span className="crm-chat-row-preview">{item.lastActivityKind === "call" ? (item.lastMessagePreview || "Call") : (item.lastMessagePreview || "No messages yet")}</span>
                   </div>
                 </div>
               );
             })}
             {ready && !loadingList && tab !== "people" && tab !== "monitor" && rows.map((item) => (
               <div className={`crm-chat-row ${active?._id === item._id ? "selected" : ""}`} key={item._id} role="button" tabIndex={0} onClick={() => openThread(item)} onKeyDown={(event) => { if (event.key === "Enter") openThread(item); }}>
-                <div className="crm-chat-avatar">{initials(item.other)}{item.other?.online && <i className="dot" />}</div>
+                <ChatAvatar person={item.other} />
                 <div className="crm-chat-row-copy">
                   <div className="crm-chat-row-top">
                     <strong>{nameOf(item.other)}</strong>
+                    {item.other?.role && <span className={`crm-chat-row-role ${String(item.other.role).toLowerCase()}`}>{item.other.role}</span>}
                     {item.lastMessageAt && <time className="crm-chat-row-time">{listTime(item.lastMessageAt)}</time>}
                   </div>
-                  <span className={typing && personId(item._id) === personId(active?._id) ? "crm-chat-row-typing" : ""}>
+                  <span className={`crm-chat-row-preview ${typing && personId(item._id) === personId(active?._id) ? "crm-chat-row-typing" : ""}`}>
                     {typing && personId(item._id) === personId(active?._id)
                       ? "typing…"
                       : item.lastActivityKind === "call"
@@ -736,7 +1015,7 @@ const ChatPage = () => {
                   </span>
                 </div>
                 {item.unread > 0 && <span className="crm-chat-badge">{item.unread}</span>}
-                <button type="button" className="crm-chat-row-delete" aria-label="Delete conversation" title="Delete conversation" onClick={(event) => { event.stopPropagation(); deleteConversation(item); }}><DeleteOutline /></button>
+                <button type="button" className="crm-chat-row-delete" aria-label="Delete conversation" title="Delete conversation" onClick={(event) => { event.stopPropagation(); deleteConversation(item); }}><DeleteOutline style={{ fontSize: 18 }} /></button>
               </div>
             ))}
           </div>
@@ -747,61 +1026,126 @@ const ChatPage = () => {
           )}
           {!active && ready && !loadingList && (
             <div className="crm-chat-empty">
+              <div style={{
+                width: 72,
+                height: 72,
+                borderRadius: "22px",
+                background: "linear-gradient(135deg, #eef2ff 0%, #ede9fe 100%)",
+                color: "#4f46e5",
+                display: "grid",
+                placeItems: "center",
+                margin: "0 auto 18px",
+                boxShadow: "0 8px 24px rgba(79, 70, 229, 0.12)"
+              }}>
+                <ForumOutlined style={{ fontSize: 36 }} />
+              </div>
               <h2>Your conversations, all in one place</h2>
-              <p>Select a teammate from the left to start a conversation.</p>
+              <p>Select a teammate from the left to start a conversation, make calls, or view past records.</p>
             </div>
           )}
           {active && (
             <>
               <header className="crm-chat-head">
-                <button className="crm-chat-icon" onClick={() => { openingIdRef.current = ""; activeRef.current = null; setActive(null); setMessages([]); setUnreadChip(null); navigate(chatPath(tab)); }}>←</button>
-                <div className="crm-chat-avatar">{initials(active.readOnly ? active.participants?.[0] : active.other)}{(active.readOnly ? active.participants?.[0] : active.other)?.online && <i className="dot" />}</div>
-                <div style={{ flex: 1 }}>
-                  <h2>{active.readOnly ? ((active.participants || []).map((person) => nameOf(person)).filter(Boolean).join(" · ") || "Chat") : nameOf(active.other)}</h2>
-                  <p className={typing && !active.readOnly ? "is-typing" : ""}>
-                    {active.readOnly ? "Read only" : typing ? (
+                <button
+                  type="button"
+                  className="crm-chat-icon"
+                  aria-label="Back to conversations"
+                  title="Back"
+                  onClick={() => {
+                    openingIdRef.current = "";
+                    activeRef.current = null;
+                    setActive(null);
+                    setMessages([]);
+                    setUnreadChip(null);
+                    navigate(chatPath(tab));
+                  }}
+                >
+                  <ArrowBack style={{ fontSize: 20 }} />
+                </button>
+                <ChatAvatar
+                  person={active.readOnly ? active.participants?.[0] : active.other}
+                />
+                <div className="crm-chat-head-user">
+                  <div className="crm-chat-head-name">
+                    <h2>
+                      {active.readOnly
+                        ? ((active.participants || []).map((person) => nameOf(person)).filter(Boolean).join(" · ") || "Chat")
+                        : nameOf(active.other)}
+                    </h2>
+                    {!active.readOnly && active.other?.role && (
+                      <span className={`crm-chat-role-chip ${String(active.other.role).toLowerCase()}`}>{active.other.role}</span>
+                    )}
+                  </div>
+                  <p className={typing && !active.readOnly ? "is-typing" : (active.other?.online && !active.readOnly ? "is-online" : "")}>
+                    {active.readOnly ? (
+                      "Read only"
+                    ) : typing ? (
                       <>
                         <span className="crm-chat-typing-dots" aria-hidden="true"><i /><i /><i /></span>
                         {typing} is typing…
                       </>
-                    ) : `${active.other?.role || "Agent"} · ${lastSeenText(active.other)}`}
+                    ) : (
+                      `${active.other?.role || "Agent"} · ${lastSeenText(active.other)}`
+                    )}
                   </p>
                 </div>
-                {!active.readOnly && active.other?._id && (
-                  <button
-                    type="button"
-                    className="crm-chat-icon"
-                    title="Call log"
-                    aria-label="Call log"
-                    onClick={() => setCallLogOpen(true)}
-                  >
-                    <History />
-                  </button>
-                )}
-                {!active.readOnly && active.other?._id && !unavailable && (
-                  <button
-                    type="button"
-                    className="crm-chat-icon"
-                    title="Voice call"
-                    aria-label="Voice call"
-                    onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || "") } }))}
-                  >
-                    <Phone />
-                  </button>
-                )}
-                {!active.readOnly && active.other?._id && !unavailable && (
-                  <button
-                    type="button"
-                    className="crm-chat-icon"
-                    title="Video call"
-                    aria-label="Video call"
-                    onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || ""), video: true } }))}
-                  >
-                    <Videocam />
-                  </button>
-                )}
-                {!active.readOnly && <button type="button" className="crm-chat-row-delete" aria-label="Delete conversation" title="Delete conversation" onClick={() => deleteConversation(active)}><DeleteOutline /></button>}
-                {!active.readOnly && <button className="crm-chat-icon" title="Contact info" onClick={() => { setContactOpen(true); setInfo(null); }}>ⓘ</button>}
+                <div className="crm-chat-head-actions">
+                  {!active.readOnly && active.other?._id && (
+                    <button
+                      type="button"
+                      className="crm-chat-icon"
+                      title="Call log"
+                      aria-label="Call log"
+                      onClick={() => setCallLogOpen(true)}
+                    >
+                      <History style={{ fontSize: 19 }} />
+                    </button>
+                  )}
+                  {!active.readOnly && active.other?._id && !unavailable && (
+                    <button
+                      type="button"
+                      className="crm-chat-icon call-btn"
+                      title="Voice call"
+                      aria-label="Voice call"
+                      onClick={() => startCall(false)}
+                    >
+                      <Phone style={{ fontSize: 18 }} />
+                    </button>
+                  )}
+                  {!active.readOnly && active.other?._id && !unavailable && (
+                    <button
+                      type="button"
+                      className="crm-chat-icon video-btn"
+                      title="Video call"
+                      aria-label="Video call"
+                      onClick={() => startCall(true)}
+                    >
+                      <Videocam style={{ fontSize: 20 }} />
+                    </button>
+                  )}
+                  {!active.readOnly && (
+                    <button
+                      type="button"
+                      className="crm-chat-icon delete-btn"
+                      aria-label="Delete conversation"
+                      title="Delete conversation"
+                      onClick={() => deleteConversation(active)}
+                    >
+                      <DeleteOutline style={{ fontSize: 19 }} />
+                    </button>
+                  )}
+                  {!active.readOnly && (
+                    <button
+                      type="button"
+                      className="crm-chat-icon"
+                      title="Contact info"
+                      aria-label="Contact info"
+                      onClick={() => { setContactOpen(true); setInfo(null); }}
+                    >
+                      <InfoOutlined style={{ fontSize: 19 }} />
+                    </button>
+                  )}
+                </div>
               </header>
               <div className="crm-chat-stream" ref={streamRef}>
                 {loadingThread && <ThreadSkeleton />}
@@ -858,23 +1202,55 @@ const ChatPage = () => {
                                     );
                                   })}
                                 </div>
-                                {message.mine && <button onClick={async () => {
-                                  const next = window.prompt("Edit message", message.body);
-                                  setMenuId(null);
-                                  if (!next || next === message.body) return;
-                                  const response = await editChatMessageApi(message._id, { body: next });
-                                  if (!response.success) toast.error(response.msg || "Could not edit");
-                                }}>Edit</button>}
-                                <button onClick={() => { navigator.clipboard?.writeText(message.body || ""); setMenuId(null); }}>Copy</button>
-                                <button onClick={() => hideChatMessageApi(message._id).then(() => openThread(active))}>Delete for me</button>
-                                {message.mine && <button type="button" onClick={async () => {
-                                  const response = await deleteChatMessageApi(message._id, {});
-                                  setMenuId(null);
-                                  if (!response.success) toast.error(response.msg || "Could not delete");
-                                }}>Delete for everyone</button>}
+                                {message.mine && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const next = window.prompt("Edit message", message.body);
+                                      setMenuId(null);
+                                      if (!next || next === message.body) return;
+                                      const response = await editChatMessageApi(message._id, { body: next });
+                                      if (!response.success) toast.error(response.msg || "Could not edit");
+                                    }}
+                                  >
+                                    <Edit style={{ fontSize: 16 }} />
+                                    <span>Edit</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(message.body || "");
+                                    setMenuId(null);
+                                  }}
+                                >
+                                  <ContentCopy style={{ fontSize: 16 }} />
+                                  <span>Copy</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => hideChatMessageApi(message._id).then(() => openThread(active))}
+                                >
+                                  <DeleteOutline style={{ fontSize: 16 }} />
+                                  <span>Delete for me</span>
+                                </button>
+                                {message.mine && (
+                                  <button
+                                    type="button"
+                                    className="danger"
+                                    onClick={async () => {
+                                      const response = await deleteChatMessageApi(message._id, {});
+                                      setMenuId(null);
+                                      if (!response.success) toast.error(response.msg || "Could not delete");
+                                    }}
+                                  >
+                                    <DeleteForever style={{ fontSize: 16 }} />
+                                    <span>Delete for everyone</span>
+                                  </button>
+                                )}
                               </div>
                         )}
-                        {message.deleted ? <p>This message was deleted</p> : <p>{message.body}</p>}
+                        {message.deleted ? <p>This message was deleted</p> : <MessageBody body={message.body} />}
                         {(message.attachments || []).map((file) => (
                           <div className="crm-chat-attach" key={file.publicId || file.url}>
                             {String(file.mimeType || "").startsWith("image/")
@@ -944,9 +1320,25 @@ const ChatPage = () => {
                     </div>
                   )}
                   <form className="crm-chat-compose" onSubmit={(event) => { event.preventDefault(); send(); }}>
-                    <button type="button" className="crm-chat-tool" aria-label="Emoji" onClick={() => setEmojiOpen((open) => !open)}><EmojiEmotions /></button>
+                    <button type="button" className={`crm-chat-tool ${emojiOpen ? "active" : ""}`} aria-label="Emoji" onClick={() => setEmojiOpen((open) => !open)}><EmojiEmotions /></button>
                     <label className="crm-chat-tool" aria-label="Attach file"><AttachFile /><input hidden type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files || []))} /></label>
-                    <textarea ref={inputRef} rows={1} placeholder="Write a message" value={draft} onChange={(event) => onType(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} />
+                    <textarea
+                      ref={inputRef}
+                      rows={1}
+                      placeholder="Write a message or paste leads..."
+                      value={draft}
+                      onInput={adjustTextareaHeight}
+                      onChange={(event) => {
+                        onType(event.target.value);
+                        adjustTextareaHeight();
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey) {
+                          event.preventDefault();
+                          send();
+                        }
+                      }}
+                    />
                     <button className="crm-chat-send" type="submit" aria-label="Send" disabled={sending || (!draft.trim() && files.length === 0)}><Send /></button>
                   </form>
                 </>
@@ -955,7 +1347,7 @@ const ChatPage = () => {
                 <aside className="crm-chat-drawer">
                   <header>
                     <strong>Call log</strong>
-                    <button type="button" className="crm-chat-icon" onClick={() => setCallLogOpen(false)}>×</button>
+                    <button type="button" className="crm-chat-icon" onClick={() => setCallLogOpen(false)}><Close style={{ fontSize: 18 }} /></button>
                   </header>
                   <section>
                     {callLogs.length === 0 && <p className="crm-chat-empty-note">No calls with {nameOf(active.other)} yet.</p>}
@@ -972,8 +1364,14 @@ const ChatPage = () => {
                           </div>
                           {!unavailable && (
                             <div className="crm-call-log-actions">
-                              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || "") } }))}>Call</button>
-                              <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("crm-voice-start", { detail: { userId: String(active.other._id), name: nameOf(active.other), conversationId: String(active._id || ""), video: true } }))}>Video</button>
+                              <button type="button" onClick={() => startCall(false)}>
+                                <Phone style={{ fontSize: 13 }} />
+                                <span>Call</span>
+                              </button>
+                              <button type="button" onClick={() => startCall(true)}>
+                                <Videocam style={{ fontSize: 14 }} />
+                                <span>Video</span>
+                              </button>
                             </div>
                           )}
                         </article>
@@ -984,7 +1382,7 @@ const ChatPage = () => {
               )}
               {info && (
                 <aside className="crm-chat-drawer">
-                  <header><strong>Message info</strong><button className="crm-chat-icon" onClick={() => setInfo(null)}>×</button></header>
+                  <header><strong>Message info</strong><button className="crm-chat-icon" onClick={() => setInfo(null)}><Close style={{ fontSize: 18 }} /></button></header>
                   <section>
                     <p>{info.body || "Attachment"}</p>
                     <p className="crm-chat-receipt"><WaTicks state="sent" /> Sent<br />{formatFull(info.sentAt || info.createdAt)}</p>
@@ -995,16 +1393,33 @@ const ChatPage = () => {
               )}
               {contactOpen && (
                 <aside className="crm-chat-drawer">
-                  <header><strong>Contact info</strong><button className="crm-chat-icon" onClick={() => setContactOpen(false)}>×</button></header>
+                  <header><strong>Contact info</strong><button className="crm-chat-icon" onClick={() => setContactOpen(false)}><Close style={{ fontSize: 18 }} /></button></header>
                   <section>
-                    <div className="crm-chat-avatar" style={{ width: 64, height: 64, fontSize: 24 }}>{initials(active.other)}</div>
+                    <ChatAvatar
+                      person={active.other}
+                      showOnline={false}
+                      style={{ width: 64, height: 64, fontSize: 24, borderRadius: "50%" }}
+                    />
                     <h2>{nameOf(active.other)}</h2>
-                    <p>{active.other?.role}</p>
+                    {active.other?.role && (
+                      <span className={`crm-chat-role-chip ${String(active.other.role).toLowerCase()}`} style={{ margin: "4px auto 8px" }}>
+                        {active.other.role}
+                      </span>
+                    )}
                     <p>{lastSeenText(active.other)}</p>
                     <div className="crm-chat-actions-col">
-                      <button type="button" onClick={() => flagChatConversationApi(active._id, "mutedBy")}>Mute notifications</button>
-                      <button type="button" onClick={() => flagChatConversationApi(active._id, "pinnedBy")}>Pin conversation</button>
-                      <button type="button" className="danger" onClick={() => deleteConversation(active)}>Delete conversation</button>
+                      <button type="button" onClick={() => flagChatConversationApi(active._id, "mutedBy")}>
+                        <NotificationsOff style={{ fontSize: 18 }} />
+                        <span>Mute notifications</span>
+                      </button>
+                      <button type="button" onClick={() => flagChatConversationApi(active._id, "pinnedBy")}>
+                        <PushPin style={{ fontSize: 18 }} />
+                        <span>Pin conversation</span>
+                      </button>
+                      <button type="button" className="danger" onClick={() => deleteConversation(active)}>
+                        <DeleteOutline style={{ fontSize: 18 }} />
+                        <span>Delete conversation</span>
+                      </button>
                     </div>
                   </section>
                 </aside>
@@ -1014,72 +1429,173 @@ const ChatPage = () => {
         </section>
       </div>
       {recycleOpen && (
-        <aside className="crm-chat-drawer crm-chat-recycle">
-          <header>
-            <strong>Recycle bin</strong>
-            <button className="crm-chat-icon" onClick={() => setRecycleOpen(false)}>×</button>
-          </header>
-          <section>
-            {recycle.length === 0 && <p className="crm-chat-empty-note">Nothing in the recycle bin.</p>}
-            {recycle.map((item) => (
-              <article className="crm-chat-card" key={item._id}>
-                {item.type === "conversation" ? (
-                  <>
-                    <div className="crm-chat-card-top">
-                      <strong>Deleted conversation</strong>
-                      <button type="button" className="crm-chat-clear" onClick={async () => {
-                        if (!window.confirm("Remove this conversation from the recycle bin?")) return;
-                        const response = await clearChatRecycleConversationApi(item.conversationId);
-                        if (!response?.success) {
-                          toast.error(response?.msg || "Could not clear conversation");
-                          return;
-                        }
-                        const next = await getChatRecycleApi();
-                        setRecycle(next.messages || []);
-                      }}>Clear</button>
-                    </div>
-                    {item.participants?.length > 0 && <p>{item.participants.join(" and ")}</p>}
-                    <p>Deleted {formatFull(item.deletedForEveryoneAt)}{item.deletedByName ? ` by ${item.deletedByName}` : ""}</p>
-                    <div className="crm-chat-recycle-thread">
-                      {(item.thread || []).length === 0 && <p>No messages saved.</p>}
-                      {(item.thread || []).map((line, index) => (
-                        <div className="crm-chat-recycle-line" key={`${item._id}-${index}`}>
-                          <strong>{line.senderName}</strong>
-                          <span>{line.body}</span>
-                          <time>{formatClock(line.createdAt)}</time>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="crm-chat-card-top">
-                      <strong>{item.senderName || "Unknown"}</strong>
-                      <time>{formatClock(item.createdAt)}</time>
-                    </div>
-                    <div className="quote">{item.body || "Attachment or empty message"}</div>
-                    <p>Deleted {formatFull(item.deletedForEveryoneAt)}{item.deletedByName ? ` by ${item.deletedByName}` : ""}</p>
-                    {item.participants?.length > 0 && <p>{item.participants.join(" and ")}</p>}
-                    {item.deleteReason && <p>{item.deleteReason}</p>}
-                    <div className="crm-chat-card-actions">
-                      <button type="button" className="crm-chat-restore" onClick={() => restoreChatMessageApi(item._id).then(async () => { const response = await getChatRecycleApi(); setRecycle(response.messages || []); })}>Restore</button>
-                      <button type="button" className="crm-chat-clear" onClick={async () => {
-                        if (!window.confirm("Delete this message from the recycle bin?")) return;
-                        const response = await deleteChatRecycleMessageApi(item._id);
-                        if (!response?.success) {
-                          toast.error(response?.msg || "Could not delete message");
-                          return;
-                        }
-                        const next = await getChatRecycleApi();
-                        setRecycle(next.messages || []);
-                      }}>Delete</button>
-                    </div>
-                  </>
+        <div className="crm-recycle-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setRecycleOpen(false); }}>
+          <div className="crm-recycle-modal" role="dialog" aria-modal="true">
+            <header className="crm-recycle-head">
+              <div className="crm-recycle-title-group">
+                <div className="crm-recycle-icon-box">
+                  <DeleteSweep style={{ fontSize: 24 }} />
+                </div>
+                <div>
+                  <div className="crm-recycle-headline">
+                    <h2>Chat Recycle Bin</h2>
+                    <span className="crm-recycle-pill">{recycle.length} item{recycle.length === 1 ? "" : "s"}</span>
+                  </div>
+                  <p>Restore or permanently delete messages and conversations</p>
+                </div>
+              </div>
+              <button type="button" className="crm-recycle-close" aria-label="Close recycle bin" onClick={() => setRecycleOpen(false)}>
+                <Close style={{ fontSize: 20 }} />
+              </button>
+            </header>
+
+            <div className="crm-recycle-toolbar">
+              <div className="crm-recycle-search">
+                <Search style={{ fontSize: 18 }} />
+                <input
+                  value={recycleSearch}
+                  onChange={(e) => setRecycleSearch(e.target.value)}
+                  placeholder="Search deleted messages or conversations..."
+                />
+                {recycleSearch && (
+                  <button type="button" className="crm-recycle-clear-btn" onClick={() => setRecycleSearch("")}><Close style={{ fontSize: 14 }} /></button>
                 )}
-              </article>
-            ))}
-          </section>
-        </aside>
+              </div>
+              <div className="crm-recycle-tabs">
+                <button
+                  type="button"
+                  className={`crm-recycle-tab ${recycleTab === "all" ? "active" : ""}`}
+                  onClick={() => setRecycleTab("all")}
+                >
+                  All ({recycle.length})
+                </button>
+                <button
+                  type="button"
+                  className={`crm-recycle-tab ${recycleTab === "conversations" ? "active" : ""}`}
+                  onClick={() => setRecycleTab("conversations")}
+                >
+                  Conversations ({recycle.filter((i) => i.type === "conversation").length})
+                </button>
+                <button
+                  type="button"
+                  className={`crm-recycle-tab ${recycleTab === "messages" ? "active" : ""}`}
+                  onClick={() => setRecycleTab("messages")}
+                >
+                  Messages ({recycle.filter((i) => i.type !== "conversation").length})
+                </button>
+              </div>
+            </div>
+
+            <div className="crm-recycle-body">
+              {filteredRecycle.length === 0 ? (
+                <div className="crm-recycle-empty">
+                  <div className="crm-recycle-empty-icon"><DeleteSweep style={{ fontSize: 48 }} /></div>
+                  <h3>Recycle bin is empty</h3>
+                  <p>{recycleSearch ? "No items matching your search query." : "No deleted conversations or messages stored here."}</p>
+                </div>
+              ) : (
+                <div className="crm-recycle-list">
+                  {filteredRecycle.map((item) => (
+                    <article className="crm-recycle-card" key={item._id}>
+                      <div className="crm-recycle-card-head">
+                        <div className="crm-recycle-card-badges">
+                          <span className={`crm-recycle-kind ${item.type === "conversation" ? "conv" : "msg"}`}>
+                            {item.type === "conversation" ? "Conversation" : "Message"}
+                          </span>
+                          <span className="crm-recycle-time">
+                            Deleted {formatClock(item.deletedForEveryoneAt || item.createdAt)}
+                            {item.deletedByName ? ` by ${item.deletedByName}` : ""}
+                          </span>
+                        </div>
+                        <div className="crm-recycle-card-actions">
+                          {item.type === "conversation" ? (
+                            <button
+                              type="button"
+                              className="crm-recycle-btn-danger"
+                              title="Permanently remove"
+                              onClick={async () => {
+                                if (!window.confirm("Remove this conversation from the recycle bin?")) return;
+                                const response = await clearChatRecycleConversationApi(item.conversationId);
+                                if (!response?.success) {
+                                  toast.error(response?.msg || "Could not clear conversation");
+                                  return;
+                                }
+                                const next = await getChatRecycleApi();
+                                setRecycle(next.messages || []);
+                              }}
+                            >
+                              <DeleteForever style={{ fontSize: 16 }} />
+                              <span>Clear</span>
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="crm-recycle-btn-restore"
+                                title="Restore message"
+                                onClick={() => restoreChatMessageApi(item._id).then(async () => {
+                                  toast.success("Message restored");
+                                  const response = await getChatRecycleApi();
+                                  setRecycle(response.messages || []);
+                                })}
+                              >
+                                <RestoreFromTrash style={{ fontSize: 16 }} />
+                                <span>Restore</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="crm-recycle-btn-danger"
+                                title="Delete permanently"
+                                onClick={async () => {
+                                  if (!window.confirm("Permanently delete this message?")) return;
+                                  const response = await deleteChatRecycleMessageApi(item._id);
+                                  if (!response?.success) {
+                                    toast.error(response?.msg || "Could not delete message");
+                                    return;
+                                  }
+                                  const next = await getChatRecycleApi();
+                                  setRecycle(next.messages || []);
+                                }}
+                              >
+                                <DeleteForever style={{ fontSize: 16 }} />
+                                <span>Delete</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {item.type === "conversation" ? (
+                        <div className="crm-recycle-conv-content">
+                          {item.participants?.length > 0 && (
+                            <div className="crm-recycle-participants">
+                              <strong>Participants:</strong> {item.participants.join(" & ")}
+                            </div>
+                          )}
+                          <div className="crm-recycle-thread-box">
+                            {(item.thread || []).length === 0 && <em>No preview messages saved.</em>}
+                            {(item.thread || []).slice(0, 4).map((line, index) => (
+                              <div className="crm-recycle-thread-line" key={`${item._id}-${index}`}>
+                                <span className="sender">{line.senderName}:</span>
+                                <span className="body">{line.body}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="crm-recycle-msg-content">
+                          <strong className="crm-recycle-sender">{item.senderName || "Unknown member"}</strong>
+                          <div className="crm-recycle-quote">{item.body || "Attachment or empty message"}</div>
+                          {item.deleteReason && <div className="crm-recycle-reason">Reason: {item.deleteReason}</div>}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

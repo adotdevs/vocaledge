@@ -85,6 +85,7 @@ function Login(props) {
 						verified: updateHeader.user.verified,
 						permissions: updateHeader.user.permissions || {},
 						adminPermissions: updateHeader.user.adminPermissions || {},
+						avatar: updateHeader.user.avatar || null,
 					},
 				};
 			}
@@ -104,6 +105,10 @@ function Login(props) {
 					sameSite: false,
 				})
 			) {
+				const avUrl = updateHeader.user?.avatar?.url || (typeof updateHeader.user?.avatar === "string" ? updateHeader.user?.avatar : "");
+				if (avUrl) {
+					localStorage.setItem('user_avatar', avUrl);
+				}
 				// Store token in localStorage for Electron OR localhost backend
 				// For production web  , cookies handle authentication
 				// CRITICAL: Store token BEFORE navigation to ensure it's available for subsequent API calls

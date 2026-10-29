@@ -44,7 +44,16 @@ import {
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useAuthUser, useSignOut } from "react-auth-kit";
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { logoutApi, getEmailQueueStatusApi, getCallQueueStatusApi, getCallStatisticsApi, getReminderBadgeCountApi, getChatConversationsApi, getAdminChatConversationsApi } from '../../../Api/Service';
+import {
+  logoutApi,
+  getEmailQueueStatusApi,
+  getCallQueueStatusApi,
+  getCallStatisticsApi,
+  getReminderBadgeCountApi,
+  getChatConversationsApi,
+  getAdminChatConversationsApi,
+  signleUsersApi,
+} from '../../../Api/Service';
 import { toast } from 'react-toastify';
 import { getLiveSocket } from '../../../utils/liveSocket';
 import { endLiveSession } from '../../../utils/endLiveSession';
@@ -105,8 +114,47 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const [leadStatuses, setLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
   const [internalMobileMenu, setInternalMobileMenu] = useState(false);
   const previousPathRef = useRef(location.pathname);
-  const { can, role } = useLiveCrmUser();
+  const { can, role, user: liveUser } = useLiveCrmUser();
   const canManageReminders = can("canManageReminders");
+
+  const [profileAvatar, setProfileAvatar] = useState(() => {
+    const cached = typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "";
+    return cached || user()?.user?.avatar?.url || (typeof user()?.user?.avatar === "string" ? user()?.user?.avatar : "") || "";
+  });
+
+  useEffect(() => {
+    const liveAv = liveUser?.avatar?.url || (typeof liveUser?.avatar === "string" ? liveUser?.avatar : "");
+    if (liveAv) {
+      setProfileAvatar(liveAv);
+      localStorage.setItem("user_avatar", liveAv);
+    }
+
+    const onAvatarUpdate = (e) => {
+      const next = e.detail?.avatar?.url || (typeof e.detail?.avatar === "string" ? e.detail?.avatar : "");
+      if (next !== undefined) {
+        setProfileAvatar(next || "");
+        if (next) localStorage.setItem("user_avatar", next);
+        else localStorage.removeItem("user_avatar");
+      }
+    };
+    window.addEventListener("crm-user-profile-updated", onAvatarUpdate);
+    return () => window.removeEventListener("crm-user-profile-updated", onAvatarUpdate);
+  }, [liveUser]);
+
+  // Fetch fresh profile on mount to guarantee avatar survives refresh
+  useEffect(() => {
+    const currentId = user()?.user?._id;
+    if (!currentId) return;
+    signleUsersApi(currentId).then((res) => {
+      if (res?.success && res.signleUser) {
+        const freshAv = res.signleUser.avatar?.url || (typeof res.signleUser.avatar === "string" ? res.signleUser.avatar : "");
+        if (freshAv) {
+          setProfileAvatar(freshAv);
+          localStorage.setItem("user_avatar", freshAv);
+        }
+      }
+    }).catch(() => {});
+  }, [user]);
 
   // Use internal state if setisMobileMenu not provided
   const mobileMenuState = isMobileMenu ?? internalMobileMenu;
@@ -852,24 +900,26 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
       </Box>
 
       {/* User Profile */}
-      {!isCollapsed && (
-        <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
-              {'A'}
-            </Avatar>
+      <Box sx={{ p: isCollapsed ? 1.5 : 2, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: isCollapsed ? 'center' : 'flex-start' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: isCollapsed ? 0 : 2, width: '100%' }}>
+          <Avatar
+            src={profileAvatar || liveUser?.avatar?.url || (typeof liveUser?.avatar === "string" ? liveUser?.avatar : "") || user()?.user?.avatar?.url || (typeof user()?.user?.avatar === "string" ? user()?.user?.avatar : "") || (typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "") || ""}
+            sx={{ width: 34, height: 34, bgcolor: 'primary.main', fontSize: '0.85rem', fontWeight: 700, mx: isCollapsed ? 'auto' : 0 }}
+          >
+            {`${user()?.user?.firstName?.[0] || ""}${user()?.user?.lastName?.[0] || ""}`.toUpperCase() || 'A'}
+          </Avatar>
+          {!isCollapsed && (
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }} noWrap>
                 {user()?.user?.firstName}{" "}{user()?.user?.lastName}
-
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary' }} noWrap>
                 {user()?.user?.email}
               </Typography>
             </Box>
-          </Box>
+          )}
         </Box>
-      )}
+      </Box>
     </Drawer>
   );
 };

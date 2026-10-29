@@ -66,7 +66,7 @@ const LoginPage = () => {
                             postalCode: updateHeader.user.postalCode,
                             role: updateHeader.user.role,
                             status: updateHeader.user.status,
-
+                            avatar: updateHeader.user.avatar || null,
                             verified: updateHeader.user.verified,
                         },
                     };
@@ -87,6 +87,10 @@ const LoginPage = () => {
                         sameSite: false,
                     })
                 ) {
+                    const avUrl = updateHeader.user?.avatar?.url || (typeof updateHeader.user?.avatar === "string" ? updateHeader.user?.avatar : "");
+                    if (avUrl) {
+                        localStorage.setItem('user_avatar', avUrl);
+                    }
                     // Store token in localStorage for Electron OR localhost backend
                     // For production web  , cookies handle authentication
                     // CRITICAL: Store token BEFORE navigation to ensure it's available for subsequent API calls

@@ -46,6 +46,9 @@ const LiveStatusDot = ({ variant = "fixed" }) => {
   );
 
   if (variant === "inline") return pill;
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin/crm")) {
+    return null;
+  }
   return createPortal(pill, document.body);
 };
 

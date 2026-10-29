@@ -3,10 +3,10 @@ const User = require("../models/userModel");
 const chat = require("./chatService");
 
 const tokenFromHandshake = (socket) => {
-  const header = socket.handshake.auth?.token || socket.handshake.headers?.authorization || "";
+  const header = socket.handshake.auth?.token || socket.handshake.query?.token || socket.handshake.headers?.authorization || "";
   if (header.startsWith("Bearer ")) return header.slice(7);
   const cookie = socket.handshake.headers?.cookie || "";
-  const match = cookie.match(/(?:^|;\s*)jwttoken=([^;]+)/);
+  const match = cookie.match(/(?:^|;\s*)(?:jwttoken|_auth)=([^;]+)/);
   return match ? decodeURIComponent(match[1]) : header;
 };
 

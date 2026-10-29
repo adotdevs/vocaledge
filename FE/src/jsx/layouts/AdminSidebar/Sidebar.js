@@ -1,7 +1,6 @@
 import logo_300x57_1 from "../../../assets/newlogo/logo-blue.png";
 import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import Log from "../../../assets/newlogo/logo-blue.png";
 import { useAuthUser, useSignOut } from "react-auth-kit";
 import { logoutApi, addUserByEmailApi, signleUsersApi } from "../../../Api/Service";
 import { toast } from "react-toastify";
@@ -15,16 +14,46 @@ const SideBar = (props) => {
   const [isLoading, setisLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [Admin, setAdmin] = useState("");
-  const [noPop, setnoPop] = useState(false);
-  useEffect(() => {
-    if (authUser().user.role === "user") {
-      setAdmin(authUser().user);
-      return;
-    } else if (authUser().user.role === "admin" || authUser().user.role === "superadmin") {
-      setAdmin(authUser().user);
-      return;
+  const [Admin, setAdmin] = useState(() => {
+    try {
+      const u = authUser()?.user || {};
+      const cached = typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "";
+      return {
+        ...u,
+        avatar: cached ? { url: cached } : (u.avatar || null),
+      };
+    } catch {
+      return {};
     }
+  });
+  const [noPop, setnoPop] = useState(false);
+
+  useEffect(() => {
+    try {
+      const u = authUser()?.user;
+      if (u) {
+        const cached = typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "";
+        setAdmin((prev) => ({
+          ...u,
+          avatar: cached ? { url: cached } : (u.avatar || prev.avatar || null),
+        }));
+      }
+    } catch {}
+
+    const onProfileUpdate = (e) => {
+      const nextAvatar = e.detail?.avatar;
+      if (nextAvatar !== undefined) {
+        setAdmin((prev) => ({
+          ...prev,
+          avatar: nextAvatar,
+        }));
+        const url = nextAvatar?.url || (typeof nextAvatar === "string" ? nextAvatar : "");
+        if (url) localStorage.setItem("user_avatar", url);
+        else localStorage.removeItem("user_avatar");
+      }
+    };
+    window.addEventListener("crm-user-profile-updated", onProfileUpdate);
+    return () => window.removeEventListener("crm-user-profile-updated", onProfileUpdate);
   }, []);
   let togglePop = () => {
     if (noPop === false) {
@@ -102,11 +131,17 @@ const SideBar = (props) => {
       const signleUser = await signleUsersApi(authUser().user._id);
 
       if (signleUser.success) {
-        setAllowManageSubAdmins(signleUser?.signleUser?.adminPermissions?.isSubManagement)
-        setAllowEditProfile(signleUser?.signleUser?.adminPermissions?.isProfileUpdate)
-        setCanManageReferrals(signleUser?.signleUser?.adminPermissions?.canManageReferrals) // MLM
-        setAccessCrm(signleUser?.signleUser?.adminPermissions?.accessCrm) // MLM
-
+        setAllowManageSubAdmins(signleUser?.signleUser?.adminPermissions?.isSubManagement);
+        setAllowEditProfile(signleUser?.signleUser?.adminPermissions?.isProfileUpdate);
+        setCanManageReferrals(signleUser?.signleUser?.adminPermissions?.canManageReferrals); // MLM
+        setAccessCrm(signleUser?.signleUser?.adminPermissions?.accessCrm); // MLM
+        if (signleUser.signleUser) {
+          setAdmin(signleUser.signleUser);
+          const av = signleUser.signleUser.avatar?.url || (typeof signleUser.signleUser.avatar === "string" ? signleUser.signleUser.avatar : "");
+          if (av) {
+            localStorage.setItem("user_avatar", av);
+          }
+        }
       } else {
         toast.dismiss();
         toast.error(signleUser.msg);
@@ -656,58 +691,77 @@ const SideBar = (props) => {
         <div className={styles.account}>
           <div className="group inline-flex items-center justify-center text-right">
             <div data-headlessui-state className="relative h-10 w-10 text-left">
-              <button
-                onClick={togglePop}
-                className={styles.avatarBtn}
-                id="headlessui-menu-button-34"
-                aria-haspopup="menu"
-                aria-expanded="false"
-                type="button"
-              >
-                <img src={Log} alt="" />
-              </button>
-              {noPop && (
-                <div
-                  aria-labelledby="headlessui-menu-button-31"
-                  id="headlessui-menu-items-32"
-                  role="menu"
-                  tabIndex={0}
-                  data-headlessui-state="open"
-                  className={styles.pop}
-                >
-                  <div className={styles.popHead} role="none">
-                    <div className="flex items-center" role="none">
-                      <div className={styles.avatarBtn} role="none">
-                        <img src={Log} alt="" role="none" />
-                      </div>
-                      <div className="ms-3" role="none">
-                        <h6 className={styles.accountName} role="none">
-                          {Admin.firstName}
-                        </h6>
-                        <p className={styles.accountEmail} role="none">
-                          {Admin.email}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="p-2" role="none">
-                    <div
-                      id="headlessui-menu-item-44"
-                      role="menuitem"
-                      tabIndex={-1}
-                      data-headlessui-state
+              {(() => {
+                const adminAvatarUrl = Admin?.avatar?.url || (typeof Admin?.avatar === "string" ? Admin.avatar : "") || (typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "") || "";
+                return (
+                  <>
+                    <button
+                      onClick={togglePop}
+                      className={styles.avatarBtn}
+                      id="headlessui-menu-button-34"
+                      aria-haspopup="menu"
+                      aria-expanded="false"
+                      type="button"
                     >
-                      <a
-                        onClick={() => isLoginOrLogout()}
-                        href="javascript:void(0)"
-                        className={styles.popAction}
+                      {adminAvatarUrl ? (
+                        <img src={adminAvatarUrl} alt="" />
+                      ) : (
+                        <span style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#3b82f6', color: '#fff', fontWeight: 700, fontSize: '13px' }}>
+                          {`${Admin?.firstName?.[0] || ""}${Admin?.lastName?.[0] || ""}`.toUpperCase() || "A"}
+                        </span>
+                      )}
+                    </button>
+                    {noPop && (
+                      <div
+                        aria-labelledby="headlessui-menu-button-31"
+                        id="headlessui-menu-items-32"
+                        role="menu"
+                        tabIndex={0}
+                        data-headlessui-state="open"
+                        className={styles.pop}
                       >
-                        Logout
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              )}
+                        <div className={styles.popHead} role="none">
+                          <div className="flex items-center" role="none">
+                            <div className={styles.avatarBtn} role="none">
+                              {adminAvatarUrl ? (
+                                <img src={adminAvatarUrl} alt="" role="none" />
+                              ) : (
+                                <span style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#3b82f6', color: '#fff', fontWeight: 700, fontSize: '13px' }}>
+                                  {`${Admin?.firstName?.[0] || ""}${Admin?.lastName?.[0] || ""}`.toUpperCase() || "A"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="ms-3" role="none">
+                              <h6 className={styles.accountName} role="none">
+                                {Admin?.firstName || "Admin"}
+                              </h6>
+                              <p className={styles.accountEmail} role="none">
+                                {Admin?.email || ""}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-2" role="none">
+                          <div
+                            id="headlessui-menu-item-44"
+                            role="menuitem"
+                            tabIndex={-1}
+                            data-headlessui-state
+                          >
+                            <a
+                              onClick={() => isLoginOrLogout()}
+                              href="javascript:void(0)"
+                              className={styles.popAction}
+                            >
+                              Logout
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
           <div className={styles.accountMeta}>

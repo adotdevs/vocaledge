@@ -55,6 +55,15 @@ export const getCryptoNewsApi = () => getApi("cryptoNews");
 export const signleUsersApi = (id) => {
   return getApi(`singleUser/${id}`);
 };
+export const uploadUserAvatarApi = (userId, data) => {
+  if (data instanceof FormData) {
+    return postFormApi(`user/avatar/${userId || ""}`, data);
+  }
+  return postApi(`user/avatar/${userId || ""}`, data);
+};
+export const removeUserAvatarApi = (userId) => {
+  return deleteApi(`user/avatar/${userId || ""}`);
+};
 export const getKycDocumentApi = (userId, docType) => {
   return getBlobApi(`kycDocument/${userId}/${docType}`, {}, "application/pdf");
 };

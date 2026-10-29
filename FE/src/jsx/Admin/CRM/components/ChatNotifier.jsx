@@ -5,7 +5,7 @@ import { useAuthUser } from "react-auth-kit";
 import useLiveCrmUser from "../useLiveCrmUser";
 import { subscribeChatEvents } from "../chatEvents";
 import LiveStatusDot from "./LiveStatusDot";
-import { CheckCircleOutline, NotificationsNone, Send } from "@mui/icons-material";
+import { CheckCircleOutline, Close, NotificationsNone, Send } from "@mui/icons-material";
 import { deliveredChatApi, flagChatConversationApi, getChatUnreadPopupsApi, seenChatApi, sendChatMessageApi } from "../../../../Api/Service";
 import { playNotificationSound } from "../notificationSound";
 import "../Chat.css";
@@ -14,6 +14,28 @@ const personId = (value) => {
   if (value == null || value === "") return "";
   if (typeof value === "object") return personId(value._id || value.id || "");
   return String(value);
+};
+
+const AVATAR_GRADIENTS = [
+  "linear-gradient(135deg, #6366f1 0%, #4338ca 100%)",
+  "linear-gradient(135deg, #0ea5e9 0%, #0369a1 100%)",
+  "linear-gradient(135deg, #10b981 0%, #047857 100%)",
+  "linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)",
+  "linear-gradient(135deg, #f43f5e 0%, #be123c 100%)",
+  "linear-gradient(135deg, #f59e0b 0%, #b45309 100%)",
+  "linear-gradient(135deg, #06b6d4 0%, #0e7490 100%)",
+  "linear-gradient(135deg, #ec4899 0%, #be185d 100%)",
+];
+
+const getAvatarStyle = (seed) => {
+  const key = String(seed || "notification");
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash << 5) - hash + key.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % AVATAR_GRADIENTS.length;
+  return { background: AVATAR_GRADIENTS[idx] };
 };
 
 const timeAgo = (value) => {
@@ -39,10 +61,19 @@ const attachmentLabel = (message) => {
 const PopupCard = ({ message, onClose, onOpen }) => {
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const name = message.senderName || "New message";
   const initial = name.trim().slice(0, 1).toUpperCase() || "M";
   const file = attachmentLabel(message);
-  const preview = (message.body || "").trim() || (file ? `Sent ${file}` : "New message");
+  const preview = (message.body || "").replace(/\s+/g, " ").trim() || (file ? `Sent ${file}` : "New message");
+  const avatarUrl =
+    !imgError &&
+    (message.senderAvatar ||
+      message.avatar?.url ||
+      (typeof message.avatar === "string" ? message.avatar : "") ||
+      message.sender?.avatar?.url ||
+      (typeof message.sender?.avatar === "string" ? message.sender?.avatar : "") ||
+      "");
 
   const sendReply = async (event) => {
     event.preventDefault();
@@ -72,11 +103,26 @@ const PopupCard = ({ message, onClose, onOpen }) => {
       <header className="crm-chat-popup-top">
         <span className="crm-chat-popup-app" aria-hidden="true">V</span>
         <span className="crm-chat-popup-appname">Vocaledge <i>•</i> {timeAgo(message.createdAt)}</span>
-        <button type="button" className="crm-chat-popup-x" aria-label="Close" onClick={onClose}>×</button>
+        <button type="button" className="crm-chat-popup-x" aria-label="Close" onClick={onClose}><Close style={{ fontSize: 16 }} /></button>
       </header>
       <button type="button" className="crm-chat-popup-msg" onClick={() => onOpen(message)}>
-        <span className="crm-chat-popup-avatar" aria-hidden="true">{initial}</span>
-        <span>
+        <span
+          className="crm-chat-popup-avatar"
+          style={avatarUrl ? { background: "transparent" } : getAvatarStyle(message.senderId || name)}
+          aria-hidden="true"
+        >
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt=""
+              className="crm-chat-popup-avatar-img"
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            initial
+          )}
+        </span>
+        <span className="crm-chat-popup-text">
           <strong>{name}</strong>
           <em>{preview.slice(0, 140)}</em>
         </span>
@@ -95,10 +141,10 @@ const PopupCard = ({ message, onClose, onOpen }) => {
 
 const ChatNotifier = () => {
   const authUser = useAuthUser();
-  const { can, role, ready, user } = useLiveCrmUser();
+  const { can, role, user } = useLiveCrmUser();
   const navigate = useNavigate();
   const [popups, setPopups] = useState([]);
-  const allowed = role === "superadmin" || can("canAccessChat");
+  const allowed = role === "superadmin" || role === "manager" || can("canAccessChat");
   const crmRole = ["superadmin", "admin", "subadmin", "manager"].includes(role);
   const myIdRef = useRef("");
   const heardRef = useRef(new Set());

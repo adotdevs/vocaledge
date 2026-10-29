@@ -263,6 +263,26 @@ exports.RegisterSubAdmin = catchAsyncErrors(async (req, res, next) => {
   }
   email.toLowerCase();
 
+  let avatarData = { public_id: "", url: "" };
+  const incomingAvatar = req.body.avatarUrl || req.body.avatar;
+  if (incomingAvatar && typeof incomingAvatar === "string") {
+    if (incomingAvatar.startsWith("https://api.dicebear.com/")) {
+      avatarData = { public_id: "", url: incomingAvatar };
+    } else {
+      try {
+        const uploadResult = await cloudinary.uploader.upload(incomingAvatar, {
+          folder: "avatars",
+          resource_type: "image",
+        });
+        avatarData = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+      } catch (e) {
+        console.error("Avatar upload during registration error:", e);
+      }
+    }
+  } else if (incomingAvatar && typeof incomingAvatar === "object" && incomingAvatar.url) {
+    avatarData = incomingAvatar;
+  }
+
   let createUser = await UserModel.create({
     firstName,
     lastName,
@@ -275,6 +295,7 @@ exports.RegisterSubAdmin = catchAsyncErrors(async (req, res, next) => {
     country,
     postalCode,
     role,
+    avatar: avatarData,
     verified: true
   });
 
@@ -286,8 +307,10 @@ exports.RegisterSubAdmin = catchAsyncErrors(async (req, res, next) => {
   }
 
   res.status(201).send({
-    msg: "Data updated successfully",
+    msg: "Admin created successfully",
     success: true,
+    user: createUser,
+    userId: createUser._id,
   });
   // 
 
@@ -4132,5 +4155,164 @@ exports.getWalletIntegrationStatus = catchAsyncErrors(async (req, res, next) => 
   res.status(200).json({
     success: true,
     walletIntegration: user.walletIntegration || { status: "none" },
+  });
+});
+
+// Upload, change, or replace user avatar (DP)
+exports.updateUserAvatar = catchAsyncErrors(async (req, res, next) => {
+  const targetId = req.params.id || (req.user && req.user._id && req.user._id.toString());
+  if (!targetId) {
+    return next(new errorHandler("User ID is required", 400));
+  }
+
+  // Permission: user can update their own DP; superadmin can update any user's DP
+  const isSelf = req.user && req.user._id && req.user._id.toString() === targetId.toString();
+  const isSuper = req.user && req.user.role === "superadmin";
+
+  if (!isSelf && !isSuper) {
+    return next(new errorHandler("Access denied: You do not have permission to edit this profile picture", 403));
+  }
+
+  const file = req.file || (req.files && req.files[0]);
+  const avatarUrl = req.body && (req.body.avatarUrl || req.body.avatar || req.body.defaultAvatar);
+
+  if (!file && !avatarUrl) {
+    return next(new errorHandler("Please provide an image file or avatar URL to upload", 400));
+  }
+
+  if (file && (!file.mimetype || !file.mimetype.startsWith("image/"))) {
+    return next(new errorHandler("Only image files are allowed", 400));
+  }
+
+  const user = await UserModel.findById(targetId);
+  if (!user) {
+    return next(new errorHandler("User not found", 404));
+  }
+
+  // Remove previous avatar from Cloudinary if it exists (non-blocking in background)
+  if (user.avatar && user.avatar.public_id) {
+    const oldPublicId = user.avatar.public_id;
+    cloudinary.uploader.destroy(oldPublicId).catch((destroyError) => {
+      console.error("Cloudinary previous avatar destroy error:", destroyError);
+    });
+  }
+
+  // Upload new image to Cloudinary or use CDN preset directly
+  let uploadResult;
+  if (file && file.buffer) {
+    // Fast binary stream upload directly to Cloudinary preserving full original image quality
+    uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: "avatars",
+          resource_type: "image",
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        }
+      );
+      stream.end(file.buffer);
+    });
+  } else if (file) {
+    const fileUri = getDataUri(file);
+    uploadResult = await cloudinary.uploader.upload(fileUri.content, {
+      folder: "avatars",
+      resource_type: "image",
+    });
+  } else if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.startsWith("https://api.dicebear.com/")) {
+    // Preset default avatars are already hosted on Dicebear CDN — save instantly without Cloudinary roundtrip
+    user.avatar = {
+      public_id: "",
+      url: avatarUrl,
+    };
+    await user.save({ validateBeforeSave: false });
+    return res.status(200).json({
+      success: true,
+      msg: "Profile picture updated successfully",
+      avatar: user.avatar,
+      user: {
+        _id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+      },
+    });
+  } else {
+    uploadResult = await cloudinary.uploader.upload(avatarUrl, {
+      folder: "avatars",
+      resource_type: "image",
+    });
+  }
+
+  user.avatar = {
+    public_id: uploadResult.public_id,
+    url: uploadResult.secure_url,
+  };
+
+  await user.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    success: true,
+    msg: "Profile picture updated successfully",
+    avatar: user.avatar,
+    user: {
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+    },
+  });
+});
+
+// Remove user avatar (DP)
+exports.removeUserAvatar = catchAsyncErrors(async (req, res, next) => {
+  const targetId = req.params.id || (req.user && req.user._id && req.user._id.toString());
+  if (!targetId) {
+    return next(new errorHandler("User ID is required", 400));
+  }
+
+  const isSelf = req.user && req.user._id && req.user._id.toString() === targetId.toString();
+  const isSuper = req.user && req.user.role === "superadmin";
+
+  if (!isSelf && !isSuper) {
+    return next(new errorHandler("Access denied: You do not have permission to remove this profile picture", 403));
+  }
+
+  const user = await UserModel.findById(targetId);
+  if (!user) {
+    return next(new errorHandler("User not found", 404));
+  }
+
+  if (user.avatar && user.avatar.public_id) {
+    const oldPublicId = user.avatar.public_id;
+    cloudinary.uploader.destroy(oldPublicId).catch((destroyError) => {
+      console.error("Cloudinary avatar destroy error:", destroyError);
+    });
+  }
+
+  user.avatar = {
+    public_id: "",
+    url: "",
+  };
+
+  await user.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    success: true,
+    msg: "Profile picture removed successfully",
+    avatar: user.avatar,
+    user: {
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+    },
   });
 });

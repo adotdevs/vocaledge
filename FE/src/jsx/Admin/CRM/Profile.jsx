@@ -12,6 +12,10 @@ import {
   CircularProgress,
   Divider,
 } from "@mui/material";
+import {
+  PhotoCamera,
+  DeleteOutline,
+} from "@mui/icons-material";
 import { useAuthUser, useSignOut } from "react-auth-kit";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -19,6 +23,7 @@ import { toast } from "react-toastify";
 import Sidebar from "./Sidebar";
 import CrmAppBarActions from './components/CrmAppBarActions';
 import PasswordField from "./components/PasswordField";
+import AvatarEditorModal from "./components/AvatarEditorModal";
 import {
   signleUsersApi,
   updateSignleUsersApi,
@@ -26,6 +31,8 @@ import {
   UpdateAdminVapiConfigApi,
   GetMySipConfigApi,
   UpdateAdminSipConfigApi,
+  uploadUserAvatarApi,
+  removeUserAvatarApi,
 } from "../../../Api/Service";
 
 const CrmProfile = () => {
@@ -77,6 +84,122 @@ const CrmProfile = () => {
     setUserData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+
+  const handleAvatarSave = async ({ file, avatarUrl, previewUrl }) => {
+    const previousAvatar = userData.avatar;
+    const tempUrl = previewUrl || avatarUrl;
+
+    // Optimistically update UI immediately so user sees new avatar instantly
+    if (tempUrl) {
+      localStorage.setItem("user_avatar", tempUrl);
+      const optimisticAvatar = {
+        url: tempUrl,
+        public_id: previousAvatar?.public_id || "",
+      };
+      setUserData((prev) => ({
+        ...prev,
+        avatar: optimisticAvatar,
+      }));
+      window.dispatchEvent(
+        new CustomEvent("crm-user-profile-updated", {
+          detail: { ...userData, avatar: optimisticAvatar },
+        })
+      );
+    }
+
+    try {
+      setAvatarUploading(true);
+      const targetId = userData._id || authUser()?.user?._id;
+      let resp;
+      if (file) {
+        const formData = new FormData();
+        formData.append("file", file);
+        resp = await uploadUserAvatarApi(targetId, formData);
+      } else if (avatarUrl) {
+        resp = await uploadUserAvatarApi(targetId, { avatarUrl });
+      }
+
+      if (resp?.success) {
+        toast.success("Profile picture updated successfully");
+        const nextAvatar = resp.avatar || { url: resp.user?.avatar?.url, public_id: resp.user?.avatar?.public_id };
+        const savedUrl = nextAvatar.url || (typeof nextAvatar === "string" ? nextAvatar : "");
+        if (savedUrl) {
+          localStorage.setItem("user_avatar", savedUrl);
+        }
+        setUserData((prev) => ({
+          ...prev,
+          avatar: nextAvatar,
+        }));
+        window.dispatchEvent(
+          new CustomEvent("crm-user-profile-updated", {
+            detail: { ...userData, avatar: nextAvatar },
+          })
+        );
+      } else {
+        // Rollback to previous avatar on error
+        const prevUrl = previousAvatar?.url || (typeof previousAvatar === "string" ? previousAvatar : "");
+        if (prevUrl) localStorage.setItem("user_avatar", prevUrl);
+        else localStorage.removeItem("user_avatar");
+        setUserData((prev) => ({ ...prev, avatar: previousAvatar }));
+        window.dispatchEvent(
+          new CustomEvent("crm-user-profile-updated", {
+            detail: { ...userData, avatar: previousAvatar },
+          })
+        );
+        toast.error(resp?.msg || "Failed to upload profile picture");
+      }
+    } catch (err) {
+      console.error("Avatar upload error:", err);
+      // Rollback to previous avatar on error
+      const prevUrl = previousAvatar?.url || (typeof previousAvatar === "string" ? previousAvatar : "");
+      if (prevUrl) localStorage.setItem("user_avatar", prevUrl);
+      else localStorage.removeItem("user_avatar");
+      setUserData((prev) => ({ ...prev, avatar: previousAvatar }));
+      window.dispatchEvent(
+        new CustomEvent("crm-user-profile-updated", {
+          detail: { ...userData, avatar: previousAvatar },
+        })
+      );
+      toast.error(err?.response?.data?.msg || err?.message || "Failed to upload profile picture");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const handleAvatarRemove = async () => {
+    if (!window.confirm("Are you sure you want to remove your profile picture?")) return;
+
+    try {
+      setAvatarUploading(true);
+      const targetId = userData._id || authUser()?.user?._id;
+      const resp = await removeUserAvatarApi(targetId);
+
+      if (resp.success) {
+        toast.success("Profile picture removed");
+        localStorage.removeItem("user_avatar");
+        const emptyAvatar = { url: "", public_id: "" };
+        setUserData((prev) => ({
+          ...prev,
+          avatar: emptyAvatar,
+        }));
+        window.dispatchEvent(
+          new CustomEvent("crm-user-profile-updated", {
+            detail: { ...userData, avatar: emptyAvatar },
+          })
+        );
+      } else {
+        toast.error(resp.msg || "Failed to remove profile picture");
+      }
+    } catch (err) {
+      console.error("Avatar remove error:", err);
+      toast.error(err?.response?.data?.msg || err?.message || "Failed to remove profile picture");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
   const getCurrentUserProfile = async () => {
     try {
       const currentUser = authUser()?.user;
@@ -104,6 +227,10 @@ const CrmProfile = () => {
       }
 
       const profile = resp.signleUser;
+      const loadedAvatar = profile?.avatar?.url || (typeof profile?.avatar === "string" ? profile?.avatar : "");
+      if (loadedAvatar) {
+        localStorage.setItem("user_avatar", loadedAvatar);
+      }
 
       // For admin/subadmin, check profile edit permission
       if (
@@ -437,7 +564,10 @@ const CrmProfile = () => {
               >
                 <CardHeader
                   avatar={
-                    <Avatar sx={{ bgcolor: "primary.main", width: 48, height: 48 }}>
+                    <Avatar
+                      src={userData.avatar?.url || userData.avatar || ""}
+                      sx={{ bgcolor: "primary.main", width: 50, height: 50, fontWeight: 700 }}
+                    >
                       {initials}
                     </Avatar>
                   }
@@ -448,11 +578,111 @@ const CrmProfile = () => {
                   }
                   subheader={
                     <Typography variant="body2" color="text.secondary">
-                      Update your basic profile details.
+                      Update your basic profile details and profile picture.
                     </Typography>
                   }
                 />
+                <Divider />
                 <CardContent>
+                  {/* Profile Photo Uploader */}
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 2.5,
+                      p: 2,
+                      mb: 2.5,
+                      borderRadius: 2,
+                      bgcolor: "action.hover",
+                      border: "1px dashed",
+                      borderColor: "divider",
+                    }}
+                  >
+                    <Box sx={{ position: "relative", flex: "none" }}>
+                      <Avatar
+                        src={userData.avatar?.url || userData.avatar || ""}
+                        sx={{
+                          width: 76,
+                          height: 76,
+                          fontSize: 26,
+                          fontWeight: 700,
+                          bgcolor: "primary.main",
+                          boxShadow: "0 4px 14px rgba(79, 70, 229, 0.22)",
+                          border: "3px solid #ffffff",
+                        }}
+                      >
+                        {initials}
+                      </Avatar>
+                      {avatarUploading && (
+                        <Box
+                          sx={{
+                            position: "absolute",
+                            inset: 0,
+                            borderRadius: "50%",
+                            bgcolor: "rgba(0,0,0,0.45)",
+                            display: "grid",
+                            placeItems: "center",
+                          }}
+                        >
+                          <CircularProgress size={24} sx={{ color: "#ffffff" }} />
+                        </Box>
+                      )}
+                    </Box>
+
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="subtitle2" fontWeight={700}>
+                        Profile Picture
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+                        Upload or change your profile picture (JPG, PNG, WebP up to 10MB).
+                      </Typography>
+                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<PhotoCamera />}
+                          disabled={avatarUploading}
+                          onClick={() => setAvatarModalOpen(true)}
+                          sx={{
+                            textTransform: "none",
+                            borderRadius: 2,
+                            fontWeight: 600,
+                            fontSize: "0.8125rem",
+                          }}
+                        >
+                          {userData.avatar?.url || userData.avatar ? "Change Photo" : "Upload Photo"}
+                        </Button>
+                        {(userData.avatar?.url || userData.avatar) && (
+                          <Button
+                            variant="outlined"
+                            color="error"
+                            size="small"
+                            startIcon={<DeleteOutline />}
+                            disabled={avatarUploading}
+                            onClick={handleAvatarRemove}
+                            sx={{
+                              textTransform: "none",
+                              borderRadius: 2,
+                              fontWeight: 600,
+                              fontSize: "0.8125rem",
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </Box>
+                    </Box>
+                  </Box>
+
+                  <AvatarEditorModal
+                    open={avatarModalOpen}
+                    onClose={() => setAvatarModalOpen(false)}
+                    onSave={handleAvatarSave}
+                    initialAvatar={userData.avatar?.url || userData.avatar || ""}
+                    userName={`${userData.firstName || ""} ${userData.lastName || ""}`}
+                    title="Adjust Your Profile Picture"
+                  />
+
                   <Box
                     component="form"
                     onSubmit={updateProfile}

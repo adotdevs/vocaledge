@@ -6,8 +6,14 @@ const byUser = new Map();
 const otherUser = (call, userId) => (call.from === userId ? call.to : call.from);
 
 const userOnline = (io, userId) => {
-  const room = io.sockets.adapter.rooms.get(`user:${userId}`);
-  return Boolean(room && room.size);
+  const rootRoom = io.sockets.adapter.rooms.get(`user:${userId}`);
+  if (rootRoom && rootRoom.size) return true;
+  const chatNsp = io._nsps?.get?.("/chat") || global.chatNamespace;
+  if (chatNsp) {
+    const chatRoom = chatNsp.adapter.rooms.get(`user:${userId}`);
+    if (chatRoom && chatRoom.size) return true;
+  }
+  return false;
 };
 
 const saveLog = (call, status, durationSec = 0) => {
@@ -32,6 +38,10 @@ const attachVoice = (io, socket) => {
   const send = (userId, payload) => {
     if (!userId) return;
     io.to(`user:${userId}`).emit("voice:signal", payload);
+    const chatNsp = io._nsps?.get?.("/chat") || global.chatNamespace;
+    if (chatNsp) {
+      chatNsp.to(`user:${userId}`).emit("voice:signal", payload);
+    }
   };
 
   const snapshot = (call, userId) => {
@@ -66,9 +76,25 @@ const attachVoice = (io, socket) => {
   };
 
   socket.on("voice:signal", (message) => {
-    const userId = me();
+    let userId = me();
     const type = String(message?.type || "");
     const callId = String(message?.callId || "");
+
+    if (type === "bind") {
+      const boundId = String(message?.userId || message?.from || "");
+      if (boundId) {
+        socket.data.userId = boundId;
+        socket.join(`user:${boundId}`);
+      }
+      return;
+    }
+
+    if (!userId && (message?.from || message?.userId)) {
+      userId = String(message.from || message.userId);
+      socket.data.userId = userId;
+      socket.join(`user:${userId}`);
+    }
+
     if (!userId || !type) return;
 
     if (type === "invite") {
@@ -225,4 +251,8 @@ function dropUser(userId) {
   const payload = { type: "ended", callId: call.id, reason: "ended", status: "ended", durationSec: 0 };
   global.io.to(`user:${call.from}`).emit("voice:signal", payload);
   global.io.to(`user:${call.to}`).emit("voice:signal", payload);
+  if (global.chatNamespace) {
+    global.chatNamespace.to(`user:${call.from}`).emit("voice:signal", payload);
+    global.chatNamespace.to(`user:${call.to}`).emit("voice:signal", payload);
+  }
 }

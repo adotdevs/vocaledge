@@ -35,7 +35,7 @@ const DEFAULT_ON = new Set(
 
 export const isPermissionOn = (user, key) => {
   if (!user) return false;
-  if (user.role === "superadmin") return true;
+  if (user.role === "superadmin" || user.role === "manager") return true;
   const bag = user.role === "subadmin" ? user.permissions : user.adminPermissions;
   const value = bag?.[key];
   if (value === true || value === "true") return true;

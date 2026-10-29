@@ -90,11 +90,16 @@ const formatDuration = (startedAt) => {
 const VoiceCall = () => {
   const authUser = useAuthUser();
   const navigate = useNavigate();
-  const { can, role, ready } = useLiveCrmUser();
-  const voiceAllowed = role === "superadmin" || can("canAccessChat");
+  const { can, role, ready, user } = useLiveCrmUser();
+  const person = authUser()?.user;
+  const effectiveRole = role || person?.role || user?.role || "";
+  const voiceAllowed = effectiveRole === "superadmin"
+    || effectiveRole === "manager"
+    || can("canAccessChat")
+    || Boolean(person?.adminPermissions?.canAccessChat)
+    || Boolean(user?.adminPermissions?.canAccessChat);
   const [call, setCall] = useState(getVoiceState());
   const [clock, setClock] = useState("00:00");
-  const person = authUser()?.user;
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
 
@@ -106,10 +111,13 @@ const VoiceCall = () => {
   }, [voiceAllowed, ready]);
 
   useEffect(() => {
-    const name = `${person?.firstName || ""} ${person?.lastName || ""}`.trim() || "Agent";
-    bindVoiceIdentity(person?._id || "", name);
+    const myUserId = person?._id || person?.id || user?._id || user?.id || "";
+    const name = `${person?.firstName || user?.firstName || ""} ${person?.lastName || user?.lastName || ""}`.trim() || "Agent";
+    if (myUserId) {
+      bindVoiceIdentity(myUserId, name);
+    }
     listenForVoice();
-  }, [person?._id, person?.firstName, person?.lastName]);
+  }, [person?._id, person?.id, person?.firstName, person?.lastName, user?._id, user?.id, user?.firstName, user?.lastName]);
 
   useEffect(() => subscribeVoice(setCall), []);
 
