@@ -14,7 +14,7 @@ const { logActivity } = require('./activityController');
 const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = require('../utils/leadStatusHelpers');
 const { hasCrmPermission, denyCrmPermission, canViewLeadSource } = require('../utils/crmPermissions');
 const { addCustomerSearch, applyCustomerFilters, normalizeCustomerFields, bodyHasCustomerFields } = require('../utils/leadCustomerFields');
-const { isNewStatus, refillOwners, listRequestCanRefill, ownerIdOf } = require('../utils/leadRefill');
+const { isNewStatus, refillOwners, refillAllEligibleAgents, listRequestCanRefill, ownerIdOf, userCanOpenCrm, refillIfEmpty } = require('../utils/leadRefill');
 
 const hidePrivateLeadFields = (lead, user) => {
   if (!lead) return lead;
@@ -174,29 +174,101 @@ async function applyLeadVisibilityToQuery(query, user) {
     }
 }
 
-async function applyAgentFilterToQuery(query, agent, user) {
+let unassignedAgentsCache = null;
+let unassignedAgentsCacheAt = 0;
+const UNASSIGNED_CACHE_MS = 30 * 1000;
+
+async function getUnassignedAgentIds(Lead) {
+    if (unassignedAgentsCache && (Date.now() - unassignedAgentsCacheAt < UNASSIGNED_CACHE_MS)) {
+        return unassignedAgentsCache;
+    }
+    const leadModel = Lead || (await getLeadModel());
+    const supers = await User.find({ role: "superadmin" }).select("_id").lean();
+    const superIds = supers.map((item) => item._id);
+
+    const rawAgents = await leadModel.collection.distinct("agent", { isDeleted: false });
+    const objectIds = [];
+    rawAgents.forEach((agent) => {
+        if (agent && mongoose.Types.ObjectId.isValid(agent)) {
+            objectIds.push(new mongoose.Types.ObjectId(agent));
+        }
+    });
+
+    const existing = objectIds.length
+        ? await User.find({ _id: { $in: objectIds } }).select("_id").lean()
+        : [];
+    const existingIds = new Set(existing.map((item) => String(item._id)));
+    const orphanIds = objectIds.filter((id) => !existingIds.has(String(id)));
+
+    const heldIds = [...superIds, ...orphanIds];
+    unassignedAgentsCache = { heldIds, superIds, orphanIds };
+    unassignedAgentsCacheAt = Date.now();
+    return unassignedAgentsCache;
+}
+
+async function getUnassignedCondition(Lead) {
+    const { heldIds } = await getUnassignedAgentIds(Lead);
+    return {
+        $or: [
+            { agent: null },
+            { agent: { $exists: false } },
+            ...(heldIds.length ? [{ agent: { $in: heldIds } }] : [])
+        ]
+    };
+}
+
+async function canUserViewUnassignedLeads(user) {
+    if (!user) return false;
+    if (user.role === "superadmin" || user.role === "manager") return true;
+    if (user.role === "admin") {
+        const userPerms = await getCachedUserPermissions(user._id);
+        if (userPerms?.adminPermissions?.canManageCrmLeads || userPerms?.adminPermissions?.canAssignLeads) {
+            return true;
+        }
+    }
+    if (user.role === "subadmin") {
+        const userPerms = await getCachedUserPermissions(user._id);
+        if (userPerms?.permissions?.canAssignLeads) {
+            return true;
+        }
+    }
+    return false;
+}
+
+async function applyAgentFilterToQuery(query, agent, user, Lead) {
     const selected = String(agent || "").trim();
     if (!selected) return;
 
     if (selected === "unassigned") {
-        if (user?.role === "superadmin") {
-            query.agent = null;
+        const allowed = await canUserViewUnassignedLeads(user);
+        if (!allowed) {
+            query.agent = { $in: [] };
             return;
         }
-        if (user?.role === "admin") {
-            const userPerms = await getCachedUserPermissions(user._id);
-            if (userPerms?.adminPermissions?.canManageCrmLeads) {
-                query.agent = null;
-                return;
-            }
+
+        delete query.agent;
+        const unassignedCond = await getUnassignedCondition(Lead);
+
+        if (query.$or) {
+            query.$and = query.$and || [];
+            query.$and.push({ $or: query.$or });
+            delete query.$or;
         }
-        query.agent = { $in: [] };
+        if (query.$and) {
+            query.$and.push(unassignedCond);
+        } else {
+            query.$or = unassignedCond.$or;
+        }
         return;
     }
 
+    const selectedObjectId = mongoose.Types.ObjectId.isValid(selected)
+        ? new mongoose.Types.ObjectId(selected)
+        : selected;
+
     if (query.agent && query.agent.$in) {
         const allowed = query.agent.$in.map((id) => String(id));
-        query.agent = allowed.includes(selected) ? selected : { $in: [] };
+        query.agent = allowed.includes(selected) ? selectedObjectId : { $in: [] };
         return;
     }
 
@@ -205,7 +277,7 @@ async function applyAgentFilterToQuery(query, agent, user) {
         return;
     }
 
-    query.agent = selected;
+    query.agent = selectedObjectId;
 }
 
 const brandCache = new Map();
@@ -250,6 +322,14 @@ exports.loginCRM = catchAsyncErrors(async (req, res, next) => {
 
         if (!admin || String(admin.password) !== String(password)) {
             return next(new ErrorHandler("Invalid email or password", 400));
+        }
+
+        if (admin.role === "admin" || admin.role === "subadmin" || admin.role === "manager") {
+            if (userCanOpenCrm(admin)) {
+                refillIfEmpty(admin._id).catch((err) => {
+                    console.error("CRM login lead refill error:", err);
+                });
+            }
         }
 
         jwtToken(admin, 200, res, req);
@@ -567,6 +647,12 @@ exports.importUsersAsLeads = catchAsyncErrors(async (req, res, next) => {
             });
         }
     });
+
+    if (results.created > 0) {
+        refillAllEligibleAgents().catch((err) => {
+            console.error("Post-import user lead refill error:", err);
+        });
+    }
 
     res.status(200).json({
         success: true,
@@ -1119,6 +1205,12 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
             uploadId = uploadRecord._id;
         }
 
+        if (processedCount > 0) {
+            refillAllEligibleAgents().catch((err) => {
+                console.error("Post-CSV lead refill error:", err);
+            });
+        }
+
         const responseData = {
             success: true,
             msg: `Successfully processed ${processedCount} leads${skippedLeads.length > 0 ? `, ${skippedLeads.length} skipped` : ''}`,
@@ -1210,7 +1302,7 @@ exports.getLeads = async (req, res) => {
         applyCountrySearchFilter(query, countrySearch);
 
         await applyLeadVisibilityToQuery(query, req.user);
-        await applyAgentFilterToQuery(query, agent, req.user);
+        await applyAgentFilterToQuery(query, agent, req.user, Lead);
         if (hasCrmPermission(req.user, "canViewLeadBrand")) {
             if (req.query.brand && String(req.query.brand).trim()) {
                 query.Brand = new RegExp(`^${escapeRegex(String(req.query.brand).trim())}$`, 'i');
@@ -1342,7 +1434,7 @@ exports.getLeads = async (req, res) => {
         }
 
         let openedRefill = { leads: [], batchId: "" };
-        if ((req.user?.role === "admin" || req.user?.role === "subadmin") && listRequestCanRefill(req.query) && req.query.idsOnly !== "true") {
+        if ((req.user?.role === "admin" || req.user?.role === "subadmin" || req.user?.role === "manager") && listRequestCanRefill(req.query, req.user) && req.query.idsOnly !== "true") {
             openedRefill = await refillOwners([req.user._id], req.user);
         }
 
@@ -1435,11 +1527,16 @@ exports.getLeads = async (req, res) => {
             statusTotal += count;
         });
 
-        const populatedLeads = leads.map((lead) => hidePrivateLeadFields({
-            ...lead,
-            agent: lead.agent ? agentMap[lead.agent.toString()] || null : null,
-            callSummary: callSummaryMap[String(lead._id)] || null,
-        }, req.user));
+        const populatedLeads = leads.map((lead) => {
+            const agentObj = lead.agent ? agentMap[lead.agent.toString()] || null : null;
+            // Leads held by superadmin accounts are unassigned pool leads
+            const displayAgent = (agentObj && agentObj.role !== "superadmin") ? agentObj : null;
+            return hidePrivateLeadFields({
+                ...lead,
+                agent: displayAgent,
+                callSummary: callSummaryMap[String(lead._id)] || null,
+            }, req.user);
+        });
 
         // Calculate pagination info
         const totalPages = Math.ceil(totalFiltered / limitNum);
@@ -1560,11 +1657,13 @@ exports.assignLeadsToAgent = async (req, res) => {
                     }
                 });
             }
-            const lostNewOwners = leadsToUpdate
-                .filter((lead) => isNewStatus(lead.status) && lead.agent && String(lead.agent) !== String(agentId))
-                .map((lead) => lead.agent);
-            await refillOwners(lostNewOwners, req.user);
         }
+
+        const targetAgentId = unassign ? null : agentId;
+        const lostNewOwners = leadsToUpdate
+            .filter((lead) => isNewStatus(lead.status) && lead.agent && String(lead.agent) !== String(targetAgentId))
+            .map((lead) => lead.agent);
+        if (lostNewOwners.length) await refillOwners(lostNewOwners, req.user);
 
         return res.status(200).json({
             success: true,
@@ -1692,6 +1791,10 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
         const lostNewOwners = leadsWithStatusChange
             .filter((lead) => isNewStatus(lead.status) && !isNewStatus(normalizedStatus) && ownerIdOf(lead.agent))
             .map((lead) => ownerIdOf(lead.agent));
+        if (req.user && (req.user.role === "admin" || req.user.role === "subadmin" || req.user.role === "manager")) {
+            const anyLeftNew = leadsWithStatusChange.some((lead) => isNewStatus(lead.status) && !isNewStatus(normalizedStatus));
+            if (anyLeftNew) lostNewOwners.push(String(req.user._id));
+        }
         const refilled = await refillOwners(lostNewOwners, req.user);
         const parts = [`${result.modifiedCount} lead(s) updated to "${normalizedStatus}"`];
         if (deniedCount > 0) parts.push(`${deniedCount} skipped because they are not assigned to you`);
@@ -2127,9 +2230,15 @@ exports.editLead = async (req, res) => {
         const ownerId = ownerIdOf(lead.agent);
         let refilledLeads = [];
         let refillBatchId = "";
-        if (statusChanged && isNewStatus(oldStatus) && !isNewStatus(normalizedStatus) && ownerId) {
-            console.log(`Lead status left New by ${req.user.role}; checking refill for ${ownerId}`);
-            const refilled = await refillOwners([ownerId], req.user);
+        const potentialOwners = new Set();
+        if (ownerId) potentialOwners.add(ownerId);
+        if (req.user && (req.user.role === "admin" || req.user.role === "subadmin" || req.user.role === "manager")) {
+            potentialOwners.add(String(req.user._id));
+        }
+
+        if (statusChanged && isNewStatus(oldStatus) && !isNewStatus(normalizedStatus) && potentialOwners.size > 0) {
+            console.log(`Lead status left New by ${req.user.role}; checking refill for ${[...potentialOwners].join(", ")}`);
+            const refilled = await refillOwners([...potentialOwners], req.user);
             refilledLeads = refilled.leads;
             refillBatchId = refilled.batchId;
         }
@@ -2701,8 +2810,12 @@ exports.leadListStatistics = async (req, res) => {
         // Visibility
         const visibilityQuery = {};
         await applyLeadVisibilityToQuery(visibilityQuery, req.user);
+        const isFilteringUnassigned = String(req.query.agent || "").trim() === "unassigned";
+        const canViewUnassigned = await canUserViewUnassignedLeads(req.user);
         if (Object.keys(visibilityQuery).length > 0) {
-            andConditions.push(visibilityQuery);
+            if (!(isFilteringUnassigned && canViewUnassigned)) {
+                andConditions.push(visibilityQuery);
+            }
         }
 
         // 1. Filter by Brand
@@ -2750,9 +2863,13 @@ exports.leadListStatistics = async (req, res) => {
         // 4. Filter by Agent
         if (req.query.agent && String(req.query.agent).trim()) {
             const agentQuery = {};
-            await applyAgentFilterToQuery(agentQuery, req.query.agent, req.user);
+            await applyAgentFilterToQuery(agentQuery, req.query.agent, req.user, Lead);
             if (agentQuery.agent !== undefined) {
-                andConditions.push(agentQuery);
+                andConditions.push({ agent: agentQuery.agent });
+            } else if (agentQuery.$or) {
+                andConditions.push({ $or: agentQuery.$or });
+            } else if (agentQuery.$and) {
+                andConditions.push({ $and: agentQuery.$and });
             }
         }
 
@@ -2785,7 +2902,8 @@ exports.leadListStatistics = async (req, res) => {
             }
         }
 
-        const match = andConditions.length === 1 ? andConditions[0] : { $and: andConditions };
+        const rawMatch = andConditions.length === 1 ? andConditions[0] : { $and: andConditions };
+        const match = plainAggregateMatch(rawMatch);
 
         // Aggregate statistics in a single pipeline
         const [result] = await Lead.aggregate([
@@ -2903,28 +3021,41 @@ exports.leadListStatistics = async (req, res) => {
             : [];
         const agentMap = new Map(agentUsers.map((u) => [String(u._id), u]));
 
-        const agentRows = agentRawRows.map((row) => {
+        let unassignedCount = 0;
+        const validAgentRows = [];
+
+        agentRawRows.forEach((row) => {
             if (!row._id) {
-                return {
-                    agentId: "unassigned",
-                    name: "Unassigned",
-                    email: "",
-                    role: "",
-                    count: row.count || 0,
-                    percentage: total > 0 ? Number(((row.count / total) * 100).toFixed(1)) : 0,
-                };
+                unassignedCount += (row.count || 0);
+                return;
             }
             const user = agentMap.get(String(row._id));
-            const name = user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email : "Unknown Agent";
-            return {
+            if (!user || user.role === "superadmin") {
+                unassignedCount += (row.count || 0);
+                return;
+            }
+            const name = `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email;
+            validAgentRows.push({
                 agentId: String(row._id),
                 name,
-                email: user?.email || "",
-                role: user?.role || "",
+                email: user.email || "",
+                role: user.role || "",
                 count: row.count || 0,
                 percentage: total > 0 ? Number(((row.count / total) * 100).toFixed(1)) : 0,
-            };
+            });
         });
+
+        const agentRows = [
+            ...(unassignedCount > 0 ? [{
+                agentId: "unassigned",
+                name: "Unassigned",
+                email: "",
+                role: "",
+                count: unassignedCount,
+                percentage: total > 0 ? Number(((unassignedCount / total) * 100).toFixed(1)) : 0,
+            }] : []),
+            ...validAgentRows
+        ];
 
         // 4. Process Countries
         const countryRows = (result?.byCountry || []).map((row) => ({
@@ -2951,7 +3082,7 @@ exports.leadListStatistics = async (req, res) => {
             (async () => {
                 let agentsQuery = {};
                 if (req.user.role === "superadmin") {
-                    agentsQuery = { role: { $in: ["admin", "subadmin", "superadmin"] } };
+                    agentsQuery = { role: { $in: ["admin", "subadmin"] } };
                 } else if (req.user.role === "admin") {
                     const subadminIds = await getCachedSubadmins();
                     agentsQuery = { _id: { $in: [req.user._id, ...subadminIds] } };

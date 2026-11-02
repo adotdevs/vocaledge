@@ -167,7 +167,17 @@ activitySchema.methods.formatForDisplay = function() {
     if (this.type === 'field_update' && this.changes) {
         activity.description = this.changes.description || 'Field updated';
     } else if (this.type === 'assignment_change' && this.changes) {
-        activity.description = `Agent changed from '${this.changes.oldValue || 'Unassigned'}' to '${this.changes.newValue || 'Unassigned'}'`;
+        if (
+            this.isSystemGenerated ||
+            this.metadata?.get?.('isAutomated') ||
+            this.changes?.description?.toLowerCase().includes('automatically') ||
+            this.createdBy?.userRole === 'system' ||
+            this.createdBy?.userName === 'System'
+        ) {
+            activity.description = `Lead assigned by system automatically to '${this.changes.newValue || 'Agent'}'`;
+        } else {
+            activity.description = `Agent changed from '${this.changes.oldValue || 'Unassigned'}' to '${this.changes.newValue || 'Unassigned'}'`;
+        }
     } else if (this.type === 'status_change' && this.changes) {
         activity.description = `Status changed from '${this.changes.oldValue || 'N/A'}' to '${this.changes.newValue}'`;
     } else if (this.type === 'comment') {

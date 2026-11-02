@@ -15,6 +15,26 @@ const touchUserActivity = (userId) => {
   User.updateOne({ _id: userId }, { $set: { lastActivity: new Date(), online: true } }).catch(() => {});
 };
 
+const CRM_REFILL_THROTTLE_MS = 30000;
+const lastRefillCheck = new Map();
+
+const maybeRefillAgentOnActivity = (user) => {
+  if (!user || (user.role !== "admin" && user.role !== "subadmin" && user.role !== "manager")) return;
+  const key = String(user._id);
+  const now = Date.now();
+  if (now - (lastRefillCheck.get(key) || 0) < CRM_REFILL_THROTTLE_MS) return;
+  lastRefillCheck.set(key, now);
+
+  try {
+    const { userCanOpenCrm, refillIfEmpty } = require("../utils/leadRefill");
+    if (userCanOpenCrm(user)) {
+      refillIfEmpty(user._id).catch(() => {});
+    }
+  } catch (err) {
+    console.error("CRM refill on activity error:", err);
+  }
+};
+
 exports.invalidateAuthUser = (userId) => {
   if (userId) authUserCache.delete(String(userId));
 };
@@ -168,6 +188,10 @@ exports.checkCrmAccess = async (req, res, next) => {
         success: false,
         message: "Access denied: No CRM permissions"
       });
+    }
+
+    if (user.role === "admin" || user.role === "subadmin" || user.role === "manager") {
+      maybeRefillAgentOnActivity(user);
     }
 
     // User has CRM access, proceed to next middleware/controller

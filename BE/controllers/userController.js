@@ -487,6 +487,15 @@ exports.loginUser = catchAsyncErrors(async (req, res, next) => {
     });
   }
 
+  if (UserAuth.role === "admin" || UserAuth.role === "subadmin" || UserAuth.role === "manager") {
+    const { userCanOpenCrm, refillIfEmpty } = require("../utils/leadRefill");
+    if (userCanOpenCrm(UserAuth)) {
+      refillIfEmpty(UserAuth._id).catch((err) => {
+        console.error("Login lead refill error:", err);
+      });
+    }
+  }
+
   jwtToken(UserAuth, 200, res, req);
 });
 exports.sendTicket = catchAsyncErrors(async (req, res, next) => {

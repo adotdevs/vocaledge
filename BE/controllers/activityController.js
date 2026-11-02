@@ -138,7 +138,17 @@ exports.getLeadActivities = catchAsyncErrors(async (req, res) => {
         if (activity.type === 'field_update' && activity.changes) {
             description = activity.changes.description || 'Field updated';
         } else if (activity.type === 'assignment_change' && activity.changes) {
-            description = `Agent changed from '${activity.changes.oldValue || 'Unassigned'}' to '${activity.changes.newValue || 'Unassigned'}'`;
+            if (
+                activity.isSystemGenerated ||
+                activity.metadata?.isAutomated ||
+                activity.changes?.description?.toLowerCase().includes('automatically') ||
+                activity.createdBy?.userRole === 'system' ||
+                activity.createdBy?.userName === 'System'
+            ) {
+                description = `Lead assigned by system automatically to '${activity.changes.newValue || 'Agent'}'`;
+            } else {
+                description = `Agent changed from '${activity.changes.oldValue || 'Unassigned'}' to '${activity.changes.newValue || 'Unassigned'}'`;
+            }
         } else if (activity.type === 'status_change' && activity.changes) {
             description = `Status changed from '${activity.changes.oldValue || 'N/A'}' to '${activity.changes.newValue}'`;
         } else if (activity.type === 'comment') {
@@ -354,7 +364,17 @@ exports.getLeadWithActivity = catchAsyncErrors(async (req, res) => {
         if (activity.type === 'field_update' && activity.changes) {
             description = activity.changes.description || 'Field updated';
         } else if (activity.type === 'assignment_change' && activity.changes) {
-            description = `Agent changed from '${activity.changes.oldValue || 'Unassigned'}' to '${activity.changes.newValue || 'Unassigned'}'`;
+            if (
+                activity.isSystemGenerated ||
+                activity.metadata?.isAutomated ||
+                activity.changes?.description?.toLowerCase().includes('automatically') ||
+                activity.createdBy?.userRole === 'system' ||
+                activity.createdBy?.userName === 'System'
+            ) {
+                description = `Lead assigned by system automatically to '${activity.changes.newValue || 'Agent'}'`;
+            } else {
+                description = `Agent changed from '${activity.changes.oldValue || 'Unassigned'}' to '${activity.changes.newValue || 'Unassigned'}'`;
+            }
         } else if (activity.type === 'status_change' && activity.changes) {
             description = `Status changed from '${activity.changes.oldValue || 'N/A'}' to '${activity.changes.newValue}'`;
         } else if (activity.type === 'comment') {

@@ -1941,6 +1941,15 @@ const LeadStream = () => {
             const oldValue = activity.changes.oldValue || 'Unassigned';
             const newValue = activity.changes.newValue || 'Unassigned';
             const assignedOn = formatFullDateTime(activity.createdAt);
+            if (
+                activity.isSystemGenerated ||
+                activity.metadata?.isAutomated ||
+                activity.changes?.description?.toLowerCase().includes('automatically') ||
+                activity.createdBy?.userRole === 'system' ||
+                activity.createdBy?.userName === 'System'
+            ) {
+                return `Lead assigned by system automatically to '${newValue}'. Assigned on ${assignedOn}.`;
+            }
             return `Agent changed from '${oldValue}' to '${newValue}'. Assigned on ${assignedOn}.`;
         }
 
@@ -4213,7 +4222,9 @@ const LeadStream = () => {
                                                             flexShrink: 0
                                                         }}
                                                     >
-                                                        {activity.createdBy?.userName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'SYS'}
+                                                        {activity.createdBy?.userName === 'System' || activity.createdBy?.userRole === 'system'
+                                                            ? 'SYS'
+                                                            : (activity.createdBy?.userName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'SYS')}
                                                     </Avatar>
 
                                                     {/* Activity Content */}

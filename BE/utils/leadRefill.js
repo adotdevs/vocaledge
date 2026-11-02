@@ -22,6 +22,7 @@ const userCanOpenCrm = (user) => {
     if (!user) return false;
     if (user.role === "admin") return user.adminPermissions?.accessCrm === true;
     if (user.role === "subadmin") return user.permissions?.accessCrm === true;
+    if (user.role === "manager") return user.adminPermissions?.accessCrm === true || user.permissions?.accessCrm === true;
     return false;
 };
 
@@ -80,10 +81,16 @@ const releaseLock = async (id) => {
 };
 
 const hasOwnNewLead = async (Lead, userId) => {
+    const agentMatch = mongoose.Types.ObjectId.isValid(userId)
+        ? { $in: [new mongoose.Types.ObjectId(userId), String(userId)] }
+        : userId;
     const count = await Lead.countDocuments({
         isDeleted: false,
-        agent: userId,
-        status: "New",
+        agent: agentMatch,
+        $or: [
+            { status: { $in: ["New", "new", "", null] } },
+            { status: { $exists: false } }
+        ]
     });
     return count;
 };
@@ -92,18 +99,22 @@ const poolFilter = async (Lead) => {
     const supers = await User.find({ role: "superadmin" }).select("_id").lean();
     const superIds = supers.map((item) => item._id);
     const rawAgents = await Lead.collection.distinct("agent", {
-        status: "New",
+        $or: [
+            { status: { $in: ["New", "new", "", null] } },
+            { status: { $exists: false } }
+        ],
         isDeleted: { $ne: true },
     });
     const objectIds = [];
     let hasBlank = false;
     rawAgents.forEach((agent) => {
-        if (agent === "") {
+        if (agent === "" || agent === null || agent === undefined) {
             hasBlank = true;
             return;
         }
-        if (agent === null || agent === undefined) return;
-        if (mongoose.Types.ObjectId.isValid(agent)) objectIds.push(agent);
+        if (mongoose.Types.ObjectId.isValid(agent)) {
+            objectIds.push(new mongoose.Types.ObjectId(agent));
+        }
     });
     const existing = objectIds.length
         ? await User.find({ _id: { $in: objectIds } }).select("_id").lean()
@@ -111,22 +122,33 @@ const poolFilter = async (Lead) => {
     const existingIds = new Set(existing.map((item) => String(item._id)));
     const orphanIds = objectIds.filter((id) => !existingIds.has(String(id)));
     const heldBy = [...superIds, ...orphanIds];
+    const heldByValues = [
+        ...heldBy,
+        ...heldBy.map((id) => String(id)),
+    ];
     return {
         isDeleted: false,
-        status: "New",
         $or: [
-            { agent: null },
-            { agent: { $exists: false } },
-            ...(hasBlank ? [{ agent: "" }] : []),
-            ...(heldBy.length ? [{ agent: { $in: heldBy } }] : []),
+            { status: { $in: ["New", "new", "", null] } },
+            { status: { $exists: false } }
         ],
+        $and: [
+            {
+                $or: [
+                    { agent: null },
+                    { agent: { $exists: false } },
+                    ...(hasBlank ? [{ agent: "" }] : []),
+                    ...(heldByValues.length ? [{ agent: { $in: heldByValues } }] : []),
+                ]
+            }
+        ]
     };
 };
 
 const readPool = async (Lead, pool, limit) => {
     const collection = Lead.collection;
     const available = await collection.countDocuments(pool);
-    const picked = await collection.find(pool).project({ _id: 1 }).limit(limit).toArray();
+    const picked = await collection.find(pool).sort({ createdAt: 1 }).project({ _id: 1 }).limit(limit).toArray();
     return { available, ids: picked.map((item) => item._id) };
 };
 
@@ -157,16 +179,25 @@ const recordAssignments = async (leads, owner) => {
         type: "assignment_change",
         isSystemGenerated: true,
         createdBy: {
-            userId: owner._id,
-            userName: name,
-            userRole: owner.role,
+            userName: "System",
+            userRole: "system",
         },
         changes: {
             field: "agent",
             oldValue: "Unassigned",
             newValue: name,
-            description: "Assigned automatically because New leads reached zero",
+            description: "Lead assigned by system automatically",
         },
+        comment: "Lead assigned by system automatically",
+        metadata: {
+            isAutomated: true,
+            reason: "Lead assigned by system automatically",
+            assignedTo: {
+                userId: owner._id,
+                userName: name,
+                userRole: owner.role,
+            }
+        }
     })), { ordered: false });
 };
 
@@ -197,11 +228,14 @@ const claimNewLeads = async (owner) => {
             }
             const batchId = new mongoose.Types.ObjectId();
             const now = new Date();
+            const ownerObjectId = mongoose.Types.ObjectId.isValid(owner._id)
+                ? new mongoose.Types.ObjectId(owner._id)
+                : owner._id;
             await Lead.updateMany(
                 { _id: { $in: ids }, isDeleted: false },
-                { $set: { agent: owner._id, updatedAt: now, createdAt: now } }
+                { $set: { agent: ownerObjectId, status: "New", updatedAt: now, createdAt: now } }
             );
-            const leads = await Lead.find({ _id: { $in: ids }, agent: owner._id, isDeleted: false }).lean();
+            const leads = await Lead.find({ _id: { $in: ids }, agent: ownerObjectId, isDeleted: false }).lean();
             if (!leads.length) return emptyResult();
             console.log(`Lead refill: assigned ${leads.length} New leads to ${owner._id}`);
             recordAssignments(leads, owner).catch((error) => {
@@ -234,7 +268,7 @@ const refillIfEmpty = (userId) => {
             return emptyResult();
         }
         const owner = await User.findById(key).select("firstName lastName email role adminPermissions permissions").lean();
-        if (!owner || (owner.role !== "admin" && owner.role !== "subadmin")) return emptyResult();
+        if (!owner || (owner.role !== "admin" && owner.role !== "subadmin" && owner.role !== "manager")) return emptyResult();
         if (!userCanOpenCrm(owner)) {
             console.log(`Lead refill skipped: ${key} does not have Open CRM`);
             return emptyResult();
@@ -255,6 +289,27 @@ const refillIfEmpty = (userId) => {
 
     inflight.set(key, job);
     return job;
+};
+
+const refillAllEligibleAgents = async () => {
+    try {
+        if (!(await autoAssignEnabled())) return;
+        const candidates = await User.find({
+            role: { $in: ["admin", "subadmin", "manager"] },
+            $or: [
+                { "adminPermissions.accessCrm": true },
+                { "permissions.accessCrm": true },
+            ]
+        }).select("_id role permissions adminPermissions firstName lastName email").lean();
+
+        for (const user of candidates) {
+            if (userCanOpenCrm(user)) {
+                await refillIfEmpty(user._id);
+            }
+        }
+    } catch (err) {
+        console.error("refillAllEligibleAgents failed:", err);
+    }
 };
 
 const viewerCanSeeOwner = (viewer, owner) => {
@@ -290,22 +345,42 @@ const refillOwners = async (userIds, viewer) => {
     return { batchId, leads: visible };
 };
 
-const listRequestCanRefill = (query) => {
+const listRequestCanRefill = (query, user) => {
+    if (!query) return true;
+    if (query.idsOnly === "true") return false;
+
+    // If filtering by status, allow if status is New or not specified
+    const status = query.status;
+    if (status && !isNewStatus(status)) {
+        return false;
+    }
+
+    // If filtering by agent, allow if agent is themselves or not specified
+    const agent = query.agent;
+    if (agent && user && String(agent) !== String(user._id)) {
+        return false;
+    }
+
+    // Allow page 1
     const page = parseInt(query.page, 10) || 1;
     if (page !== 1) return false;
-    const keys = [
-        "search", "status", "country", "countrySearch", "brandSearch", "agent", "callStatus",
+
+    const searchKeys = [
+        "search", "countrySearch", "brandSearch",
         "customerAge", "amountLost", "amountLostWhen", "registeredToPlatform", "activeTradingPlatform",
         "customerBank", "additionalPhone", "screenSharing", "screenSharingId", "customerPotential",
     ];
-    return keys.every((key) => String(query[key] || "").trim() === "");
+    return searchKeys.every((key) => String(query[key] || "").trim() === "");
 };
 
 module.exports = {
     REFILL_SIZE,
     isNewStatus,
     ownerIdOf,
+    userCanOpenCrm,
+    hasOwnNewLead,
     refillIfEmpty,
     refillOwners,
+    refillAllEligibleAgents,
     listRequestCanRefill,
 };
