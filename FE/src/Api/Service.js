@@ -370,6 +370,8 @@ export const importUsersAsLeadsApi = (userIds) => {
   return postApi(`/crm/importUsersAsLeads`, { userIds });
 };
 export const getLeadStatusesApi = () => getApi(`/crm/lead-statuses`);
+export const getLeadViewColumnsApi = () => getApi(`/crm/lead-columns`);
+export const saveLeadViewColumnsApi = (columns) => putSimpleApi(`/crm/lead-columns`, { columns });
 export const createLeadStatusApi = (body) => postApi(`/crm/lead-statuses`, body);
 export const updateLeadStatusApi = (id, body) => patchApi(`/crm/lead-statuses/${id}`, body);
 export const deleteLeadStatusApi = (id) => deleteApi(`/crm/lead-statuses/${id}`);

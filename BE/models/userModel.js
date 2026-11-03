@@ -383,6 +383,11 @@ let userSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: false }, // Whether to use custom SIP config or default
   },
 
+  leadViewColumns: {
+    type: [String],
+    default: undefined,
+  },
+
   // SMTP Configuration (per-admin custom config for CRM lead emails)
   smtpConfig: {
     host: { type: String, default: null },

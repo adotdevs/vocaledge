@@ -324,7 +324,8 @@ exports.initiateCall = catchAsyncErrors(async (req, res, next) => {
                 phoneNumber: formattedPhoneNumber,
                 status: 'scheduled',
                 callType: 'manual',
-                scheduledAt: new Date()
+                scheduledAt: new Date(),
+                initiatedBy: req.user ? req.user._id : null
             });
             await scheduledCall.save();
 
@@ -372,7 +373,8 @@ exports.initiateCall = catchAsyncErrors(async (req, res, next) => {
                 phoneNumber: formattedPhoneNumber,
                 status: 'scheduled',
                 callType: 'manual',
-                scheduledAt: new Date() // Schedule immediately (will be processed when active call finishes)
+                scheduledAt: new Date(),
+                initiatedBy: req.user ? req.user._id : null
             });
             await scheduledCall.save();
 
@@ -1634,7 +1636,8 @@ exports.scheduleCall = catchAsyncErrors(async (req, res, next) => {
             phoneNumber: phoneNumber,
             status: 'scheduled',
             callType: 'scheduled',
-            scheduledAt: scheduledDate
+            scheduledAt: scheduledDate,
+            initiatedBy: req.user ? req.user._id : null
         });
         await call.save();
 
@@ -3179,7 +3182,8 @@ exports.retryFailedCall = catchAsyncErrors(async (req, res, next) => {
             phoneNumber: call.phoneNumber,
             status: 'scheduled',
             callType: call.callType || 'manual',
-            scheduledAt: new Date()
+            scheduledAt: new Date(),
+            initiatedBy: call.initiatedBy || (req.user ? req.user._id : null)
         });
         await newCall.save();
 

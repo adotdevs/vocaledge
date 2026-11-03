@@ -876,105 +876,41 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
             }
         };
 
-        let firstRow = true;
         let csvHeaders = [];
         let rowCount = 0;
-        let hasHeaders = true; // Assume headers exist initially
-        let firstRowData = null;
+        const normalizeCsvHeader = (value) => String(value || '')
+            .replace(/^\uFEFF/, '')
+            .replace(/\u00a0/g, ' ')
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ' ');
 
         await new Promise((resolve, reject) => {
             bufferStream
-                .pipe(csv())
+                .pipe(csv({
+                    mapHeaders: ({ header }) => String(header || '').replace(/^\uFEFF/, '').trim(),
+                    mapValues: ({ value }) => typeof value === 'string' ? value.trim() : value,
+                }))
                 .on('data', (data) => {
                     try {
                         rowCount++;
-                        
-                        // Capture headers from first row and detect if they're actually headers or data
-                        if (firstRow) {
-                            csvHeaders = Object.keys(data);
-                            firstRowData = { ...data };
-                            
-                            // Detect if first row is headers or data by checking if values look like data
-                            // Headers are usually lowercase, short, no numbers. Data often has numbers, mixed case, longer strings
-                            const headerValues = Object.values(data);
-                            const looksLikeData = headerValues.some(val => {
-                                if (!val) return false;
-                                // Check if value contains phone number pattern
-                                if (/\d{10,}/.test(val)) return true;
-                                // Check if value is a long string (likely name/address)
-                                if (val.length > 20) return true;
-                                // Check if value has special characters that suggest it's data
-                                if (/[?@#$%^&*()]/.test(val)) return true;
-                                return false;
-                            });
-                            
-                            hasHeaders = !looksLikeData;
-                            
-                            console.log('📋 [CSV PARSE] CSV Headers found:', csvHeaders);
-                            console.log('📋 [CSV PARSE] First row looks like data:', looksLikeData);
-                            console.log('📋 [CSV PARSE] Has headers:', hasHeaders);
-                            console.log('📋 [CSV PARSE] Field Mapping:', fieldMapping);
-                            console.log('📋 [CSV PARSE] Selected Fields:', selectedFields);
-                            
-                            // If first row is data (no headers), we need to process it too
-                            if (!hasHeaders) {
-                                firstRow = false; // Process first row as data
-                            } else {
-                                firstRow = false; // Skip to next row
-                                return; // Skip header row
-                            }
-                        }
+                        if (rowCount === 1) csvHeaders = Object.keys(data);
 
-                        const mappedData = {};
-                        let hasRequiredFields = true;
-
-                        // Map fields according to user selection
-                        // If CSV has no headers, csv-parser will use first row as headers
-                        // In that case, we need to map by position/index
-                        Object.keys(selectedFields).forEach(fieldKey => {
-                            if (selectedFields[fieldKey] && fieldMapping[fieldKey]) {
-                                const csvColumnName = fieldMapping[fieldKey];
-                                let csvValue = null;
-                                
-                                // If no headers detected, use positional mapping
-                                // The fieldMapping contains the first row's values as "column names"
-                                // We need to find which position that value is in, then use that position for all rows
-                                if (!hasHeaders) {
-                                    // Find the index of the mapped column name in the first row headers
-                                    const columnIndex = csvHeaders.indexOf(csvColumnName);
-                                    if (columnIndex >= 0) {
-                                        // Get all column values in order for current row
-                                        const columnValues = Object.values(data);
-                                        if (columnIndex < columnValues.length) {
-                                            csvValue = columnValues[columnIndex];
-                                        }
-                                    }
-                                } else {
-                                    // Normal header-based mapping
-                                    csvValue = data[csvColumnName];
-                                    
-                                    // Try case-insensitive matching if exact match fails
-                                    if (csvValue === undefined || csvValue === '') {
-                                        const foundKey = Object.keys(data).find(key => 
-                                            key.toLowerCase() === csvColumnName.toLowerCase()
-                                        );
-                                        if (foundKey && data[foundKey]) {
-                                            csvValue = data[foundKey];
-                                        }
-                                    }
-                                }
-                                
-                                if (csvValue !== undefined && csvValue !== null && csvValue !== '') {
-                                    mappedData[fieldKey] = csvValue;
-                                }
-                            }
+                        const rowByHeader = {};
+                        Object.entries(data).forEach(([key, value]) => {
+                            rowByHeader[normalizeCsvHeader(key)] = value;
                         });
 
-                        // Debug: Log first row data for troubleshooting
-                        if (rowCount === 1 || (rowCount === 2 && !hasHeaders)) {
-                            console.log('📋 [CSV PARSE] First data row raw data:', data);
-                            console.log('📋 [CSV PARSE] First data row mapped data:', mappedData);
-                        }
+                        const mappedData = {};
+                        Object.entries(fieldMapping || {}).forEach(([fieldKey, csvColumnName]) => {
+                            if (!csvColumnName) return;
+                            const requiredName = fieldKey === 'firstName' || fieldKey === 'lastName';
+                            if (!requiredName && selectedFields && selectedFields[fieldKey] === false) return;
+                            const csvValue = rowByHeader[normalizeCsvHeader(csvColumnName)];
+                            if (csvValue !== undefined && csvValue !== null && csvValue !== '') {
+                                mappedData[fieldKey] = csvValue;
+                            }
+                        });
 
                         // Email is optional - no generation needed
                         // Check required fields - only firstName and lastName are required
@@ -3150,5 +3086,39 @@ exports.leadListStatistics = async (req, res) => {
     } catch (err) {
         console.error("Lead statistics failed:", err);
         res.status(500).json({ success: false, msg: "Could not load statistics" });
+    }
+};
+
+const LEAD_VIEW_COLUMNS = ["contact", "phone", "status", "country", "brand", "source", "fileName", "remarks", "agent", "created"];
+
+exports.getLeadViewColumns = async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).select("leadViewColumns").lean();
+        const saved = Array.isArray(user?.leadViewColumns)
+            ? user.leadViewColumns.filter((key) => LEAD_VIEW_COLUMNS.includes(key))
+            : null;
+        res.json({ success: true, columns: saved });
+    } catch (error) {
+        console.error("Get lead columns failed:", error);
+        res.status(500).json({ success: false, msg: "Could not load lead columns" });
+    }
+};
+
+exports.updateLeadViewColumns = async (req, res) => {
+    try {
+        let incoming = req.body?.columns;
+        if (typeof incoming === "string") {
+            try { incoming = JSON.parse(incoming); } catch (error) { incoming = null; }
+        }
+        incoming = Array.isArray(incoming) ? incoming : null;
+        if (!incoming) {
+            return res.status(400).json({ success: false, msg: "columns are required" });
+        }
+        const columns = [...new Set(incoming.filter((key) => LEAD_VIEW_COLUMNS.includes(key)))];
+        await User.updateOne({ _id: req.user._id }, { $set: { leadViewColumns: columns } });
+        res.json({ success: true, columns });
+    } catch (error) {
+        console.error("Save lead columns failed:", error);
+        res.status(500).json({ success: false, msg: "Could not save lead columns" });
     }
 };

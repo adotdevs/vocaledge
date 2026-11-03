@@ -558,6 +558,23 @@ a=ptime:20\r
                 const assistantId = await vapiInstance.createOrGetAssistant();
                 console.log(`   ✅ Assistant ID: ${assistantId}`);
 
+                if (metadata.userSipConfig?.enabled && metadata.userSipConfig.server && metadata.userSipConfig.username && metadata.userSipConfig.password) {
+                    const trunkPhoneNumberId = await vapiInstance.ensureTrunkPhoneNumber(metadata.userSipConfig);
+                    vapiInstance.phoneNumberId = trunkPhoneNumberId;
+                    const parsedTrunk = VapiIntegration.parseSipEndpoint(
+                        metadata.userSipConfig.server,
+                        metadata.userSipConfig.port
+                    );
+                    console.log(`📞 Outbound SIP trunk: ${parsedTrunk.host}:${parsedTrunk.port} as ${metadata.userSipConfig.username}`);
+                    if (metadata.userId && metadata.userVapiConfig?.phoneNumberId !== trunkPhoneNumberId) {
+                        const User = require('../models/userModel');
+                        await User.updateOne(
+                            { _id: metadata.userId },
+                            { $set: { 'vapiConfig.phoneNumberId': trunkPhoneNumberId } }
+                        );
+                    }
+                }
+
                 // Create call via Vapi API
                 const vapiCall = await vapiInstance.createCall(normalizedPhone, assistantId, {
                     leadId: metadata.leadId,
@@ -660,7 +677,11 @@ a=ptime:20\r
 
         if (metadata.userSipConfig && metadata.userSipConfig.enabled) {
             // User has custom SIP config - use it for this call
-            const sipServer = metadata.userSipConfig.server.replace(/^https?:\/\//, '');
+            const parsedSip = VapiIntegration.parseSipEndpoint(
+                metadata.userSipConfig.server,
+                metadata.userSipConfig.port
+            );
+            const sipServer = parsedSip.host;
             const sipIP = sipServer === 'reg.g-call.tel' ? '65.109.172.127' : sipServer;
 
             activeConfig = {
@@ -668,7 +689,7 @@ a=ptime:20\r
                 domain: sipServer,
                 username: metadata.userSipConfig.username,
                 password: metadata.userSipConfig.password,
-                port: metadata.userSipConfig.port || 5060,
+                port: parsedSip.port,
                 useTrunk: true
             };
             console.log(`\n📞 Using user-specific SIP config for call handling`);

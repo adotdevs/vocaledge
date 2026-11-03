@@ -1,4 +1,5 @@
 const axios = require('axios');
+const dgram = require('dgram');
 const path = require('path');
 const fs = require('fs');
 const WebSocket = require('ws');
@@ -1129,6 +1130,167 @@ class VapiIntegration {
      * @param {string} options.auth.password - SIP password
      * @returns {Promise<Object>} Created credential
      */
+    static parseSipEndpoint(server, fallbackPort = 5060) {
+        let raw = String(server || "").trim().replace(/^https?:\/\//, "").replace(/^[^@]+@/, "");
+        let host = raw;
+        let port = Number(fallbackPort) || 5060;
+        const match = raw.match(/^(.*):(\d+)$/);
+        if (match && match[1]) {
+            host = match[1];
+            port = Number(match[2]) || port;
+        }
+        return { host, port };
+    }
+
+    static discoverSipRealm(host, port) {
+        const once = (method) => new Promise((resolve) => {
+            if (!host) return resolve("");
+            const socket = dgram.createSocket("udp4");
+            const callId = `realm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            const packet = [
+                `${method} sip:${host} SIP/2.0`,
+                `Via: SIP/2.0/UDP 127.0.0.1:5099;branch=z9hG4bK${callId};rport`,
+                "Max-Forwards: 70",
+                `From: <sip:probe@${host}>;tag=realm`,
+                `To: <sip:${method === "REGISTER" ? `probe@${host}` : host}>`,
+                `Call-ID: ${callId}`,
+                `CSeq: 1 ${method}`,
+                "Content-Length: 0",
+                "",
+                "",
+            ].join("\r\n");
+            const finish = (realm) => {
+                clearTimeout(timer);
+                try { socket.close(); } catch (error) { /* already closed */ }
+                resolve(realm || "");
+            };
+            const timer = setTimeout(() => finish(""), 2500);
+            socket.on("message", (msg) => {
+                const text = String(msg);
+                const realm = (text.match(/realm="([^"]+)"/i) || text.match(/realm=([^;\s,]+)/i) || [])[1] || "";
+                finish(realm);
+            });
+            socket.on("error", () => finish(""));
+            socket.send(Buffer.from(packet), Number(port) || 5060, host);
+        });
+        return (async () => {
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                const realm = await once(attempt % 2 === 0 ? "OPTIONS" : "REGISTER");
+                if (realm) return realm;
+            }
+            return "";
+        })();
+    }
+
+    async ensureTrunkPhoneNumber(sip) {
+        const { host, port } = VapiIntegration.parseSipEndpoint(sip?.server, sip?.port);
+        const username = String(sip?.username || "").trim();
+        const password = String(sip?.password || "");
+        if (!host || !username || !password) {
+            throw new Error("SIP server, username, and password are required");
+        }
+
+        const realm = await VapiIntegration.discoverSipRealm(host, port);
+        const credentials = await this.getSipTrunkCredentials();
+        let credential = (credentials || []).find((item) => {
+            const sameUser = item.outboundAuthenticationPlan?.authUsername === username;
+            const sameGateway = (item.gateways || []).some((gateway) => {
+                const gatewayHost = gateway.ip || gateway.domain || "";
+                const gatewayPort = Number(gateway.port || 5060);
+                return gatewayHost === host && gatewayPort === port;
+            });
+            return sameUser && sameGateway;
+        });
+
+        const trunkOptions = {
+            name: `${username}@${host}:${port}`,
+            gateways: [{ ip: host, port, inboundEnabled: false, outboundEnabled: true, outboundProtocol: "udp" }],
+            outboundLeadingPlusEnabled: false,
+            auth: { username, password, realm, domain: host },
+        };
+
+        if (!credential) {
+            credential = await this.createSipTrunkCredential(trunkOptions);
+        } else if (realm && credential.outboundAuthenticationPlan?.sipRegisterPlan?.realm !== realm) {
+            credential = await this.updateSipTrunkCredential(credential.id, trunkOptions);
+        }
+
+        const vapiNumberPattern = /^\+?[a-zA-Z0-9]+$/;
+        const digits = username.replace(/\D/g, "");
+        const sendsLoginAsCaller = vapiNumberPattern.test(username) && username.length >= 3;
+        const callerNumber = sendsLoginAsCaller ? username : (digits.length >= 3 ? digits : "100");
+        if (!sendsLoginAsCaller) {
+            console.warn(`⚠️ SIP username "${username}" cannot be used as the Vapi caller number (letters and digits only). Servers that match the caller to the login will reject these calls with 401.`);
+        }
+
+        const numbers = await this.getPhoneNumbers();
+        const linked = (numbers || []).find((item) => item.credentialId === credential.id);
+        if (linked?.id) {
+            if (sendsLoginAsCaller && linked.number !== callerNumber) {
+                await axios.patch(
+                    `${this.baseUrl}/phone-number/${linked.id}`,
+                    { number: callerNumber, numberE164CheckEnabled: false },
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${this.apiKey}`,
+                            'Content-Type': 'application/json'
+                        },
+                        timeout: 30000
+                    }
+                );
+            }
+            return linked.id;
+        }
+
+        const created = await this.createSipTrunkPhoneNumber({
+            number: callerNumber,
+            name: `${username}@${host}:${port}`,
+            credentialId: credential.id,
+            numberE164CheckEnabled: false,
+        });
+        return created.id;
+    }
+
+    sipTrunkPayload(options, gateways) {
+        const auth = {
+            authUsername: options.auth.username,
+            authPassword: options.auth.password,
+        };
+        if (options.auth.realm) {
+            auth.sipRegisterPlan = {
+                realm: options.auth.realm,
+                username: options.auth.username,
+                domain: options.auth.domain || gateways[0]?.ip,
+            };
+        }
+        return {
+            provider: 'byo-sip-trunk',
+            name: options.name || 'SIP Trunk',
+            gateways: gateways,
+            outboundLeadingPlusEnabled: options.outboundLeadingPlusEnabled !== false,
+            outboundAuthenticationPlan: auth,
+        };
+    }
+
+    async updateSipTrunkCredential(credentialId, options) {
+        const gateways = [{ ip: options.gateways[0].ip, port: options.gateways[0].port, inboundEnabled: false, outboundEnabled: true, outboundProtocol: "udp" }];
+        const payload = this.sipTrunkPayload(options, gateways);
+        delete payload.provider;
+        const response = await axios.patch(
+            `${this.baseUrl}/credential/${credentialId}`,
+            payload,
+            {
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 30000
+            }
+        );
+        console.log(`✅ SIP trunk credential updated: ${credentialId}`);
+        return response.data;
+    }
+
     async createSipTrunkCredential(options) {
         if (!this.apiKey) {
             throw new Error('VAPI_API_KEY not configured');
@@ -1147,25 +1309,18 @@ class VapiIntegration {
             
             // Ensure each gateway has the correct format
             gateways = gateways.map(gw => {
-                if (typeof gw === 'string') {
-                    return { ip: gw, inboundEnabled: options.inboundEnabled !== false };
-                }
+                const source = typeof gw === 'string' ? gw : (gw.ip || gw.domain || gw);
+                const parsed = VapiIntegration.parseSipEndpoint(source, gw.port);
                 return {
-                    ip: gw.ip || gw.domain || gw,
-                    inboundEnabled: gw.inboundEnabled !== false
+                    ip: parsed.host,
+                    port: parsed.port,
+                    inboundEnabled: typeof gw === 'object' ? gw.inboundEnabled === true : options.inboundEnabled === true,
+                    outboundEnabled: typeof gw === 'object' ? gw.outboundEnabled !== false : true,
+                    outboundProtocol: typeof gw === 'object' && gw.outboundProtocol ? gw.outboundProtocol : 'udp',
                 };
             });
             
-            const payload = {
-                provider: 'byo-sip-trunk',
-                name: options.name || 'SIP Trunk',
-                gateways: gateways,
-                outboundLeadingPlusEnabled: options.outboundLeadingPlusEnabled !== false,
-                outboundAuthenticationPlan: {
-                    authUsername: options.auth.username,
-                    authPassword: options.auth.password
-                }
-            };
+            const payload = this.sipTrunkPayload(options, gateways);
             
             console.log(`📞 Creating SIP trunk credential: ${options.name}`);
             console.log(`   Gateways: ${JSON.stringify(gateways, null, 2)}`);
@@ -1290,14 +1445,11 @@ class VapiIntegration {
                     headers: {
                         'Authorization': `Bearer ${this.apiKey}`,
                         'Content-Type': 'application/json'
-                    },
-                    params: {
-                        provider: 'byo-sip-trunk'
                     }
                 }
             );
-            
-            return response.data || [];
+            const rows = Array.isArray(response.data) ? response.data : (response.data?.results || []);
+            return rows.filter((item) => item.provider === 'byo-sip-trunk');
         } catch (error) {
             console.error('❌ Error getting SIP trunk credentials:', error.message);
             throw error;

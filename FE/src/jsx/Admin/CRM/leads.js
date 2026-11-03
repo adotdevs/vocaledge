@@ -95,6 +95,7 @@ import {
     NotificationsActive,
     OpenInNew,
     ContentCopy,
+    ViewColumn,
 } from "@mui/icons-material";
 import {
     adminCrmLeadsApi,
@@ -121,7 +122,9 @@ import {
     activateLeadsBulkWithProgress,
     getEmailQueueStatusApi,
     getLeadWithActivityApi,
-    addLeadCommentApi
+    addLeadCommentApi,
+    getLeadViewColumnsApi,
+    saveLeadViewColumnsApi
 } from "../../../Api/Service";
 import { toast } from "react-toastify";
 import Sidebar from "./Sidebar.js";
@@ -217,6 +220,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
     const [csvHeaders, setCsvHeaders] = useState([]);
     const [csvPreview, setCsvPreview] = useState([]);
     const [fieldMapping, setFieldMapping] = useState({});
+    const fieldMappingRef = useRef({});
     const [callAfterUpload, setCallAfterUpload] = useState(false);
     const [addPhonePlusPrefix, setAddPhonePlusPrefix] = useState(false);
     const [uploadedLeadIds, setUploadedLeadIds] = useState([]);
@@ -290,7 +294,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
         reader.onload = (e) => {
             const csvText = e.target.result;
             const lines = csvText.split('\n');
-            const headers = lines[0].split(',').map(header => header.trim().replace(/"/g, ''));
+            const headers = lines[0].split(',').map(header => header.replace(/^\uFEFF/, '').trim().replace(/^"|"$/g, ''));
 
             setCsvHeaders(headers);
 
@@ -306,28 +310,31 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
 
             setCsvPreview(previewRows);
 
-            // Auto-map fields based on header names
+            const headerAliases = {
+                firstName: ['firstname', 'first name', 'fname', 'given name', 'forename'],
+                lastName: ['lastname', 'last name', 'lname', 'surname', 'family name'],
+            };
             const autoMapping = {};
             headers.forEach(header => {
-                const matchedField = leadFields.find(field =>
-                    header.toLowerCase().includes(field.key.toLowerCase()) ||
-                    field.key.toLowerCase().includes(header.toLowerCase()) ||
-                    header.toLowerCase().includes(field.label.toLowerCase())
-                );
-                if (matchedField) {
-                    autoMapping[matchedField.key] = header;
-                }
+                const name = header.toLowerCase();
+                const matchedField = leadFields.find((field) => {
+                    const aliases = headerAliases[field.key] || [field.label.toLowerCase(), field.key.toLowerCase()];
+                    return aliases.includes(name);
+                });
+                if (matchedField && !autoMapping[matchedField.key]) autoMapping[matchedField.key] = header;
             });
+            fieldMappingRef.current = autoMapping;
             setFieldMapping(autoMapping);
         };
         reader.readAsText(file);
     };
 
     const handleFieldMappingChange = (fieldKey, csvHeader) => {
-        setFieldMapping(prev => ({
-            ...prev,
-            [fieldKey]: csvHeader
-        }));
+        setFieldMapping(prev => {
+            const next = { ...prev, [fieldKey]: csvHeader };
+            fieldMappingRef.current = next;
+            return next;
+        });
     };
 
     const handleFieldSelectionChange = (fieldKey, isSelected) => {
@@ -341,6 +348,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
             setFieldMapping(prev => {
                 const newMapping = { ...prev };
                 delete newMapping[fieldKey];
+                fieldMappingRef.current = newMapping;
                 return newMapping;
             });
             if (fieldKey === 'Brand') setOverrideBrand("");
@@ -349,14 +357,12 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
     };
 
     const validateFieldMapping = () => {
-        // Check if all required fields are mapped
-        const requiredFields = leadFields.filter(field => field.required);
-        const missingRequired = requiredFields.some(field =>
-            selectedFields[field.key] && !fieldMapping[field.key]
-        );
+        const mapping = fieldMappingRef.current || {};
+        const missing = ['firstName', 'lastName'].filter((key) => !String(mapping[key] || '').trim());
 
-        if (missingRequired) {
-            toast.error('Please map all required fields');
+        if (missing.length) {
+            const labels = missing.map((key) => leadFields.find((field) => field.key === key)?.label || key);
+            toast.error(`Choose a CSV column for ${labels.join(' and ')}`);
             return false;
         }
 
@@ -620,6 +626,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
         setCsvFile(null);
         setCsvHeaders([]);
         setCsvPreview([]);
+        fieldMappingRef.current = {};
         setFieldMapping({});
         setMappingComplete(false);
         setActiveStep(0);
@@ -1781,6 +1788,37 @@ const CopyPhoneButton = memo(({ phone, isCopied = false, onCopy }) => {
 
 CopyPhoneButton.displayName = "CopyPhoneButton";
 
+const LEAD_COLUMN_OPTIONS = [
+    { key: "contact", label: "Contact" },
+    { key: "phone", label: "Phone" },
+    { key: "status", label: "Status" },
+    { key: "country", label: "Country" },
+    { key: "brand", label: "Brand" },
+    { key: "source", label: "Source" },
+    { key: "fileName", label: "File Name" },
+    { key: "remarks", label: "Remarks" },
+    { key: "agent", label: "Agent" },
+    { key: "created", label: "Created" },
+];
+const LEAD_COLUMN_KEYS = LEAD_COLUMN_OPTIONS.map((column) => column.key);
+const leadColumnStorageKey = (userId) => `crm-lead-columns:${userId}`;
+const readStoredLeadColumns = (userId) => {
+    if (!userId || typeof window === "undefined") return null;
+    try {
+        const raw = window.localStorage.getItem(leadColumnStorageKey(userId));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return null;
+        return parsed.filter((key) => LEAD_COLUMN_KEYS.includes(key));
+    } catch (error) {
+        return null;
+    }
+};
+const writeStoredLeadColumns = (userId, columns) => {
+    if (!userId || typeof window === "undefined") return;
+    window.localStorage.setItem(leadColumnStorageKey(userId), JSON.stringify(columns));
+};
+
 const LeadsPage = () => {
 
     let authUser = useAuthUser();
@@ -2674,9 +2712,83 @@ const LeadsPage = () => {
     const canViewLeadSource = can('canViewLeadSource');
     const canViewLeadBrand = can('canViewLeadBrand');
     const canViewLeadFileName = can('canViewLeadFileName');
-    const leadColumnCount = 11 + (canViewLeadSource ? 1 : 0) + (canViewLeadBrand ? 1 : 0) + (canViewLeadFileName ? 1 : 0);
-    const [filterLeadStatuses, setFilterLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
+    const signedInUserId = String(authUser()?.user?._id || "");
+    const [leadColumns, setLeadColumns] = useState(() => readStoredLeadColumns(signedInUserId));
+    const [columnPanelPos, setColumnPanelPos] = useState(null);
+    const columnPanelRef = useRef(null);
+    const columnSaveTimer = useRef(null);
+    const columnAllowed = useCallback((key) => {
+        if (key === "brand") return canViewLeadBrand;
+        if (key === "source") return canViewLeadSource;
+        if (key === "fileName") return canViewLeadFileName;
+        return true;
+    }, [canViewLeadBrand, canViewLeadSource, canViewLeadFileName]);
+    const showLeadColumn = useCallback((key) => (
+        Array.isArray(leadColumns) && leadColumns.includes(key) && columnAllowed(key)
+    ), [leadColumns, columnAllowed]);
+    const leadColumnCount = 4 + LEAD_COLUMN_OPTIONS.filter((column) => showLeadColumn(column.key)).length;
 
+    useEffect(() => {
+        const stored = readStoredLeadColumns(signedInUserId);
+        if (stored) setLeadColumns(stored);
+        let ignore = false;
+        getLeadViewColumnsApi().then((res) => {
+            if (ignore) return;
+            if (Array.isArray(res?.columns)) {
+                const saved = res.columns.filter((key) => LEAD_COLUMN_KEYS.includes(key));
+                writeStoredLeadColumns(signedInUserId, saved);
+                setLeadColumns(saved);
+                return;
+            }
+            if (!stored) {
+                writeStoredLeadColumns(signedInUserId, LEAD_COLUMN_KEYS);
+                setLeadColumns(LEAD_COLUMN_KEYS);
+            }
+        }).catch(() => {
+            if (!ignore && !stored) setLeadColumns(LEAD_COLUMN_KEYS);
+        });
+        return () => { ignore = true; };
+    }, [signedInUserId]);
+
+    useEffect(() => {
+        if (!columnPanelPos) return undefined;
+        const closeOnOutside = (event) => {
+            const target = event.target;
+            if (target?.closest?.("[data-lead-columns-button='true']")) return;
+            if (columnPanelRef.current && columnPanelRef.current.contains(target)) return;
+            setColumnPanelPos(null);
+        };
+        document.addEventListener("mousedown", closeOnOutside);
+        return () => document.removeEventListener("mousedown", closeOnOutside);
+    }, [columnPanelPos]);
+
+    useEffect(() => () => {
+        if (columnSaveTimer.current) clearTimeout(columnSaveTimer.current);
+    }, []);
+
+    const applyLeadColumns = (next) => {
+        const clean = LEAD_COLUMN_KEYS.filter((key) => next.includes(key));
+        setLeadColumns(clean);
+        writeStoredLeadColumns(signedInUserId, clean);
+        if (columnSaveTimer.current) clearTimeout(columnSaveTimer.current);
+        columnSaveTimer.current = setTimeout(() => {
+            saveLeadViewColumnsApi(clean).catch(() => {});
+        }, 700);
+    };
+    const toggleLeadColumn = (key) => {
+        const base = Array.isArray(leadColumns) ? leadColumns : LEAD_COLUMN_KEYS;
+        const next = base.includes(key) ? base.filter((item) => item !== key) : [...base, key];
+        applyLeadColumns(next);
+    };
+    const visibleColumnChoices = LEAD_COLUMN_OPTIONS.filter((column) => columnAllowed(column.key));
+    const selectedColumnCount = visibleColumnChoices.filter((column) => Array.isArray(leadColumns) && leadColumns.includes(column.key)).length;
+    const allColumnsSelected = visibleColumnChoices.length > 0 && selectedColumnCount === visibleColumnChoices.length;
+    const toggleAllLeadColumns = () => {
+        const allowedKeys = visibleColumnChoices.map((column) => column.key);
+        const kept = (Array.isArray(leadColumns) ? leadColumns : []).filter((key) => !allowedKeys.includes(key));
+        applyLeadColumns(allColumnsSelected ? kept : [...kept, ...allowedKeys]);
+    };
+    const [filterLeadStatuses, setFilterLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
     useEffect(() => {
         return subscribeLeadStatuses(setFilterLeadStatuses);
     }, []);
@@ -4031,6 +4143,96 @@ const LeadsPage = () => {
                                         ? 'Clear Selection'
                                         : `Select All (${pagination.totalFiltered.toLocaleString()})`}
                             </Button>
+                            <Button
+                                variant="outlined"
+                                data-lead-columns-button="true"
+                                startIcon={<ViewColumn sx={{ display: { xs: 'none', sm: 'block' } }} />}
+                                onClick={(event) => {
+                                    const rect = event.currentTarget.getBoundingClientRect();
+                                    const top = Math.min(rect.bottom + 8, window.innerHeight - 360);
+                                    setColumnPanelPos({ top: Math.max(8, top), right: Math.max(8, window.innerWidth - rect.right) });
+                                }}
+                                size="small"
+                                sx={{
+                                    borderRadius: 2,
+                                    flex: { xs: '1 1 auto', sm: '0 0 auto' }
+                                }}
+                            >
+                                Columns
+                            </Button>
+                            {columnPanelPos && (
+                            <Box
+                                ref={columnPanelRef}
+                                sx={{
+                                    position: "fixed",
+                                    top: columnPanelPos.top,
+                                    right: columnPanelPos.right,
+                                    zIndex: 1600,
+                                    width: 340,
+                                    maxHeight: "min(420px, calc(100vh - 24px))",
+                                    overflowY: "auto",
+                                    bgcolor: "background.paper",
+                                    borderRadius: 3,
+                                    border: "1px solid",
+                                    borderColor: "divider",
+                                    boxShadow: "0 18px 50px rgba(16, 24, 40, 0.16)",
+                                }}
+                            >
+                                <Box sx={{ px: 2, pt: 1.75, pb: 1.25 }}>
+                                    <Typography variant="subtitle2" fontWeight={800}>Table columns</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        {selectedColumnCount} of {visibleColumnChoices.length} visible
+                                    </Typography>
+                                </Box>
+                                <Divider />
+                                <Box
+                                    onClick={toggleAllLeadColumns}
+                                    sx={{
+                                        mx: 1,
+                                        mt: 1,
+                                        px: 1,
+                                        py: 0.75,
+                                        borderRadius: 2,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        cursor: "pointer",
+                                        "&:hover": { bgcolor: "action.hover" },
+                                    }}
+                                >
+                                    <Checkbox
+                                        size="small"
+                                        checked={allColumnsSelected}
+                                        indeterminate={selectedColumnCount > 0 && !allColumnsSelected}
+                                        sx={{ p: 0.5, mr: 1 }}
+                                    />
+                                    <Typography variant="body2" fontWeight={700}>Select all</Typography>
+                                </Box>
+                                <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0.5, p: 1 }}>
+                                    {visibleColumnChoices.map((column) => {
+                                        const checked = Array.isArray(leadColumns) && leadColumns.includes(column.key);
+                                        return (
+                                            <Box
+                                                key={column.key}
+                                                onClick={() => toggleLeadColumn(column.key)}
+                                                sx={{
+                                                    px: 1,
+                                                    py: 0.75,
+                                                    borderRadius: 2,
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    cursor: "pointer",
+                                                    bgcolor: checked ? "rgba(109, 74, 255, 0.08)" : "transparent",
+                                                    "&:hover": { bgcolor: checked ? "rgba(109, 74, 255, 0.12)" : "action.hover" },
+                                                }}
+                                            >
+                                                <Checkbox size="small" checked={checked} sx={{ p: 0.5, mr: 0.75, color: checked ? "#6d4aff" : undefined }} />
+                                                <Typography variant="body2" fontWeight={checked ? 700 : 500}>{column.label}</Typography>
+                                            </Box>
+                                        );
+                                    })}
+                                </Box>
+                            </Box>
+                            )}
                             {can('canExportLeads') && (
                             <Button
                                 variant="outlined"
@@ -4545,43 +4747,57 @@ const LeadsPage = () => {
                                                     />
                                                 </TableCell>
                                                 <TableCell />
+                                                {showLeadColumn("contact") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 200 }}>
                                                     Contact
                                                 </TableCell>
+                                                )}
+                                                {showLeadColumn("phone") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 130 }}>
                                                     Phone
                                                 </TableCell>
+                                                )}
+                                                {showLeadColumn("status") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 120 }}>
                                                     Status
                                                 </TableCell>
+                                                )}
+                                                {showLeadColumn("country") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 120 }}>
                                                     Country
                                                 </TableCell>
-                                                {canViewLeadBrand && (
+                                                )}
+                                                {showLeadColumn("brand") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 120 }}>
                                                     Brand
                                                 </TableCell>
                                                 )}
-                                                {canViewLeadSource && (
+                                                {showLeadColumn("source") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 140 }}>
                                                     Source
                                                 </TableCell>
                                                 )}
-                                                {canViewLeadFileName && (
+                                                {showLeadColumn("fileName") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 140 }}>
                                                     File Name
                                                 </TableCell>
                                                 )}
-                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 160 }}>
+                                                {showLeadColumn("remarks") && (
+                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 160 }}>
                                                     Remarks
                                                 </TableCell>
+                                                )}
+                                                {showLeadColumn("agent") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 150 }}>
                                                     Agent
                                                 </TableCell>
+                                                )}
+                                                {showLeadColumn("created") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 120 }}>
                                                     Created
                                                 </TableCell>
-                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 100, textAlign: 'center' }}>
+                                                )}
+                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 100, textAlign: "center" }}>
                                                     Call
                                                 </TableCell>
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 90 }}>
@@ -4623,6 +4839,7 @@ const LeadsPage = () => {
                                                                 {expandedLead === lead._id ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
                                                             </IconButton>
                                                         </TableCell>
+                                                        {showLeadColumn("contact") && (
                                                         <TableCell>
                                                             <Box>
                                                                 <Typography
@@ -4660,6 +4877,8 @@ const LeadsPage = () => {
                                                                 </Box>
                                                             </Box>
                                                         </TableCell>
+                                                        )}
+                                                        {showLeadColumn("phone") && (
                                                         <TableCell>
                                                             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                                                                 <Phone sx={{ fontSize: 16, color: "text.secondary" }} />
@@ -4686,6 +4905,8 @@ const LeadsPage = () => {
                                                                 />
                                                             </Box>
                                                         </TableCell>
+                                                        )}
+                                                        {showLeadColumn("status") && (
                                                         <TableCell onClick={(e) => e.stopPropagation()}>
                                                             {can('canChangeLeadStatus') ? (
                                                             <InlineLeadStatusCell
@@ -4697,45 +4918,54 @@ const LeadsPage = () => {
                                                                 <Chip label={lead.status || 'New'} size="small" sx={getStatusChipSx(getStatusColor(lead.status, filterLeadStatuses))} />
                                                             )}
                                                         </TableCell>
+                                                        )}
+                                                        {showLeadColumn("country") && (
                                                         <TableCell>
                                                             <Typography variant="body2">{lead.country}</Typography>
                                                         </TableCell>
-                                                        {canViewLeadBrand && (
+                                                        )}
+                                                        {showLeadColumn("brand") && (
                                                         <TableCell>
                                                             <Typography variant="body2" fontWeight="medium">
                                                                 {lead.Brand}
                                                             </Typography>
                                                         </TableCell>
                                                         )}
-                                                        {canViewLeadSource && (
+                                                        {showLeadColumn("source") && (
                                                         <TableCell>
                                                             <Typography variant="body2" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.source || ''}>
                                                                 {lead.source || '—'}
                                                             </Typography>
                                                         </TableCell>
                                                         )}
-                                                        {canViewLeadFileName && (
+                                                        {showLeadColumn("fileName") && (
                                                         <TableCell>
                                                             <Typography variant="body2" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.fileName || ''}>
                                                                 {lead.fileName || '—'}
                                                             </Typography>
                                                         </TableCell>
                                                         )}
+                                                        {showLeadColumn("remarks") && (
                                                         <TableCell>
                                                             <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lead.remarks || ''}>
                                                                 {lead.remarks || '—'}
                                                             </Typography>
                                                         </TableCell>
+                                                        )}
+                                                        {showLeadColumn("agent") && (
                                                         <TableCell>
                                                             <Typography variant="body2" fontWeight="medium">
                                                                 {lead.agent ? `${lead.agent.firstName} ${lead.agent.lastName} (${lead.agent.role})` : 'Unassigned'}
                                                             </Typography>
                                                         </TableCell>
+                                                        )}
+                                                        {showLeadColumn("created") && (
                                                         <TableCell>
                                                             <Typography variant="body2" color="text.secondary">
                                                                 {formatDate(lead.createdAt)}
                                                             </Typography>
                                                         </TableCell>
+                                                        )}
                                                         <TableCell sx={{ textAlign: 'center' }}>
                                                             {(() => {
                                                                 const callInfo = leadCallStatuses[lead._id];
