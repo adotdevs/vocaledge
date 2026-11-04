@@ -133,39 +133,49 @@ const poolFilter = async (Lead, rules = {}) => {
         ...heldBy,
         ...heldBy.map((id) => String(id)),
     ];
-    const defaultAgents = [
+    const agentMatch = [
         { agent: null },
         { agent: { $exists: false } },
         ...(hasBlank ? [{ agent: "" }] : []),
         ...(heldByValues.length ? [{ agent: { $in: heldByValues } }] : []),
     ];
-    const chosenAgents = cleanRuleList(rules.agentIds);
-    let agentMatch = defaultAgents;
-    if (chosenAgents.length) {
-        const includeUnassigned = chosenAgents.includes("unassigned");
-        const ids = chosenAgents.filter((id) => id !== "unassigned" && mongoose.Types.ObjectId.isValid(id));
-        const values = [...ids, ...ids.map((id) => new mongoose.Types.ObjectId(id))];
-        agentMatch = [
-            ...(includeUnassigned ? [{ agent: null }, { agent: { $exists: false } }, ...(hasBlank ? [{ agent: "" }] : [])] : []),
-            ...(values.length ? [{ agent: { $in: values } }] : []),
-        ];
-        if (!agentMatch.length) agentMatch = defaultAgents;
+    const settings = await UserRestriction.findOne().select("automationAllow").lean();
+    const allow = settings?.automationAllow || {};
+    const globalLists = cleanRuleList(allow.fileNames);
+    const globalCountries = cleanRuleList(allow.countries);
+    const globalBrands = cleanRuleList(allow.brands);
+    const globalSources = cleanRuleList(allow.sources);
+    const ownLists = cleanRuleList(rules.listNames);
+    const ownCountries = cleanRuleList(rules.countries);
+    const ownBrands = cleanRuleList(rules.brands);
+    const ownSources = cleanRuleList(rules.sources);
+    const narrow = (globalValues, ownValues) => {
+        if (globalValues.length && ownValues.length) return globalValues.filter((value) => ownValues.includes(value));
+        if (ownValues.length) return ownValues;
+        return globalValues;
+    };
+    const lists = narrow(globalLists, ownLists);
+    const countries = narrow(globalCountries, ownCountries);
+    const brands = narrow(globalBrands, ownBrands);
+    const sources = narrow(globalSources, ownSources);
+    const blocked = (globalValues, ownValues) => globalValues.length && ownValues.length && !globalValues.some((value) => ownValues.includes(value));
+    if ([ 
+        [globalLists, ownLists],
+        [globalCountries, ownCountries],
+        [globalBrands, ownBrands],
+        [globalSources, ownSources],
+    ].some(([globalValues, ownValues]) => blocked(globalValues, ownValues))) {
+        return { _id: { $in: [] } };
     }
-    const settings = await UserRestriction.findOne().select("automationSkip").lean();
-    const skip = settings?.automationSkip || {};
-    const skippedLists = [...new Set([...cleanRuleList(rules.listNames), ...cleanRuleList(skip.fileNames)])];
-    const skippedCountries = [...new Set([...cleanRuleList(rules.countries), ...cleanRuleList(skip.countries)])];
-    const skipBrands = cleanRuleList(skip.brands);
-    const skipSources = cleanRuleList(skip.sources);
     return {
         isDeleted: false,
         ...newLeadStatus,
         $and: [
             { $or: agentMatch },
-            ...(skippedLists.length ? [{ fileName: { $nin: skippedLists } }] : []),
-            ...(skippedCountries.length ? [{ country: { $nin: skippedCountries } }] : []),
-            ...(skipBrands.length ? [{ Brand: { $nin: skipBrands } }] : []),
-            ...(skipSources.length ? [{ source: { $nin: skipSources } }] : []),
+            ...(lists.length ? [{ fileName: { $in: lists } }] : []),
+            ...(countries.length ? [{ country: { $in: countries } }] : []),
+            ...(brands.length ? [{ Brand: { $in: brands } }] : []),
+            ...(sources.length ? [{ source: { $in: sources } }] : []),
         ],
     };
 };
@@ -238,7 +248,7 @@ const claimNewLeads = async (owner) => {
     if (!lockedUser) return emptyResult();
 
     try {
-        if (owner?.leadAutomation?.enabled === false) {
+        if (owner?.leadAutomation?.enabled !== true) {
             console.log(`Lead refill skipped: automation is off for ${owner._id}`);
             return emptyResult();
         }
@@ -307,7 +317,7 @@ const refillIfEmpty = (userId) => {
         }
         const owner = await User.findById(key).select("firstName lastName email role adminPermissions permissions leadAutomation").lean();
         if (!owner || (owner.role !== "admin" && owner.role !== "subadmin" && owner.role !== "manager")) return emptyResult();
-        if (owner.leadAutomation?.enabled === false) {
+        if (owner.leadAutomation?.enabled !== true) {
             console.log(`Lead refill skipped: automation is off for ${key}`);
             return emptyResult();
         }
@@ -348,7 +358,7 @@ const reportLeadShortages = async () => {
     const Lead = await getLeadModel();
     let opened = false;
     for (const user of candidates) {
-        if (!userCanOpenCrm(user) || user.leadAutomation?.enabled === false) continue;
+        if (!userCanOpenCrm(user) || user.leadAutomation?.enabled !== true) continue;
         const owned = await hasOwnNewLead(Lead, user._id);
         if (owned > 0) {
             await resolveShortageAlert(user._id);

@@ -24,6 +24,12 @@ const UserRestrictions = new mongoose.Schema({
         brands: { type: [String], default: [] },
         sources: { type: [String], default: [] },
     },
+    automationAllow: {
+        fileNames: { type: [String], default: [] },
+        countries: { type: [String], default: [] },
+        brands: { type: [String], default: [] },
+        sources: { type: [String], default: [] },
+    },
 }, { timestamps: true });
 
 let UserRestriction = mongoose.model("UserRestriction", UserRestrictions);

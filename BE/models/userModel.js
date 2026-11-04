@@ -469,10 +469,12 @@ let userSchema = new mongoose.Schema({
   },
   lastActivity: { type: Date, default: null },
   leadAutomation: {
-    enabled: { type: Boolean, default: true },
+    enabled: { type: Boolean, default: false },
     maxLeads: { type: Number, default: 100 },
     listNames: { type: [String], default: [] },
     countries: { type: [String], default: [] },
+    brands: { type: [String], default: [] },
+    sources: { type: [String], default: [] },
     agentIds: { type: [String], default: [] },
   },
 

@@ -15,7 +15,7 @@ const openShortageAlert = async (owner) => {
   const settings = await UserRestriction.findOne().select("autoAssignNewLeads").lean();
   if (settings && settings.autoAssignNewLeads === false) return null;
   const fresh = await User.findById(owner._id).select("leadAutomation").lean();
-  if (fresh?.leadAutomation?.enabled === false) return null;
+  if (fresh?.leadAutomation?.enabled !== true) return null;
   const Alert = await getLeadShortageAlertModel();
   const agentId = owner._id;
   const open = await Alert.findOne({ agentId, status: "open" }).lean();

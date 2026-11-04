@@ -3418,14 +3418,14 @@ exports.getLeadAutomation = async (req, res) => {
     try {
         if (!superAdminOnly(req, res)) return;
         const Lead = await getLeadModel();
-        const settings = await UserRestriction.findOne().select("autoAssignNewLeads automationSkip").lean();
+        const settings = await UserRestriction.findOne().select("autoAssignNewLeads automationAllow").lean();
         const [listNames, countries, brands, sources, users, counts] = await Promise.all([
             Lead.distinct("fileName", { isDeleted: false, fileName: { $nin: [null, ""] } }),
             Lead.distinct("country", { isDeleted: false, country: { $nin: [null, ""] } }),
             Lead.distinct("Brand", { isDeleted: false, Brand: { $nin: [null, ""] } }),
             Lead.distinct("source", { isDeleted: false, source: { $nin: [null, ""] } }),
             User.find({ role: { $in: ["admin", "subadmin", "manager", "superadmin"] } })
-                .select("firstName lastName email role adminPermissions permissions leadAutomation")
+                .select("firstName lastName email role avatar adminPermissions permissions leadAutomation")
                 .sort({ firstName: 1, lastName: 1 })
                 .lean(),
             Lead.aggregate([
@@ -3447,7 +3447,7 @@ exports.getLeadAutomation = async (req, res) => {
         ]);
         const countByAgent = new Map(counts.map((row) => [String(row._id), row]));
         const sortText = (values) => values.filter(Boolean).sort((a, b) => String(a).localeCompare(String(b)));
-        const skip = settings?.automationSkip || {};
+        const allow = settings?.automationAllow || {};
         const shape = (user) => {
             const rules = user.leadAutomation || {};
             const permissions = user.role === "subadmin" ? user.permissions : user.adminPermissions;
@@ -3457,12 +3457,14 @@ exports.getLeadAutomation = async (req, res) => {
                 name: automationName(user),
                 email: user.email || "",
                 role: user.role,
+                avatar: user.avatar?.url || (typeof user.avatar === "string" ? user.avatar : ""),
                 openCrm: user.role === "superadmin" || permissions?.accessCrm === true,
-                enabled: rules.enabled !== false,
+                enabled: rules.enabled === true,
                 maxLeads: Number(rules.maxLeads) > 0 ? Number(rules.maxLeads) : 100,
                 listNames: rules.listNames || [],
                 countries: rules.countries || [],
-                agentIds: rules.agentIds || [],
+                brands: rules.brands || [],
+                sources: rules.sources || [],
                 newLeads: held.newLeads || 0,
                 totalLeads: held.total || 0,
             };
@@ -3470,11 +3472,11 @@ exports.getLeadAutomation = async (req, res) => {
         res.json({
             success: true,
             enabled: !settings || settings.autoAssignNewLeads !== false,
-            skip: {
-                fileNames: skip.fileNames || [],
-                countries: skip.countries || [],
-                brands: skip.brands || [],
-                sources: skip.sources || [],
+            allow: {
+                fileNames: allow.fileNames || [],
+                countries: allow.countries || [],
+                brands: allow.brands || [],
+                sources: allow.sources || [],
             },
             listNames: sortText(listNames),
             countries: sortText(countries),
@@ -3500,14 +3502,14 @@ exports.updateLeadAutomation = async (req, res) => {
         if (typeof req.body?.enabled === "boolean") {
             settings.autoAssignNewLeads = req.body.enabled;
         }
-        if (req.body?.skip && typeof req.body.skip === "object") {
-            settings.automationSkip = {
-                fileNames: cleanAutomationList(req.body.skip.fileNames),
-                countries: cleanAutomationList(req.body.skip.countries),
-                brands: cleanAutomationList(req.body.skip.brands),
-                sources: cleanAutomationList(req.body.skip.sources),
+        if (req.body?.allow && typeof req.body.allow === "object") {
+            settings.automationAllow = {
+                fileNames: cleanAutomationList(req.body.allow.fileNames),
+                countries: cleanAutomationList(req.body.allow.countries),
+                brands: cleanAutomationList(req.body.allow.brands),
+                sources: cleanAutomationList(req.body.allow.sources),
             };
-            settings.markModified("automationSkip");
+            settings.markModified("automationAllow");
         }
         await settings.save();
         if (settings.autoAssignNewLeads === false) {
@@ -3517,7 +3519,7 @@ exports.updateLeadAutomation = async (req, res) => {
         res.json({
             success: true,
             enabled: settings.autoAssignNewLeads !== false,
-            skip: settings.automationSkip || { fileNames: [], countries: [], brands: [], sources: [] },
+            allow: settings.automationAllow || { fileNames: [], countries: [], brands: [], sources: [] },
         });
     } catch (err) {
         console.error("Error updating lead automation:", err);
@@ -3563,11 +3565,13 @@ exports.updateLeadAutomationAdmin = async (req, res) => {
         if (!superAdminOnly(req, res)) return;
         const maxLeads = Math.min(500, Math.max(1, Math.floor(Number(req.body?.maxLeads) || 100)));
         const leadAutomation = {
-            enabled: req.body?.enabled !== false,
+            enabled: req.body?.enabled === true,
             maxLeads,
             listNames: cleanAutomationList(req.body?.listNames),
             countries: cleanAutomationList(req.body?.countries),
-            agentIds: cleanAutomationList(req.body?.agentIds),
+            brands: cleanAutomationList(req.body?.brands),
+            sources: cleanAutomationList(req.body?.sources),
+            agentIds: [],
         };
         const updated = await User.findOneAndUpdate(
             { _id: req.params.id, role: { $in: ["admin", "subadmin", "manager"] } },
@@ -3583,11 +3587,12 @@ exports.updateLeadAutomationAdmin = async (req, res) => {
             success: true,
             admin: {
                 _id: updated._id,
-                enabled: updated.leadAutomation?.enabled !== false,
+                enabled: updated.leadAutomation?.enabled === true,
                 maxLeads: updated.leadAutomation?.maxLeads || 100,
                 listNames: updated.leadAutomation?.listNames || [],
                 countries: updated.leadAutomation?.countries || [],
-                agentIds: updated.leadAutomation?.agentIds || [],
+                brands: updated.leadAutomation?.brands || [],
+                sources: updated.leadAutomation?.sources || [],
             },
         });
     } catch (err) {
