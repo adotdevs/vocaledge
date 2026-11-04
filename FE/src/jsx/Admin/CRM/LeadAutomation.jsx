@@ -11,7 +11,6 @@ import {
   CircularProgress,
   Divider,
   IconButton,
-  Switch,
   TextField,
   Toolbar,
   Typography,
@@ -53,6 +52,46 @@ const PersonAvatar = ({ name, src, size = 36, active = false }) => {
   );
 };
 
+const Toggle = ({ checked, disabled, onChange, label }) => (
+  <Box
+    component="button"
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    disabled={disabled}
+    onClick={(event) => {
+      event.stopPropagation();
+      if (!disabled) onChange(!checked);
+    }}
+    sx={{
+      width: 48,
+      height: 28,
+      p: "3px",
+      border: 0,
+      borderRadius: 999,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: checked ? "flex-end" : "flex-start",
+      flexShrink: 0,
+      cursor: disabled ? "wait" : "pointer",
+      bgcolor: checked ? "primary.main" : "#d7dbe3",
+      boxShadow: checked ? "inset 0 0 0 1px rgba(118, 52, 220, 0.35)" : "inset 0 0 0 1px rgba(15, 23, 42, 0.08)",
+      transition: "background-color 0.2s ease",
+    }}
+  >
+    <Box sx={{ width: 22, height: 22, borderRadius: "50%", bgcolor: "#fff", boxShadow: "0 1px 3px rgba(15, 23, 42, 0.28)" }} />
+  </Box>
+);
+
+const cardShell = {
+  border: "1px solid",
+  borderColor: "divider",
+  borderRadius: "18px",
+  bgcolor: "background.paper",
+  boxShadow: "0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px rgba(16, 24, 40, 0.05)",
+};
+
 const MultiSelect = ({ label, options, value, onChange, placeholder }) => {
   const theme = useTheme();
   const primary = theme.palette.primary.main;
@@ -76,10 +115,11 @@ const MultiSelect = ({ label, options, value, onChange, placeholder }) => {
         styles={{
           control: (base, state) => ({
             ...base,
-            minHeight: 42,
-            borderRadius: 10,
+            minHeight: 44,
+            borderRadius: 12,
+            cursor: "pointer",
             borderColor: state.isFocused ? primary : theme.palette.divider,
-            boxShadow: state.isFocused ? `0 0 0 1px ${primary}` : "none",
+            boxShadow: state.isFocused ? `0 0 0 3px rgba(118, 52, 220, 0.16)` : "none",
             backgroundColor: theme.palette.background.paper,
             "&:hover": { borderColor: primary },
           }),
@@ -105,14 +145,16 @@ const MultiSelect = ({ label, options, value, onChange, placeholder }) => {
           multiValueLabel: (base) => ({ ...base, color: primary, fontWeight: 700, paddingLeft: 8 }),
           multiValueRemove: (base) => ({
             ...base,
+            cursor: "pointer",
             borderRadius: 999,
             color: primary,
             ":hover": { backgroundColor: primary, color: "#fff" },
           }),
           placeholder: (base) => ({ ...base, color: theme.palette.text.secondary }),
-          input: (base) => ({ ...base, color: theme.palette.text.primary }),
+          input: (base) => ({ ...base, color: theme.palette.text.primary, cursor: "pointer" }),
           indicatorSeparator: () => ({ display: "none" }),
-          dropdownIndicator: (base, state) => ({ ...base, color: state.isFocused ? primary : theme.palette.text.secondary }),
+          dropdownIndicator: (base, state) => ({ ...base, cursor: "pointer", color: state.isFocused ? primary : theme.palette.text.secondary }),
+          clearIndicator: (base) => ({ ...base, cursor: "pointer" }),
         }}
       />
     </Box>
@@ -291,24 +333,27 @@ const LeadAutomation = () => {
           </Toolbar>
         </AppBar>
         <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", p: { xs: 2, sm: 3 } }}>
-          <Card elevation={0} sx={{ mb: 3, border: 1, borderColor: "divider", borderRadius: 3 }}>
-            <CardContent sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
-              <Box>
-                <Typography fontWeight={800}>Automation</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {enabled ? "On. Allowed admins receive leads when they have none marked New." : "Off. No leads are assigned."}
-                </Typography>
+          <Card elevation={0} sx={{ ...cardShell, mb: 3 }}>
+            <CardContent sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap", py: 2.25 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: enabled ? "success.main" : "text.disabled", boxShadow: enabled ? "0 0 0 4px rgba(46, 125, 50, 0.15)" : "none" }} />
+                <Box>
+                  <Typography fontWeight={800}>Automation</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {enabled ? "On. Allowed admins receive leads when they have none marked New." : "Off. No leads are assigned."}
+                  </Typography>
+                </Box>
               </Box>
-              <Switch checked={enabled} disabled={savingGlobal} onChange={(event) => toggleGlobal(event.target.checked)} />
+              <Toggle checked={enabled} disabled={savingGlobal} onChange={toggleGlobal} label="Automation" />
             </CardContent>
           </Card>
 
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" }, gap: 2, mb: 3, alignItems: "start" }}>
-            <Card elevation={0} sx={{ border: 1, borderColor: "divider", borderRadius: 3, opacity: enabled ? 1 : 0.45, pointerEvents: enabled ? "auto" : "none" }}>
+            <Card elevation={0} sx={{ ...cardShell, opacity: enabled ? 1 : 0.45, pointerEvents: enabled ? "auto" : "none" }}>
               <CardContent>
                 <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1, alignItems: "flex-start", mb: 0.5 }}>
                   <Typography fontWeight={800}>Allow agents</Typography>
-                  <Chip size="small" label={`${admins.filter((admin) => (drafts[admin._id] || emptyRules(admin)).enabled).length} on`} />
+                  <Chip size="small" label={`${admins.filter((admin) => (drafts[admin._id] || emptyRules(admin)).enabled).length} on`} sx={{ fontWeight: 700, bgcolor: "rgba(118, 52, 220, 0.1)", color: "primary.main" }} />
                 </Box>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                   Everyone starts off. Turn an admin on here. Only these admins receive leads.
@@ -319,7 +364,7 @@ const LeadAutomation = () => {
                   placeholder="Search admin"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  sx={{ mb: 1.5 }}
+                  sx={{ mb: 1.5, "& .MuiOutlinedInput-root": { borderRadius: "12px" } }}
                 />
                 {loading && <CircularProgress size={28} />}
                 {!loading && !shown.length && (
@@ -331,16 +376,20 @@ const LeadAutomation = () => {
                     return (
                       <Box
                         key={admin._id}
+                        onClick={() => { if (savingId !== admin._id) setAgentEnabled(admin, !on); }}
                         sx={{
-                          border: 1,
+                          border: "1px solid",
                           borderColor: on ? "primary.main" : "divider",
-                          bgcolor: on ? "action.hover" : "background.paper",
-                          borderRadius: 2,
+                          bgcolor: on ? "rgba(118, 52, 220, 0.06)" : "background.paper",
+                          borderRadius: "14px",
                           px: 1.25,
                           py: 1,
                           display: "flex",
                           alignItems: "center",
                           gap: 1.25,
+                          cursor: savingId === admin._id ? "wait" : "pointer",
+                          transition: "border-color 0.2s ease, background-color 0.2s ease",
+                          "&:hover": { borderColor: "primary.main" },
                         }}
                       >
                         <PersonAvatar name={admin.name} src={admin.avatar} active={on} />
@@ -350,12 +399,7 @@ const LeadAutomation = () => {
                             {admin.role}{admin.openCrm ? "" : " · CRM off"} · {admin.newLeads || 0} New
                           </Typography>
                         </Box>
-                        <Switch
-                          checked={on}
-                          disabled={savingId === admin._id}
-                          onChange={(event) => setAgentEnabled(admin, event.target.checked)}
-                          inputProps={{ "aria-label": `Allow ${admin.name}` }}
-                        />
+                        <Toggle checked={on} disabled={savingId === admin._id} onChange={(next) => setAgentEnabled(admin, next)} label={`Allow ${admin.name}`} />
                       </Box>
                     );
                   })}
@@ -363,7 +407,7 @@ const LeadAutomation = () => {
               </CardContent>
             </Card>
 
-            <Card elevation={0} sx={{ border: 1, borderColor: "divider", borderRadius: 3 }}>
+            <Card elevation={0} sx={cardShell}>
               <CardContent>
                 <Typography fontWeight={800}>Allow these leads</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
@@ -376,7 +420,7 @@ const LeadAutomation = () => {
                   <MultiSelect label="Sources" options={sources} value={allow.sources} onChange={(next) => setAllow((current) => ({ ...current, sources: next }))} placeholder="Every source" />
                 </Box>
                 <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 2 }}>
-                  <Button variant="contained" disabled={savingAllow} onClick={saveAllow}>{savingAllow ? "Saving" : "Save global leads"}</Button>
+                  <Button variant="contained" disabled={savingAllow} onClick={saveAllow} sx={{ borderRadius: "12px", textTransform: "none", fontWeight: 800, px: 2.5, cursor: "pointer" }}>{savingAllow ? "Saving" : "Save global leads"}</Button>
                 </Box>
               </CardContent>
             </Card>
@@ -394,7 +438,7 @@ const LeadAutomation = () => {
           <Box sx={{ opacity: enabled ? 1 : 0.45, pointerEvents: enabled ? "auto" : "none" }}>
           {loading && <CircularProgress size={28} />}
           {!loading && !admins.some((admin) => (drafts[admin._id] || emptyRules(admin)).enabled === true || String(admin._id) === focusAdminId) && (
-            <Card elevation={0} sx={{ border: 1, borderColor: "divider", borderRadius: 3 }}>
+            <Card elevation={0} sx={cardShell}>
               <CardContent>
                 <Typography color="text.secondary">Turn an admin on under Allow agents. Their card will show here.</Typography>
               </CardContent>
@@ -408,11 +452,10 @@ const LeadAutomation = () => {
                 ref={(node) => { cardRefs.current[String(admin._id)] = node; }}
                 elevation={0}
                 sx={{
+                  ...cardShell,
                   mb: 2,
-                  border: 1,
                   borderColor: highlightId === String(admin._id) ? "warning.main" : "divider",
-                  borderRadius: 3,
-                  boxShadow: highlightId === String(admin._id) ? "0 0 0 6px rgba(237, 108, 2, 0.28)" : "none",
+                  boxShadow: highlightId === String(admin._id) ? "0 0 0 6px rgba(237, 108, 2, 0.28)" : cardShell.boxShadow,
                   transition: "box-shadow 0.3s ease, border-color 0.3s ease",
                 }}
               >
@@ -443,6 +486,7 @@ const LeadAutomation = () => {
                       onChange={(event) => updateDraft(admin._id, { maxLeads: event.target.value })}
                       inputProps={{ min: 1, max: 500 }}
                       helperText="When they have no New leads"
+                      sx={{ "& .MuiOutlinedInput-root": { borderRadius: "12px" } }}
                     />
                     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
                       <MultiSelect label="File names" options={listNames} value={draft.listNames} onChange={(listNames) => updateDraft(admin._id, { listNames })} placeholder="Use global list" />
@@ -452,7 +496,7 @@ const LeadAutomation = () => {
                     </Box>
                   </Box>
                   <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 2 }}>
-                    <Button variant="contained" disabled={savingId === admin._id} onClick={() => saveAdmin(admin)}>
+                    <Button variant="contained" disabled={savingId === admin._id} onClick={() => saveAdmin(admin)} sx={{ borderRadius: "12px", textTransform: "none", fontWeight: 800, px: 2.5, cursor: "pointer" }}>
                       {savingId === admin._id ? "Saving" : "Save"}
                     </Button>
                   </Box>

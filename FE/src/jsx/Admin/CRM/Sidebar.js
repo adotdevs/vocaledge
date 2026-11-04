@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import {
   Box,
   Drawer,
@@ -36,7 +36,6 @@ import {
   ExpandMore,
   NotificationsActive,
   FolderOpen,
-  FilterList,
   Assessment,
   Campaign,
   Forum,
@@ -60,12 +59,6 @@ import { clearStoredAvatars, readStoredAvatar, writeStoredAvatar } from "./userA
 import { toast } from 'react-toastify';
 import { getLiveSocket } from '../../../utils/liveSocket';
 import { endLiveSession } from '../../../utils/endLiveSession';
-import {
-  fetchLeadStatuses,
-  getCachedLeadStatuses,
-  subscribeLeadStatuses,
-} from './components/leadStatusCache';
-import { getStatusColor } from './components/leadStatusStyles';
 import useLiveCrmUser from './useLiveCrmUser';
 
 const LEADS_LINK = '/admin/dashboard/crm';
@@ -114,8 +107,6 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const [callMenuOpen, setCallMenuOpen] = useState(false);
   const [chatMenuOpen, setChatMenuOpen] = useState(true);
   const [sidebarChats, setSidebarChats] = useState([]);
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
-  const [leadStatuses, setLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
   const [internalMobileMenu, setInternalMobileMenu] = useState(false);
   const previousPathRef = useRef(location.pathname);
   const menuScrollRef = useRef(null);
@@ -367,28 +358,6 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
     if (link === "/admin/crm/upload-history" || link === "/admin/crm/lead-automation") return location.pathname.startsWith(link);
     return location.pathname === link || (link.startsWith("/admin/crm/chat") && location.pathname.startsWith("/admin/crm/chat"));
   };
-  const isLeadsRoute = location.pathname === LEADS_LINK;
-  const activeStatusFilter = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    return params.get('status') || '';
-  }, [location.search]);
-
-  useEffect(() => {
-    if (!hasCrmAccess) return undefined;
-    return subscribeLeadStatuses(setLeadStatuses);
-  }, [hasCrmAccess]);
-
-  useEffect(() => {
-    if (!hasCrmAccess) return;
-    fetchLeadStatuses().catch(() => { });
-  }, [hasCrmAccess]);
-
-  useEffect(() => {
-    if (isLeadsRoute && hasCrmAccess) {
-      setStatusMenuOpen(true);
-    }
-  }, [isLeadsRoute, hasCrmAccess]);
-
   const handleLogout = async () => {
     try {
       const logout = await logoutApi();
@@ -652,125 +621,6 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                       </Box>
                     </List>
                   </Collapse>
-                )}
-
-                {item.link === LEADS_LINK && hasCrmAccess && (
-                  <>
-                    <ListItem disablePadding sx={{ mb: 0.5 }}>
-                      <ListItemButton
-                        onClick={() => {
-                          if (isCollapsed) return;
-                          setStatusMenuOpen((prev) => {
-                            const next = !prev;
-                            localStorage.setItem('lead-status-menu-open', JSON.stringify(next));
-                            return next;
-                          });
-                        }}
-                        sx={{
-                          borderRadius: 2,
-                          color: isLeadsRoute ? 'primary.main' : 'text.secondary',
-                          backgroundColor: isLeadsRoute ? 'action.selected' : 'transparent',
-                          '&:hover': {
-                            backgroundColor: 'action.hover',
-                          },
-                          justifyContent: isCollapsed ? 'center' : 'flex-start',
-                          px: 2,
-                          py: 1.5,
-                        }}
-                      >
-                        <ListItemIcon
-                          sx={{
-                            minWidth: 'auto',
-                            color: 'inherit',
-                            mr: isCollapsed ? 0 : 2,
-                          }}
-                        >
-                          <FilterList />
-                        </ListItemIcon>
-                        {!isCollapsed && (
-                          <>
-                            <ListItemText
-                              primary="Status"
-                              primaryTypographyProps={{
-                                fontSize: '0.875rem',
-                                fontWeight: isLeadsRoute ? 600 : 500,
-                              }}
-                            />
-                            {statusMenuOpen ? <ExpandLess /> : <ExpandMore />}
-                          </>
-                        )}
-                      </ListItemButton>
-                    </ListItem>
-                    <Collapse in={statusMenuOpen && !isCollapsed} timeout="auto" unmountOnExit>
-                      <List component="div" disablePadding>
-                        <ListItem disablePadding sx={{ mb: 0.5, pl: 4 }}>
-                          <ListItemButton
-                            component={Link}
-                            to={LEADS_LINK}
-                            onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}
-                            sx={{
-                              borderRadius: 2,
-                              color: isLeadsRoute && !activeStatusFilter ? 'primary.main' : 'text.secondary',
-                              backgroundColor: isLeadsRoute && !activeStatusFilter ? 'action.selected' : 'transparent',
-                              '&:hover': {
-                                backgroundColor: isLeadsRoute && !activeStatusFilter ? 'action.selected' : 'action.hover',
-                              },
-                              px: 2,
-                              py: 1.25,
-                            }}
-                          >
-                            <ListItemText
-                              primary="All Leads"
-                              primaryTypographyProps={{
-                                fontSize: '0.8125rem',
-                                fontWeight: isLeadsRoute && !activeStatusFilter ? 600 : 500,
-                              }}
-                            />
-                          </ListItemButton>
-                        </ListItem>
-                        {leadStatuses.map((status) => {
-                          const isActive = isLeadsRoute && activeStatusFilter === status.label;
-                          return (
-                            <ListItem key={status._id} disablePadding sx={{ mb: 0.5, pl: 4 }}>
-                              <ListItemButton
-                                component={Link}
-                                to={`${LEADS_LINK}?status=${encodeURIComponent(status.label)}`}
-                                onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}
-                                sx={{
-                                  borderRadius: 2,
-                                  color: isActive ? 'primary.main' : 'text.secondary',
-                                  backgroundColor: isActive ? 'action.selected' : 'transparent',
-                                  '&:hover': {
-                                    backgroundColor: isActive ? 'action.selected' : 'action.hover',
-                                  },
-                                  px: 2,
-                                  py: 1.25,
-                                }}
-                              >
-                                <Box
-                                  sx={{
-                                    width: 8,
-                                    height: 8,
-                                    borderRadius: '50%',
-                                    bgcolor: getStatusColor(status),
-                                    mr: 1,
-                                    flexShrink: 0,
-                                  }}
-                                />
-                                <ListItemText
-                                  primary={status.label}
-                                  primaryTypographyProps={{
-                                    fontSize: '0.8125rem',
-                                    fontWeight: isActive ? 600 : 500,
-                                  }}
-                                />
-                              </ListItemButton>
-                            </ListItem>
-                          );
-                        })}
-                      </List>
-                    </Collapse>
-                  </>
                 )}
 
                 {/* Call Dashboard Dropdown Menu - Inserted after first item (Leads) */}
