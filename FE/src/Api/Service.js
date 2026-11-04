@@ -7,7 +7,8 @@ import {
   postFormApi,
   patchFormApi,getBlobApi,
   postFormStreamApi,
-  putSimpleApi
+  putSimpleApi,
+  getFetchAuthOptions
 } from "./axiosService";
 import axiosService from "./axiosService";
 import { baseUrl } from "../utils/Constant";
@@ -392,8 +393,24 @@ export const uploadLeadsCsvApi = (formData) => {
 export const uploadLeadsCsvStreamApi = (formData, onProgress) => {
   return postFormStreamApi(`crm/uploadLeads`, formData, onProgress);
 };
-export const getLeadUploadsApi = () => getApi(`/crm/lead-uploads`);
+const toQuery = (params = {}) => {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") query.set(key, value);
+  });
+  const text = query.toString();
+  return text ? `?${text}` : "";
+};
+export const getLeadUploadsApi = (params) => getApi(`/crm/lead-uploads${toQuery(params)}`);
+export const getLeadUploadApi = (id, params) => getApi(`/crm/lead-uploads/${id}${toQuery(params)}`);
+export const acceptLeadUploadDuplicatesApi = (id, body) => postApi(`/crm/lead-uploads/${id}/accept`, body);
+export const declineLeadUploadDuplicatesApi = (id, body) => postApi(`/crm/lead-uploads/${id}/decline`, body);
 export const deleteLeadUploadApi = (id) => deleteApi(`/crm/lead-uploads/${id}`);
+export const getLeadAutomationApi = () => getApi(`/crm/lead-automation`);
+export const saveLeadAutomationApi = (body) => putSimpleApi(`/crm/lead-automation`, body);
+export const saveLeadAutomationAdminApi = (id, body) => putSimpleApi(`/crm/lead-automation/${id}`, body);
+export const getLeadShortageAlertsApi = () => getApi(`/crm/lead-shortage-alerts`);
+export const ignoreLeadShortageAlertApi = (id) => postApi(`/crm/lead-shortage-alerts/${id}/ignore`, {});
 export const deleteLeadApi = (leadId) => {
   return deleteApi(`/crm/deleteLead/${leadId}`);
 };
@@ -408,10 +425,7 @@ export const deleteAllLeadsApiWithProgress = async (onProgress) => {
   try {
     const response = await fetch(`${baseUrl}/crm/deleteAllLeads?enableProgress=true`, {
       method: 'DELETE',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      ...getFetchAuthOptions({ 'Content-Type': 'application/json' }),
     });
 
     if (!response.ok) {
@@ -586,10 +600,7 @@ export const restoreAllLeadsApiWithProgress = async (onProgress) => {
   try {
     const response = await fetch(`${baseUrl}/crm/recycle/restoreAll`, {
       method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      ...getFetchAuthOptions({ 'Content-Type': 'application/json' }),
     });
 
     if (!response.ok) {
@@ -641,10 +652,7 @@ export const hardDeleteAllLeadsApiWithProgress = async (onProgress) => {
   try {
     const response = await fetch(`${baseUrl}/crm/recycle/hardDeleteAll`, {
       method: 'DELETE',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      ...getFetchAuthOptions({ 'Content-Type': 'application/json' }),
     });
 
     if (!response.ok) {
@@ -792,10 +800,7 @@ export const searchCommentsApi = (leadId, params = {}) => {
 export const activateLeadsBulkWithProgress = async (leadIds, sendWelcomeEmail = true, onProgress) => {try {
     const response = await fetch(`${baseUrl}/crm/bulkActivateLeads`, {
       method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      ...getFetchAuthOptions({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ leadIds, sendWelcomeEmail })
     });if (!response.ok) {
       const errorText = await response.text();

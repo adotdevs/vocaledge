@@ -6,6 +6,7 @@ const getActivityModel = require("../crmDB/models/activityModel");
 const { hasCrmPermission } = require("./crmPermissions");
 const UserRestriction = require("../models/usersRestrictions");
 const { publishToUser } = require("./chatSse");
+const { openShortageAlert, resolveShortageAlert, publishOpenShortageAlerts } = require("./leadShortageAlert");
 
 const REFILL_SIZE = 100;
 const LOCK_MS = 20000;
@@ -95,14 +96,20 @@ const hasOwnNewLead = async (Lead, userId) => {
     return count;
 };
 
-const poolFilter = async (Lead) => {
+const newLeadStatus = {
+    $or: [
+        { status: { $in: ["New", "new", "", null] } },
+        { status: { $exists: false } }
+    ],
+};
+
+const cleanRuleList = (values) => (Array.isArray(values) ? values.map((value) => String(value || "").trim()).filter(Boolean) : []);
+
+const poolFilter = async (Lead, rules = {}) => {
     const supers = await User.find({ role: "superadmin" }).select("_id").lean();
     const superIds = supers.map((item) => item._id);
     const rawAgents = await Lead.collection.distinct("agent", {
-        $or: [
-            { status: { $in: ["New", "new", "", null] } },
-            { status: { $exists: false } }
-        ],
+        ...newLeadStatus,
         isDeleted: { $ne: true },
     });
     const objectIds = [];
@@ -126,23 +133,47 @@ const poolFilter = async (Lead) => {
         ...heldBy,
         ...heldBy.map((id) => String(id)),
     ];
+    const defaultAgents = [
+        { agent: null },
+        { agent: { $exists: false } },
+        ...(hasBlank ? [{ agent: "" }] : []),
+        ...(heldByValues.length ? [{ agent: { $in: heldByValues } }] : []),
+    ];
+    const chosenAgents = cleanRuleList(rules.agentIds);
+    let agentMatch = defaultAgents;
+    if (chosenAgents.length) {
+        const includeUnassigned = chosenAgents.includes("unassigned");
+        const ids = chosenAgents.filter((id) => id !== "unassigned" && mongoose.Types.ObjectId.isValid(id));
+        const values = [...ids, ...ids.map((id) => new mongoose.Types.ObjectId(id))];
+        agentMatch = [
+            ...(includeUnassigned ? [{ agent: null }, { agent: { $exists: false } }, ...(hasBlank ? [{ agent: "" }] : [])] : []),
+            ...(values.length ? [{ agent: { $in: values } }] : []),
+        ];
+        if (!agentMatch.length) agentMatch = defaultAgents;
+    }
+    const settings = await UserRestriction.findOne().select("automationSkip").lean();
+    const skip = settings?.automationSkip || {};
+    const skippedLists = [...new Set([...cleanRuleList(rules.listNames), ...cleanRuleList(skip.fileNames)])];
+    const skippedCountries = [...new Set([...cleanRuleList(rules.countries), ...cleanRuleList(skip.countries)])];
+    const skipBrands = cleanRuleList(skip.brands);
+    const skipSources = cleanRuleList(skip.sources);
     return {
         isDeleted: false,
-        $or: [
-            { status: { $in: ["New", "new", "", null] } },
-            { status: { $exists: false } }
-        ],
+        ...newLeadStatus,
         $and: [
-            {
-                $or: [
-                    { agent: null },
-                    { agent: { $exists: false } },
-                    ...(hasBlank ? [{ agent: "" }] : []),
-                    ...(heldByValues.length ? [{ agent: { $in: heldByValues } }] : []),
-                ]
-            }
-        ]
+            { $or: agentMatch },
+            ...(skippedLists.length ? [{ fileName: { $nin: skippedLists } }] : []),
+            ...(skippedCountries.length ? [{ country: { $nin: skippedCountries } }] : []),
+            ...(skipBrands.length ? [{ Brand: { $nin: skipBrands } }] : []),
+            ...(skipSources.length ? [{ source: { $nin: skipSources } }] : []),
+        ],
     };
+};
+
+const refillSizeFor = (owner) => {
+    const requested = Number(owner?.leadAutomation?.maxLeads);
+    if (!Number.isFinite(requested) || requested <= 0) return REFILL_SIZE;
+    return Math.min(500, Math.max(1, Math.floor(requested)));
 };
 
 const readPool = async (Lead, pool, limit) => {
@@ -207,6 +238,10 @@ const claimNewLeads = async (owner) => {
     if (!lockedUser) return emptyResult();
 
     try {
+        if (owner?.leadAutomation?.enabled === false) {
+            console.log(`Lead refill skipped: automation is off for ${owner._id}`);
+            return emptyResult();
+        }
         const Lead = await getLeadModel();
         const owned = await hasOwnNewLead(Lead, owner._id);
         if (owned > 0) {
@@ -219,11 +254,13 @@ const claimNewLeads = async (owner) => {
 
         try {
             if (await hasOwnNewLead(Lead, owner._id)) return emptyResult();
-            const pool = await poolFilter(Lead);
-            const take = REFILL_SIZE;
+            const pool = await poolFilter(Lead, owner.leadAutomation || {});
+            const take = refillSizeFor(owner);
             const { available, ids } = await readPool(Lead, pool, take);
             if (!available || !ids.length) {
                 console.log(`Lead refill skipped: no New leads in the super admin pool for ${owner._id}`);
+                await openShortageAlert(owner);
+                publishOpenShortageAlerts().catch((error) => console.error("Lead shortage publish failed:", error));
                 return emptyResult();
             }
             const batchId = new mongoose.Types.ObjectId();
@@ -237,6 +274,7 @@ const claimNewLeads = async (owner) => {
             );
             const leads = await Lead.find({ _id: { $in: ids }, agent: ownerObjectId, isDeleted: false }).lean();
             if (!leads.length) return emptyResult();
+            await resolveShortageAlert(owner._id);
             console.log(`Lead refill: assigned ${leads.length} New leads to ${owner._id}`);
             recordAssignments(leads, owner).catch((error) => {
                 console.error("Lead refill activity log failed:", error);
@@ -267,8 +305,12 @@ const refillIfEmpty = (userId) => {
             console.log("Lead refill skipped: automatic assignment is turned off");
             return emptyResult();
         }
-        const owner = await User.findById(key).select("firstName lastName email role adminPermissions permissions").lean();
+        const owner = await User.findById(key).select("firstName lastName email role adminPermissions permissions leadAutomation").lean();
         if (!owner || (owner.role !== "admin" && owner.role !== "subadmin" && owner.role !== "manager")) return emptyResult();
+        if (owner.leadAutomation?.enabled === false) {
+            console.log(`Lead refill skipped: automation is off for ${key}`);
+            return emptyResult();
+        }
         if (!userCanOpenCrm(owner)) {
             console.log(`Lead refill skipped: ${key} does not have Open CRM`);
             return emptyResult();
@@ -276,10 +318,13 @@ const refillIfEmpty = (userId) => {
         const Lead = await getLeadModel();
         const owned = await hasOwnNewLead(Lead, key);
         if (owned > 0) {
+            await resolveShortageAlert(key);
             console.log(`Lead refill skipped: ${key} still has ${owned} New leads`);
             return emptyResult();
         }
-        return claimNewLeads(owner);
+        const result = await claimNewLeads(owner);
+        reportLeadShortages().catch((error) => console.error("Lead shortage scan failed:", error));
+        return result;
     })().catch((error) => {
         console.error("Lead refill failed:", error);
         return emptyResult();
@@ -289,6 +334,34 @@ const refillIfEmpty = (userId) => {
 
     inflight.set(key, job);
     return job;
+};
+
+const reportLeadShortages = async () => {
+    if (!(await autoAssignEnabled())) return;
+    const candidates = await User.find({
+        role: { $in: ["admin", "subadmin", "manager"] },
+        $or: [
+            { "adminPermissions.accessCrm": true },
+            { "permissions.accessCrm": true },
+        ]
+    }).select("_id role permissions adminPermissions firstName lastName email leadAutomation").lean();
+    const Lead = await getLeadModel();
+    let opened = false;
+    for (const user of candidates) {
+        if (!userCanOpenCrm(user) || user.leadAutomation?.enabled === false) continue;
+        const owned = await hasOwnNewLead(Lead, user._id);
+        if (owned > 0) {
+            await resolveShortageAlert(user._id);
+            continue;
+        }
+        const pool = await poolFilter(Lead, user.leadAutomation || {});
+        const available = await Lead.collection.countDocuments(pool);
+        if (!available) {
+            const alert = await openShortageAlert(user);
+            if (alert) opened = true;
+        }
+    }
+    if (opened) await publishOpenShortageAlerts();
 };
 
 const refillAllEligibleAgents = async () => {
@@ -307,6 +380,7 @@ const refillAllEligibleAgents = async () => {
                 await refillIfEmpty(user._id);
             }
         }
+        await reportLeadShortages();
     } catch (err) {
         console.error("refillAllEligibleAgents failed:", err);
     }

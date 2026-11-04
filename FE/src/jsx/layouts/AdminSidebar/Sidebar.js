@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuthUser, useSignOut } from "react-auth-kit";
 import { logoutApi, addUserByEmailApi, signleUsersApi } from "../../../Api/Service";
+import { clearStoredAvatars, readStoredAvatar, writeStoredAvatar } from "../../Admin/CRM/userAvatarStore";
 import { toast } from "react-toastify";
 import styles from './Sidebar.module.css';
 import 'react-responsive-modal/styles.css';
@@ -17,7 +18,7 @@ const SideBar = (props) => {
   const [Admin, setAdmin] = useState(() => {
     try {
       const u = authUser()?.user || {};
-      const cached = typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "";
+      const cached = readStoredAvatar(u._id);
       return {
         ...u,
         avatar: cached ? { url: cached } : (u.avatar || null),
@@ -32,11 +33,11 @@ const SideBar = (props) => {
     try {
       const u = authUser()?.user;
       if (u) {
-        const cached = typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "";
-        setAdmin((prev) => ({
+        const cached = readStoredAvatar(u._id);
+        setAdmin({
           ...u,
-          avatar: cached ? { url: cached } : (u.avatar || prev.avatar || null),
-        }));
+          avatar: cached ? { url: cached } : (u.avatar || null),
+        });
       }
     } catch {}
 
@@ -48,8 +49,8 @@ const SideBar = (props) => {
           avatar: nextAvatar,
         }));
         const url = nextAvatar?.url || (typeof nextAvatar === "string" ? nextAvatar : "");
-        if (url) localStorage.setItem("user_avatar", url);
-        else localStorage.removeItem("user_avatar");
+        const id = authUser()?.user?._id;
+        if (id) writeStoredAvatar(id, url || "");
       }
     };
     window.addEventListener("crm-user-profile-updated", onProfileUpdate);
@@ -101,6 +102,7 @@ const SideBar = (props) => {
       const logout = await logoutApi();
 
       if (logout.success) {
+        clearStoredAvatars();
         signOut();
         localStorage.removeItem("token");
         localStorage.removeItem("authToken");
@@ -138,9 +140,7 @@ const SideBar = (props) => {
         if (signleUser.signleUser) {
           setAdmin(signleUser.signleUser);
           const av = signleUser.signleUser.avatar?.url || (typeof signleUser.signleUser.avatar === "string" ? signleUser.signleUser.avatar : "");
-          if (av) {
-            localStorage.setItem("user_avatar", av);
-          }
+          writeStoredAvatar(signleUser.signleUser._id, av || "");
         }
       } else {
         toast.dismiss();
@@ -692,7 +692,7 @@ const SideBar = (props) => {
           <div className="group inline-flex items-center justify-center text-right">
             <div data-headlessui-state className="relative h-10 w-10 text-left">
               {(() => {
-                const adminAvatarUrl = Admin?.avatar?.url || (typeof Admin?.avatar === "string" ? Admin.avatar : "") || (typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "") || "";
+                const adminAvatarUrl = Admin?.avatar?.url || (typeof Admin?.avatar === "string" ? Admin.avatar : "") || readStoredAvatar(authUser()?.user?._id) || "";
                 return (
                   <>
                     <button

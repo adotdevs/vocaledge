@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef, useMemo } from 'react';
 import {
   Box,
   Drawer,
@@ -40,6 +40,8 @@ import {
   Assessment,
   Campaign,
   Forum,
+  History,
+  AutoMode,
 } from '@mui/icons-material';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useAuthUser, useSignOut } from "react-auth-kit";
@@ -54,6 +56,7 @@ import {
   getAdminChatConversationsApi,
   signleUsersApi,
 } from '../../../Api/Service';
+import { clearStoredAvatars, readStoredAvatar, writeStoredAvatar } from "./userAvatarStore";
 import { toast } from 'react-toastify';
 import { getLiveSocket } from '../../../utils/liveSocket';
 import { endLiveSession } from '../../../utils/endLiveSession';
@@ -66,6 +69,7 @@ import { getStatusColor } from './components/leadStatusStyles';
 import useLiveCrmUser from './useLiveCrmUser';
 
 const LEADS_LINK = '/admin/dashboard/crm';
+let savedSidebarScroll = 0;
 
 const chatClock = (value) => {
   if (!value) return '';
@@ -114,47 +118,48 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const [leadStatuses, setLeadStatuses] = useState(() => getCachedLeadStatuses() || []);
   const [internalMobileMenu, setInternalMobileMenu] = useState(false);
   const previousPathRef = useRef(location.pathname);
+  const menuScrollRef = useRef(null);
   const { can, role, user: liveUser } = useLiveCrmUser();
   const canManageReminders = can("canManageReminders");
 
-  const [profileAvatar, setProfileAvatar] = useState(() => {
-    const cached = typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "";
-    return cached || user()?.user?.avatar?.url || (typeof user()?.user?.avatar === "string" ? user()?.user?.avatar : "") || "";
-  });
+  const signedInId = String(user()?.user?._id || "");
+  const [profileAvatar, setProfileAvatar] = useState(() => readStoredAvatar(signedInId));
 
   useEffect(() => {
-    const liveAv = liveUser?.avatar?.url || (typeof liveUser?.avatar === "string" ? liveUser?.avatar : "");
-    if (liveAv) {
-      setProfileAvatar(liveAv);
-      localStorage.setItem("user_avatar", liveAv);
-    }
+    const authAvatar = user()?.user?.avatar?.url || (typeof user()?.user?.avatar === "string" ? user()?.user?.avatar : "");
+    const liveId = liveUser?._id ? String(liveUser._id) : "";
+    const liveAv = liveId && liveId === signedInId
+      ? (liveUser?.avatar?.url || (typeof liveUser?.avatar === "string" ? liveUser.avatar : ""))
+      : "";
+    const next = liveAv || authAvatar || readStoredAvatar(signedInId) || "";
+    setProfileAvatar(next);
+    if (signedInId) writeStoredAvatar(signedInId, next);
 
     const onAvatarUpdate = (e) => {
-      const next = e.detail?.avatar?.url || (typeof e.detail?.avatar === "string" ? e.detail?.avatar : "");
-      if (next !== undefined) {
-        setProfileAvatar(next || "");
-        if (next) localStorage.setItem("user_avatar", next);
-        else localStorage.removeItem("user_avatar");
-      }
+      const updatedId = e.detail?._id ? String(e.detail._id) : signedInId;
+      if (updatedId !== signedInId) return;
+      const nextAvatar = e.detail?.avatar?.url || (typeof e.detail?.avatar === "string" ? e.detail.avatar : "");
+      setProfileAvatar(nextAvatar || "");
+      writeStoredAvatar(signedInId, nextAvatar || "");
     };
     window.addEventListener("crm-user-profile-updated", onAvatarUpdate);
     return () => window.removeEventListener("crm-user-profile-updated", onAvatarUpdate);
-  }, [liveUser]);
+  }, [liveUser, signedInId]);
 
-  // Fetch fresh profile on mount to guarantee avatar survives refresh
   useEffect(() => {
-    const currentId = user()?.user?._id;
-    if (!currentId) return;
-    signleUsersApi(currentId).then((res) => {
+    if (!signedInId) {
+      setProfileAvatar("");
+      return;
+    }
+    signleUsersApi(signedInId).then((res) => {
+      if (String(user()?.user?._id || "") !== signedInId) return;
       if (res?.success && res.signleUser) {
         const freshAv = res.signleUser.avatar?.url || (typeof res.signleUser.avatar === "string" ? res.signleUser.avatar : "");
-        if (freshAv) {
-          setProfileAvatar(freshAv);
-          localStorage.setItem("user_avatar", freshAv);
-        }
+        setProfileAvatar(freshAv || "");
+        writeStoredAvatar(signedInId, freshAv || "");
       }
     }).catch(() => {});
-  }, [user]);
+  }, [signedInId]);
 
   // Use internal state if setisMobileMenu not provided
   const mobileMenuState = isMobileMenu ?? internalMobileMenu;
@@ -347,6 +352,8 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
 
   // Add Recycle Bin and Email Queue for superadmin
   if (user()?.user?.role === 'superadmin') {  // Commented out for now
+    menuItems.push({ icon: <AutoMode />, label: 'Automation', link: "/admin/crm/lead-automation" });
+    menuItems.push({ icon: <History />, label: 'Upload history', link: "/admin/crm/upload-history" });
     menuItems.push({ icon: <DeleteForeverIcon />, label: 'Recycle Bin', link: "/admin/dashboard/crm/recycle-bin" });
     menuItems.push({ icon: <EmailOutlined />, label: 'Email', link: "/admin/crm/email-queue", badge: true });
   }
@@ -356,7 +363,10 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
     menuItems.push({ icon: <Settings />, label: 'My Profile', link: "/admin/crm/profile" });
   }
 
-  const isActiveLink = (link) => location.pathname === link || (link.startsWith("/admin/crm/chat") && location.pathname.startsWith("/admin/crm/chat"));
+  const isActiveLink = (link) => {
+    if (link === "/admin/crm/upload-history" || link === "/admin/crm/lead-automation") return location.pathname.startsWith(link);
+    return location.pathname === link || (link.startsWith("/admin/crm/chat") && location.pathname.startsWith("/admin/crm/chat"));
+  };
   const isLeadsRoute = location.pathname === LEADS_LINK;
   const activeStatusFilter = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -400,6 +410,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
             }
           }
         }
+        clearStoredAvatars();
         signOut();
         endLiveSession();
         navigate("/auth/login/crm");
@@ -431,6 +442,12 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
 
     return () => window.removeEventListener('resize', handleResize);
   }, [setMobileMenuState]);
+
+  useLayoutEffect(() => {
+    const node = menuScrollRef.current;
+    if (!node) return;
+    node.scrollTop = savedSidebarScroll;
+  }, [location.pathname]);
 
   return (
     <Drawer
@@ -486,7 +503,13 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
       </Box>
 
       {/* Menu Items */}
-      <Box sx={{ flex: 1, p: 1, overflow: 'auto' }}>
+      <Box
+        ref={menuScrollRef}
+        onScroll={(event) => {
+          savedSidebarScroll = event.currentTarget.scrollTop;
+        }}
+        sx={{ flex: 1, p: 1, overflow: 'auto' }}
+      >
         <List>
           {menuItems.map((item, index) => {
             // Insert Call Dashboard dropdown after the first item (Leads)
@@ -903,7 +926,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
       <Box sx={{ p: isCollapsed ? 1.5 : 2, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: isCollapsed ? 'center' : 'flex-start' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: isCollapsed ? 0 : 2, width: '100%' }}>
           <Avatar
-            src={profileAvatar || liveUser?.avatar?.url || (typeof liveUser?.avatar === "string" ? liveUser?.avatar : "") || user()?.user?.avatar?.url || (typeof user()?.user?.avatar === "string" ? user()?.user?.avatar : "") || (typeof window !== "undefined" ? localStorage.getItem("user_avatar") : "") || ""}
+            src={profileAvatar || ""}
             sx={{ width: 34, height: 34, bgcolor: 'primary.main', fontSize: '0.85rem', fontWeight: 700, mx: isCollapsed ? 'auto' : 0 }}
           >
             {`${user()?.user?.firstName?.[0] || ""}${user()?.user?.lastName?.[0] || ""}`.toUpperCase() || 'A'}

@@ -258,7 +258,14 @@ const lastSeenText = (user) => {
   if (sameSystemDay(date, now)) return `Last seen today at ${formatClock(date)}`;
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   if (sameSystemDay(date, yesterday)) return `Last seen yesterday at ${formatClock(date)}`;
-  const day = new Intl.DateTimeFormat(undefined, { timeZone: systemTimeZone, month: "short", day: "numeric" }).format(date);
+  const seenYear = new Intl.DateTimeFormat("en-CA", { timeZone: systemTimeZone, year: "numeric" }).format(date);
+  const thisYear = new Intl.DateTimeFormat("en-CA", { timeZone: systemTimeZone, year: "numeric" }).format(now);
+  const day = new Intl.DateTimeFormat(undefined, {
+    timeZone: systemTimeZone,
+    month: "short",
+    day: "numeric",
+    ...(seenYear !== thisYear ? { year: "numeric" } : {}),
+  }).format(date);
   return `Last seen ${day} at ${formatClock(date)}`;
 };
 

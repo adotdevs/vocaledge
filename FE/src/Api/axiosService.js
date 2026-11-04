@@ -123,7 +123,7 @@ const getCredentialsConfig = () => {
   };
 };
 
-const getFetchAuthOptions = (extraHeaders = {}) => {
+export const getFetchAuthOptions = (extraHeaders = {}) => {
   const credentialsConfig = getCredentialsConfig();
   const headers = { ...extraHeaders };
   if (isElectronApp() || isBackendLocalhost()) {

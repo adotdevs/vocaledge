@@ -106,9 +106,9 @@ function Login(props) {
 				})
 			) {
 				const avUrl = updateHeader.user?.avatar?.url || (typeof updateHeader.user?.avatar === "string" ? updateHeader.user?.avatar : "");
-				if (avUrl) {
-					localStorage.setItem('user_avatar', avUrl);
-				}
+				const { clearStoredAvatars, writeStoredAvatar } = require("../../Admin/CRM/userAvatarStore");
+				clearStoredAvatars();
+				if (updateHeader.user?._id) writeStoredAvatar(updateHeader.user._id, avUrl || "");
 				// Store token in localStorage for Electron OR localhost backend
 				// For production web  , cookies handle authentication
 				// CRITICAL: Store token BEFORE navigation to ensure it's available for subsequent API calls

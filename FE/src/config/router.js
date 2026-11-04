@@ -13,6 +13,8 @@ import LoginPage from "../jsx/Admin/CRM/Login.js";
 import DarkModeProvider from "../context/DarkModeContext";
 import LeadsPage from "../jsx/Admin/CRM/leads.js";
 import RecycleBin from "../jsx/Admin/CRM/RecycleBin.jsx";
+import UploadHistory from "../jsx/Admin/CRM/UploadHistory.jsx";
+import LeadAutomation from "../jsx/Admin/CRM/LeadAutomation.jsx";
 import EmailQueue from "../jsx/Admin/CRM/EmailQueue.jsx";
 import LeadStream from "../jsx/Admin/CRM/LeadStream.jsx";
 import CallDashboard from "../jsx/Admin/CRM/CallDashboard.jsx";
@@ -27,6 +29,7 @@ import Reminders from "../jsx/Admin/CRM/Reminders.jsx";
 import DocumentLibrary from "../jsx/Admin/CRM/DocumentLibrary.jsx";
 import LeadListStatistics from "../jsx/Admin/CRM/LeadListStatistics.jsx";
 import AdminReminderNotifier from "../jsx/Admin/CRM/components/AdminReminderNotifier";
+import LeadShortageAlerts from "../jsx/Admin/CRM/components/LeadShortageAlerts";
 import StaffMessagePopup from "../jsx/Admin/CRM/components/StaffMessagePopup";
 import ChatNotifier from "../jsx/Admin/CRM/components/ChatNotifier";
 import VoiceCall from "../jsx/Admin/CRM/components/VoiceCall";
@@ -123,6 +126,7 @@ export default function Router() {
       <DarkModeProvider>
         <RouterComponent>
           <AdminReminderNotifier />
+          <LeadShortageAlerts />
           <StaffMessagePopup />
           <ChatNotifier />
           <VoiceCall />
@@ -152,6 +156,30 @@ export default function Router() {
               element={
                 <RequireAuth loginPath={"/auth/login/crm"}>
                   <RecycleBin />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/crm/lead-automation"
+              element={
+                <RequireAuth loginPath={"/auth/login/crm"}>
+                  <LeadAutomation />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/crm/upload-history"
+              element={
+                <RequireAuth loginPath={"/auth/login/crm"}>
+                  <UploadHistory />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/crm/upload-history/:uploadId"
+              element={
+                <RequireAuth loginPath={"/auth/login/crm"}>
+                  <UploadHistory />
                 </RequireAuth>
               }
             />

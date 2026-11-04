@@ -468,6 +468,13 @@ let userSchema = new mongoose.Schema({
     default: null
   },
   lastActivity: { type: Date, default: null },
+  leadAutomation: {
+    enabled: { type: Boolean, default: true },
+    maxLeads: { type: Number, default: 100 },
+    listNames: { type: [String], default: [] },
+    countries: { type: [String], default: [] },
+    agentIds: { type: [String], default: [] },
+  },
 
 });
 

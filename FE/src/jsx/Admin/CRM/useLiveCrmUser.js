@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthUser } from "react-auth-kit";
 import { allUsersApi, signleUsersApi } from "../../../Api/Service";
 import { isPermissionOn } from "./crmPermissions";
+import { readStoredAvatar, writeStoredAvatar } from "./userAvatarStore";
 
 const LIVE_ROLES = new Set(["superadmin", "admin", "subadmin", "manager"]);
 
@@ -23,13 +24,9 @@ export default function useLiveCrmUser() {
   const needsLivePermissions = LIVE_ROLES.has(role);
 
   const [user, setUser] = useState(() => {
-    const cachedAvatar = typeof window !== "undefined" ? localStorage.getItem("user_avatar") : null;
-    if (cachedAvatar && identity) {
-      return {
-        ...identity,
-        avatar: { url: cachedAvatar },
-      };
-    }
+    if (!identity) return null;
+    const cachedAvatar = readStoredAvatar(identity._id);
+    if (cachedAvatar) return { ...identity, avatar: { url: cachedAvatar } };
     return needsLivePermissions ? null : identity;
   });
 
@@ -53,12 +50,12 @@ export default function useLiveCrmUser() {
         const list = await allUsersApi({ search: userId, limit: 1 });
         fresh = list?.allUsers?.[0] || null;
       }
-      if (fresh) {
+      if (fresh && String(fresh._id) === String(userId)) {
         const freshAv = fresh.avatar?.url || (typeof fresh.avatar === "string" ? fresh.avatar : "");
-        if (freshAv) {
-          localStorage.setItem("user_avatar", freshAv);
-        }
-        setUser((current) => (samePermissions(current, fresh) ? current : fresh));
+        writeStoredAvatar(userId, freshAv);
+        setUser((current) => (
+          current && String(current._id) === String(fresh._id) && samePermissions(current, fresh) ? current : fresh
+        ));
       }
     } catch (error) {
       console.error("Failed to load live permissions:", error);
@@ -68,6 +65,13 @@ export default function useLiveCrmUser() {
   }, [userId, role]);
 
   useEffect(() => {
+    const currentIdentity = identityRef.current;
+    if (!userId) {
+      setUser(null);
+      return undefined;
+    }
+    const cachedAvatar = readStoredAvatar(userId);
+    setUser(cachedAvatar && currentIdentity ? { ...currentIdentity, avatar: { url: cachedAvatar } } : currentIdentity);
     load();
     if (!needsLivePermissions) return undefined;
 
@@ -83,10 +87,10 @@ export default function useLiveCrmUser() {
       const updated = e.detail;
       if (updated) {
         const nextAv = updated.avatar?.url || (typeof updated.avatar === "string" ? updated.avatar : "");
-        if (nextAv) {
-          localStorage.setItem("user_avatar", nextAv);
+        if (userId && (!updated._id || String(updated._id) === String(userId))) {
+          writeStoredAvatar(userId, nextAv);
+          setUser((current) => (current && String(current._id) === String(userId) ? { ...current, ...updated } : updated));
         }
-        setUser((current) => current ? { ...current, ...updated } : updated);
       }
     };
     window.addEventListener("crm-user-profile-updated", onProfileUpdated);

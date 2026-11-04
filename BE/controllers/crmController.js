@@ -1012,7 +1012,9 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
         const BATCH_SIZE = 1000; // Increased batch size for better performance
         let processedCount = 0; // Track count instead of storing documents
         const skippedLeads = [];
+        const skippedDuplicates = [];
         const createdLeadIds = []; // Store IDs of newly created leads for bulk calling
+        let duplicateTotal = 0;
         let lastProgressUpdate = 0;
         const PROGRESS_UPDATE_INTERVAL = results.length > 1000 ? 50 : 10; // Less frequent updates for large datasets
 
@@ -1028,90 +1030,96 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                 .flatMap(lead => (lead.phone ? getPhoneLookupValues(lead.phone) : []))
                 .filter(phone => phone && phone.trim() !== '');
             
-            let existingEmailsSet = new Set();
+            const existingByEmail = new Map();
+            const existingByPhone = new Map();
+            const rememberExisting = (lead) => {
+                if (lead.email) existingByEmail.set(String(lead.email).toLowerCase(), lead);
+                getPhoneLookupValues(lead.phone).forEach((value) => existingByPhone.set(value, lead));
+            };
+            const alreadyInSystem = { isDeleted: false, uploadBatchId: { $ne: uploadBatchId } };
             if (batchEmails.length > 0) {
                 const existingLeadsByEmail = await Lead.find({
                     email: { $in: batchEmails },
-                    isDeleted: false
-                }).select('email').lean();
-
-                // Create a Set of existing emails for fast lookup
-                existingEmailsSet = new Set(existingLeadsByEmail.map(lead => lead.email));
+                    ...alreadyInSystem,
+                }).select('_id firstName lastName email phone createdAt').lean();
+                existingLeadsByEmail.forEach(rememberExisting);
             }
-            
-            let existingPhonesSet = new Set();
             if (batchPhones.length > 0) {
                 const existingLeadsByPhone = await Lead.find({
                     phone: { $in: batchPhones },
-                    isDeleted: false
-                }).select('phone').lean();
-
-                // Create a Set of existing phones for fast lookup
-                existingPhonesSet = new Set(existingLeadsByPhone.map(lead => lead.phone));
+                    ...alreadyInSystem,
+                }).select('_id firstName lastName email phone createdAt').lean();
+                existingLeadsByPhone.forEach(rememberExisting);
             }
 
-            // Separate leads into new and duplicate
             const leadsToInsert = [];
+            const noteDuplicate = (leadData, formattedPhone, reason, existing) => {
+                const row = {
+                    key: String(duplicateTotal),
+                    firstName: leadData.firstName || "",
+                    lastName: leadData.lastName || "",
+                    email: leadData.email || "",
+                    phone: formattedPhone || leadData.phone || "",
+                    country: leadData.country || "",
+                    Brand: leadData.Brand || "",
+                    source: leadData.source || "",
+                    fileName: leadData.fileName || "",
+                    Address: leadData.Address || "",
+                    status: leadData.status || "New",
+                    agent: leadData.agent ? String(leadData.agent) : null,
+                    reason,
+                    existingLeadId: existing?._id || null,
+                    acceptedLeadId: null,
+                    acceptedAt: null,
+                };
+                skippedLeads.push({ email: row.email, phone: row.phone, reason });
+                duplicateTotal += 1;
+                if (skippedDuplicates.length < 5000) skippedDuplicates.push(row);
+            };
             for (const leadData of batch) {
                 const formattedPhone = leadData.phone ? normalizeLeadPhone(leadData.phone, addPhonePlusPrefix) : '';
-                const isDuplicateEmail = leadData.email && leadData.email.trim() !== '' && existingEmailsSet.has(leadData.email);
+                const emailKey = leadData.email ? String(leadData.email).trim().toLowerCase() : "";
                 const phoneLookupValues = getPhoneLookupValues(formattedPhone);
-                const isDuplicatePhone = phoneLookupValues.some((value) => existingPhonesSet.has(value));
-                
-                // Skip if email or phone is duplicate
-                if (isDuplicateEmail) {
-                    skippedLeads.push({
-                        email: leadData.email,
-                        phone: formattedPhone || leadData.phone || '',
-                        reason: 'Duplicate email'
-                    });
-                } else if (isDuplicatePhone) {
-                    skippedLeads.push({
-                        email: leadData.email || '',
-                        phone: formattedPhone || leadData.phone || '',
-                        reason: 'Duplicate phone number'
-                    });
+                const existingEmailLead = emailKey ? existingByEmail.get(emailKey) : null;
+                const existingPhoneLead = phoneLookupValues.map((value) => existingByPhone.get(value)).find(Boolean) || null;
+
+                // Repeats inside this CSV are kept. Skip only a lead that is already stored.
+                if (emailKey && existingEmailLead) {
+                    noteDuplicate(leadData, formattedPhone, "Duplicate email", existingEmailLead);
+                } else if (existingPhoneLead) {
+                    noteDuplicate(leadData, formattedPhone, "Duplicate phone number", existingPhoneLead);
                 } else {
-                    // Format phone before inserting
-                    if (leadData.phone) {
-                        leadData.phone = formattedPhone;
-                    }
+                    if (leadData.phone) leadData.phone = formattedPhone;
                     leadData.uploadBatchId = uploadBatchId;
                     leadsToInsert.push(leadData);
                 }
             }
 
-            // Bulk insert new leads
             if (leadsToInsert.length > 0) {
                 try {
                     const result = await Lead.insertMany(leadsToInsert, { ordered: false });
                     processedCount += result.length;
-                    // Store IDs of newly created leads
                     createdLeadIds.push(...result.map(lead => lead._id.toString()));
                 } catch (error) {
-                    // Handle any individual errors during bulk insert
                     if (error.writeErrors) {
                         error.writeErrors.forEach(writeError => {
-                    skippedLeads.push({
+                            skippedLeads.push({
                                 email: leadsToInsert[writeError.index]?.email || 'unknown',
                                 reason: writeError.errmsg || 'Insert error'
                             });
                         });
-                        // Count successful inserts even if some failed
                         processedCount += (leadsToInsert.length - error.writeErrors.length);
                     } else {
-                        // If entire batch failed, add to skipped
                         leadsToInsert.forEach(lead => {
                             skippedLeads.push({
                                 email: lead.email,
                                 reason: error.message || 'Insert error'
                             });
-                    });
+                        });
+                    }
                 }
             }
-        }
 
-            // Send progress update every N leads
             const currentProgress = processedCount + skippedLeads.length;
             if (currentProgress - lastProgressUpdate >= PROGRESS_UPDATE_INTERVAL || currentProgress === results.length) {
                 sendProgress({
@@ -1126,7 +1134,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
         }
 
         let uploadId = null;
-        if (processedCount > 0) {
+        if (processedCount > 0 || skippedDuplicates.length > 0) {
             const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
             const LeadUpload = await getLeadUploadModel();
             const uploadRecord = await LeadUpload.create({
@@ -1137,6 +1145,9 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                 uploadedByRole: req.user?.role || "",
                 leadCount: processedCount,
                 skippedCount: skippedLeads.length,
+                duplicateCount: duplicateTotal,
+                acceptedCount: 0,
+                duplicates: skippedDuplicates,
             });
             uploadId = uploadRecord._id;
         }
@@ -1600,6 +1611,10 @@ exports.assignLeadsToAgent = async (req, res) => {
             .filter((lead) => isNewStatus(lead.status) && lead.agent && String(lead.agent) !== String(targetAgentId))
             .map((lead) => lead.agent);
         if (lostNewOwners.length) await refillOwners(lostNewOwners, req.user);
+        if (!unassign && result.modifiedCount > 0) {
+            const { resolveShortageAlert } = require("../utils/leadShortageAlert");
+            await resolveShortageAlert(agentId);
+        }
 
         return res.status(200).json({
             success: true,
@@ -2198,26 +2213,294 @@ exports.editLead = async (req, res) => {
         });
     }
 };
+const superAdminOnly = (req, res) => {
+    if (req.user?.role === "superadmin") return true;
+    res.status(403).json({ success: false, msg: "Super admin only" });
+    return false;
+};
+
+const leadCompareFields = "firstName lastName email phone country Brand status fileName source Address createdAt isDeleted";
+
 exports.listLeadUploads = async (req, res) => {
     try {
-        if (req.user?.role !== "superadmin") {
-            return res.status(403).json({ success: false, msg: "Super admin only" });
-        }
+        if (!superAdminOnly(req, res)) return;
         const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
         const LeadUpload = await getLeadUploadModel();
-        const uploads = await LeadUpload.find().sort({ createdAt: -1 }).limit(50).lean();
-        res.json({ success: true, uploads });
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+        const search = String(req.query.search || "").trim();
+        const query = {};
+        if (search) query.fileName = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+        const removedUploads = await LeadUpload.find({ deletedAt: { $ne: null } }).select("_id").lean();
+        if (removedUploads.length) {
+            const Lead = await getLeadModel();
+            await Lead.deleteMany({
+                uploadBatchId: { $in: removedUploads.map((item) => item._id) },
+                isDeleted: true,
+            });
+        }
+        const [uploads, total] = await Promise.all([
+            LeadUpload.find(query).select("-duplicates").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+            LeadUpload.countDocuments(query),
+        ]);
+        res.json({
+            success: true,
+            uploads,
+            pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+        });
     } catch (err) {
         console.error("Error listing lead uploads:", err);
         res.status(500).json({ success: false, msg: "Could not load upload history" });
     }
 };
 
+exports.getLeadUpload = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+        const LeadUpload = await getLeadUploadModel();
+        const Lead = await getLeadModel();
+        const upload = await LeadUpload.findById(req.params.id).lean();
+        if (!upload) return res.status(404).json({ success: false, msg: "Upload not found" });
+
+        const leadPage = Math.max(1, parseInt(req.query.leadPage, 10) || 1);
+        const leadLimit = Math.min(100, Math.max(1, parseInt(req.query.leadLimit, 10) || 25));
+        const duplicatePage = Math.max(1, parseInt(req.query.duplicatePage, 10) || 1);
+        const duplicateLimit = Math.min(100, Math.max(1, parseInt(req.query.duplicateLimit, 10) || 10));
+        const duplicateStatus = ["pending", "accepted", "declined", "all"].includes(req.query.duplicateStatus)
+            ? req.query.duplicateStatus
+            : "pending";
+        const duplicateSort = ["name", "email", "phone"].includes(req.query.duplicateSort)
+            ? req.query.duplicateSort
+            : "name";
+
+        const duplicates = (upload.duplicates || []).map((row, index) => ({
+            ...row,
+            key: row.key || String(index),
+        }));
+        const accepted = duplicates.filter((row) => row.acceptedLeadId).length;
+        const declined = duplicates.filter((row) => row.declinedAt && !row.acceptedLeadId).length;
+        const pending = duplicates.length - accepted - declined;
+        const sortText = (row) => {
+            if (duplicateSort === "email") return String(row.email || "").toLowerCase();
+            if (duplicateSort === "phone") return String(row.phone || "");
+            return `${row.firstName || ""} ${row.lastName || ""}`.trim().toLowerCase();
+        };
+        const filtered = duplicates.filter((row) => {
+            if (duplicateStatus === "accepted") return Boolean(row.acceptedLeadId);
+            if (duplicateStatus === "declined") return Boolean(row.declinedAt) && !row.acceptedLeadId;
+            if (duplicateStatus === "pending") return !row.acceptedLeadId && !row.declinedAt;
+            return true;
+        }).sort((a, b) => sortText(a).localeCompare(sortText(b)));
+        const pageRows = filtered.slice((duplicatePage - 1) * duplicateLimit, duplicatePage * duplicateLimit);
+        const relatedIds = pageRows.flatMap((row) => [row.existingLeadId, row.acceptedLeadId]).filter(Boolean);
+        const related = relatedIds.length
+            ? await Lead.find({ _id: { $in: relatedIds } }).select(leadCompareFields).lean()
+            : [];
+        const byId = new Map(related.map((lead) => [String(lead._id), lead]));
+        const duplicateRows = pageRows.map((row) => ({
+            ...row,
+            existing: row.existingLeadId ? byId.get(String(row.existingLeadId)) || null : null,
+            acceptedLead: row.acceptedLeadId ? byId.get(String(row.acceptedLeadId)) || null : null,
+        }));
+
+        const leadQuery = { uploadBatchId: upload._id };
+        const [leads, leadTotal] = await Promise.all([
+            Lead.find(leadQuery).sort({ createdAt: -1 }).skip((leadPage - 1) * leadLimit).limit(leadLimit).select(leadCompareFields).lean(),
+            Lead.countDocuments(leadQuery),
+        ]);
+
+        const { duplicates: unusedDuplicates, ...summary } = upload;
+        res.json({
+            success: true,
+            upload: { ...summary, acceptedCount: accepted },
+            duplicates: {
+                rows: duplicateRows,
+                page: duplicatePage,
+                pages: Math.max(1, Math.ceil(filtered.length / duplicateLimit)),
+                total: filtered.length,
+                pending,
+                accepted,
+                declined,
+                status: duplicateStatus,
+                sort: duplicateSort,
+            },
+            leads: {
+                rows: leads,
+                page: leadPage,
+                pages: Math.max(1, Math.ceil(leadTotal / leadLimit)),
+                total: leadTotal,
+            },
+        });
+    } catch (err) {
+        console.error("Error reading lead upload:", err);
+        res.status(500).json({ success: false, msg: "Could not load this upload" });
+    }
+};
+
+exports.acceptLeadUploadDuplicates = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+        const LeadUpload = await getLeadUploadModel();
+        const Lead = await getLeadModel();
+        const upload = await LeadUpload.findById(req.params.id);
+        if (!upload) return res.status(404).json({ success: false, msg: "Upload not found" });
+        if (upload.deletedAt) {
+            return res.status(400).json({ success: false, msg: "This upload was removed. Its duplicates cannot be accepted." });
+        }
+
+        const acceptAll = req.body?.all === true;
+        const requested = Array.isArray(req.body?.keys) ? req.body.keys.map(String) : [];
+        if (!acceptAll && !requested.length) return res.status(400).json({ success: false, msg: "Choose at least one duplicate" });
+        if (!acceptAll && requested.length > 500) return res.status(400).json({ success: false, msg: "Accept up to 500 duplicates at a time" });
+        const wanted = new Set(requested);
+
+        const rows = (upload.duplicates || []).map((entry, index) => {
+            const source = entry && typeof entry.toObject === "function" ? entry.toObject() : entry;
+            const row = source && typeof source === "object" ? { ...source } : {};
+            row.key = row.key || String(index);
+            return row;
+        });
+        let chosen = rows.filter((row) => {
+            if (row.acceptedLeadId) return false;
+            if (acceptAll) return !row.declinedAt;
+            return wanted.has(String(row.key));
+        });
+        if (!chosen.length) {
+            return res.status(400).json({ success: false, msg: "Those duplicates are already accepted or no longer in this upload" });
+        }
+        const truncated = chosen.length > 500;
+        if (truncated) chosen = chosen.slice(0, 500);
+
+        const createdByKey = new Map();
+        const failed = [];
+        const planned = chosen.map((row) => ({
+            key: String(row.key),
+            doc: {
+                _id: new mongoose.Types.ObjectId(),
+                firstName: row.firstName || "",
+                lastName: row.lastName || "",
+                email: row.email || undefined,
+                phone: row.phone || "",
+                country: row.country || "",
+                Brand: row.Brand || "",
+                source: row.source || null,
+                fileName: row.fileName || "",
+                Address: row.Address || "",
+                status: row.status || "New",
+                agent: row.agent && mongoose.Types.ObjectId.isValid(row.agent) ? row.agent : null,
+                uploadBatchId: upload._id,
+            },
+        }));
+        try {
+            await Lead.insertMany(planned.map((item) => item.doc), { ordered: false });
+            planned.forEach((item) => createdByKey.set(item.key, item.doc));
+        } catch (error) {
+            if (!error.writeErrors) throw error;
+            const failedIndexes = new Set(error.writeErrors.map((item) => item.index));
+            planned.forEach((item, index) => {
+                if (failedIndexes.has(index)) {
+                    failed.push({ key: item.key, msg: error.writeErrors.find((entry) => entry.index === index)?.errmsg || "Could not create this lead" });
+                } else {
+                    createdByKey.set(item.key, item.doc);
+                }
+            });
+        }
+
+        if (!createdByKey.size) {
+            return res.status(400).json({ success: false, msg: "None of the selected duplicates could be added", failed });
+        }
+
+        const now = new Date();
+        upload.duplicates = rows.map((row) => {
+            const lead = createdByKey.get(String(row.key));
+            if (!lead) return row;
+            return { ...row, acceptedLeadId: lead._id, acceptedAt: now };
+        });
+        upload.markModified("duplicates");
+        upload.acceptedCount = (upload.acceptedCount || 0) + createdByKey.size;
+        upload.leadCount = (upload.leadCount || 0) + createdByKey.size;
+        await upload.save();
+
+        const created = [...createdByKey.values()];
+        for (let i = 0; i < created.length; i += 25) {
+            const slice = created.slice(i, i + 25);
+            await Promise.all(slice.map((lead) => logActivity({
+                leadId: lead._id,
+                type: "created",
+                createdBy: req.user,
+                changes: { description: `Lead accepted from duplicate review in ${upload.fileName || "a CSV upload"}` },
+            }).catch(() => null)));
+        }
+        refillAllEligibleAgents().catch((err) => console.error("Post-accept lead refill error:", err));
+
+        res.json({
+            success: true,
+            accepted: createdByKey.size,
+            keys: [...createdByKey.keys()],
+            failed,
+            all: acceptAll && !truncated,
+            msg: truncated
+                ? `Added ${createdByKey.size}. More duplicates are still waiting.`
+                : failed.length
+                    ? `Added ${createdByKey.size}. ${failed.length} could not be added.`
+                    : `Added ${createdByKey.size} lead${createdByKey.size === 1 ? "" : "s"}`,
+        });
+    } catch (err) {
+        console.error("Error accepting upload duplicates:", err);
+        res.status(500).json({ success: false, msg: "Could not accept these duplicates" });
+    }
+};
+
+exports.declineLeadUploadDuplicates = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+        const LeadUpload = await getLeadUploadModel();
+        const upload = await LeadUpload.findById(req.params.id);
+        if (!upload) return res.status(404).json({ success: false, msg: "Upload not found" });
+
+        const declineAll = req.body?.all === true;
+        const requested = Array.isArray(req.body?.keys) ? req.body.keys.map(String) : [];
+        if (!declineAll && !requested.length) return res.status(400).json({ success: false, msg: "Choose at least one duplicate" });
+        const wanted = new Set(requested);
+        const now = new Date();
+        let declined = 0;
+        const declinedKeys = [];
+        const rows = (upload.duplicates || []).map((entry, index) => {
+            const source = entry && typeof entry.toObject === "function" ? entry.toObject() : entry;
+            const row = source && typeof source === "object" ? { ...source } : {};
+            row.key = row.key || String(index);
+            if (row.acceptedLeadId || row.declinedAt) return row;
+            if (!declineAll && !wanted.has(String(row.key))) return row;
+            declined += 1;
+            declinedKeys.push(String(row.key));
+            return { ...row, declinedAt: now };
+        });
+        if (!declined) {
+            return res.status(400).json({ success: false, msg: "Those duplicates are already sorted" });
+        }
+        upload.duplicates = rows;
+        upload.markModified("duplicates");
+        upload.declinedCount = (upload.declinedCount || 0) + declined;
+        await upload.save();
+        res.json({
+            success: true,
+            declined,
+            keys: declinedKeys,
+            all: declineAll,
+            msg: `Declined ${declined} duplicate${declined === 1 ? "" : "s"}`,
+        });
+    } catch (err) {
+        console.error("Error declining upload duplicates:", err);
+        res.status(500).json({ success: false, msg: "Could not decline these duplicates" });
+    }
+};
+
 exports.deleteLeadUpload = async (req, res) => {
     try {
-        if (req.user?.role !== "superadmin") {
-            return res.status(403).json({ success: false, msg: "Super admin only" });
-        }
+        if (!superAdminOnly(req, res)) return;
         const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
         const LeadUpload = await getLeadUploadModel();
         const Lead = await getLeadModel();
@@ -2225,17 +2508,14 @@ exports.deleteLeadUpload = async (req, res) => {
         if (!upload) {
             return res.status(404).json({ success: false, msg: "Upload not found" });
         }
-        if (upload.deletedAt) {
-            return res.json({ success: true, deleted: 0, alreadyDeleted: true });
+        const wasDeleted = Boolean(upload.deletedAt);
+        const result = await Lead.deleteMany({ uploadBatchId: upload._id });
+        if (!wasDeleted) {
+            upload.deletedAt = new Date();
+            upload.deletedCount = result.deletedCount || 0;
+            await upload.save();
         }
-        const result = await Lead.updateMany(
-            { uploadBatchId: upload._id, isDeleted: { $ne: true } },
-            { $set: { isDeleted: true, deletedAt: new Date() } }
-        );
-        upload.deletedAt = new Date();
-        upload.deletedCount = result.modifiedCount || 0;
-        await upload.save();
-        res.json({ success: true, deleted: result.modifiedCount || 0 });
+        res.json({ success: true, deleted: result.deletedCount || 0, alreadyDeleted: wasDeleted && !result.deletedCount });
     } catch (err) {
         console.error("Error deleting lead upload:", err);
         res.status(500).json({ success: false, msg: "Could not delete this upload" });
@@ -3120,5 +3400,198 @@ exports.updateLeadViewColumns = async (req, res) => {
     } catch (error) {
         console.error("Save lead columns failed:", error);
         res.status(500).json({ success: false, msg: "Could not save lead columns" });
+    }
+};
+
+const UserRestriction = require("../models/usersRestrictions");
+const getLeadShortageAlertModel = require("../crmDB/models/leadShortageAlertModel");
+
+const automationName = (user) => `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || user?.email || "Agent";
+
+const cleanAutomationList = (values, limit = 100) => (
+    Array.isArray(values)
+        ? [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))].slice(0, limit)
+        : []
+);
+
+exports.getLeadAutomation = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const Lead = await getLeadModel();
+        const settings = await UserRestriction.findOne().select("autoAssignNewLeads automationSkip").lean();
+        const [listNames, countries, brands, sources, users, counts] = await Promise.all([
+            Lead.distinct("fileName", { isDeleted: false, fileName: { $nin: [null, ""] } }),
+            Lead.distinct("country", { isDeleted: false, country: { $nin: [null, ""] } }),
+            Lead.distinct("Brand", { isDeleted: false, Brand: { $nin: [null, ""] } }),
+            Lead.distinct("source", { isDeleted: false, source: { $nin: [null, ""] } }),
+            User.find({ role: { $in: ["admin", "subadmin", "manager", "superadmin"] } })
+                .select("firstName lastName email role adminPermissions permissions leadAutomation")
+                .sort({ firstName: 1, lastName: 1 })
+                .lean(),
+            Lead.aggregate([
+                { $match: { isDeleted: false, agent: { $ne: null } } },
+                { $group: {
+                    _id: "$agent",
+                    total: { $sum: 1 },
+                    newLeads: {
+                        $sum: {
+                            $cond: [
+                                { $in: [{ $toLower: { $ifNull: ["$status", "new"] } }, ["new", ""]] },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                } },
+            ]),
+        ]);
+        const countByAgent = new Map(counts.map((row) => [String(row._id), row]));
+        const sortText = (values) => values.filter(Boolean).sort((a, b) => String(a).localeCompare(String(b)));
+        const skip = settings?.automationSkip || {};
+        const shape = (user) => {
+            const rules = user.leadAutomation || {};
+            const permissions = user.role === "subadmin" ? user.permissions : user.adminPermissions;
+            const held = countByAgent.get(String(user._id)) || {};
+            return {
+                _id: user._id,
+                name: automationName(user),
+                email: user.email || "",
+                role: user.role,
+                openCrm: user.role === "superadmin" || permissions?.accessCrm === true,
+                enabled: rules.enabled !== false,
+                maxLeads: Number(rules.maxLeads) > 0 ? Number(rules.maxLeads) : 100,
+                listNames: rules.listNames || [],
+                countries: rules.countries || [],
+                agentIds: rules.agentIds || [],
+                newLeads: held.newLeads || 0,
+                totalLeads: held.total || 0,
+            };
+        };
+        res.json({
+            success: true,
+            enabled: !settings || settings.autoAssignNewLeads !== false,
+            skip: {
+                fileNames: skip.fileNames || [],
+                countries: skip.countries || [],
+                brands: skip.brands || [],
+                sources: skip.sources || [],
+            },
+            listNames: sortText(listNames),
+            countries: sortText(countries),
+            brands: sortText(brands),
+            sources: sortText(sources),
+            agents: [
+                { id: "unassigned", name: "Unassigned", role: "" },
+                ...users.map((user) => ({ id: String(user._id), name: automationName(user), role: user.role })),
+            ],
+            admins: users.filter((user) => user.role !== "superadmin").map(shape),
+        });
+    } catch (err) {
+        console.error("Error loading lead automation:", err);
+        res.status(500).json({ success: false, msg: "Could not load automation" });
+    }
+};
+
+exports.updateLeadAutomation = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        let settings = await UserRestriction.findOne();
+        if (!settings) settings = new UserRestriction();
+        if (typeof req.body?.enabled === "boolean") {
+            settings.autoAssignNewLeads = req.body.enabled;
+        }
+        if (req.body?.skip && typeof req.body.skip === "object") {
+            settings.automationSkip = {
+                fileNames: cleanAutomationList(req.body.skip.fileNames),
+                countries: cleanAutomationList(req.body.skip.countries),
+                brands: cleanAutomationList(req.body.skip.brands),
+                sources: cleanAutomationList(req.body.skip.sources),
+            };
+            settings.markModified("automationSkip");
+        }
+        await settings.save();
+        if (settings.autoAssignNewLeads === false) {
+            const { clearOpenShortageAlerts } = require("../utils/leadShortageAlert");
+            await clearOpenShortageAlerts();
+        }
+        res.json({
+            success: true,
+            enabled: settings.autoAssignNewLeads !== false,
+            skip: settings.automationSkip || { fileNames: [], countries: [], brands: [], sources: [] },
+        });
+    } catch (err) {
+        console.error("Error updating lead automation:", err);
+        res.status(500).json({ success: false, msg: "Could not update automation" });
+    }
+};
+
+exports.listLeadShortageAlerts = async (req, res) => {
+    try {
+        if (req.user?.role !== "superadmin") {
+            return res.status(403).json({ success: false, msg: "Super admin only" });
+        }
+        const Alert = await getLeadShortageAlertModel();
+        const alerts = await Alert.find({ status: "open" }).sort({ openedAt: 1 }).lean();
+        res.json({ success: true, alerts });
+    } catch (err) {
+        console.error("Error listing lead shortage alerts:", err);
+        res.status(500).json({ success: false, msg: "Could not load alerts" });
+    }
+};
+
+exports.ignoreLeadShortageAlert = async (req, res) => {
+    try {
+        if (req.user?.role !== "superadmin") {
+            return res.status(403).json({ success: false, msg: "Super admin only" });
+        }
+        const Alert = await getLeadShortageAlertModel();
+        const alert = await Alert.findOneAndUpdate(
+            { _id: req.params.id, status: "open" },
+            { $set: { status: "ignored", ignoredAt: new Date() } },
+            { new: true }
+        ).lean();
+        if (!alert) return res.status(404).json({ success: false, msg: "Alert not found" });
+        res.json({ success: true, alert });
+    } catch (err) {
+        console.error("Error ignoring lead shortage alert:", err);
+        res.status(500).json({ success: false, msg: "Could not ignore this alert" });
+    }
+};
+
+exports.updateLeadAutomationAdmin = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const maxLeads = Math.min(500, Math.max(1, Math.floor(Number(req.body?.maxLeads) || 100)));
+        const leadAutomation = {
+            enabled: req.body?.enabled !== false,
+            maxLeads,
+            listNames: cleanAutomationList(req.body?.listNames),
+            countries: cleanAutomationList(req.body?.countries),
+            agentIds: cleanAutomationList(req.body?.agentIds),
+        };
+        const updated = await User.findOneAndUpdate(
+            { _id: req.params.id, role: { $in: ["admin", "subadmin", "manager"] } },
+            { $set: { leadAutomation } },
+            { new: true }
+        ).select("firstName lastName email role leadAutomation");
+        if (!updated) return res.status(404).json({ success: false, msg: "Admin not found" });
+        if (leadAutomation.enabled === false) {
+            const { clearOpenShortageAlerts } = require("../utils/leadShortageAlert");
+            await clearOpenShortageAlerts(updated._id);
+        }
+        res.json({
+            success: true,
+            admin: {
+                _id: updated._id,
+                enabled: updated.leadAutomation?.enabled !== false,
+                maxLeads: updated.leadAutomation?.maxLeads || 100,
+                listNames: updated.leadAutomation?.listNames || [],
+                countries: updated.leadAutomation?.countries || [],
+                agentIds: updated.leadAutomation?.agentIds || [],
+            },
+        });
+    } catch (err) {
+        console.error("Error saving admin automation:", err);
+        res.status(500).json({ success: false, msg: "Could not save this admin" });
     }
 };

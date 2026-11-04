@@ -96,6 +96,8 @@ import {
     OpenInNew,
     ContentCopy,
     ViewColumn,
+    History,
+    AutoMode,
 } from "@mui/icons-material";
 import {
     adminCrmLeadsApi,
@@ -128,7 +130,6 @@ import {
 } from "../../../Api/Service";
 import { toast } from "react-toastify";
 import Sidebar from "./Sidebar.js";
-import LeadUploadHistory from "./components/LeadUploadHistory";
 import CrmAccessDenied from "./components/CrmAccessDenied";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { subscribeChatEvents } from "./chatEvents";
@@ -523,7 +524,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                     // Show warning if leads were skipped
                     if (eventData.data.skipped > 0) {
                         setTimeout(() => {
-                            toast.warning(`${eventData.data.skipped} lead(s) skipped due to duplicate emails`, {
+                            toast.warning(`${eventData.data.skipped} lead(s) skipped because they are already in the system`, {
                                 autoClose: 5000
                             });
                         }, 500);
@@ -1187,7 +1188,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                             </Box>
 
                                             <Alert severity="warning" sx={{ mt: 2 }}>
-                                                This will import {csvPreview.length > 0 ? 'multiple' : 'all'} leads from the CSV file. Duplicate emails will be skipped automatically.
+                                                This will import {csvPreview.length > 0 ? 'multiple' : 'all'} leads from the CSV file. Repeated rows in the file are kept. A row is skipped only when that email or phone is already in the system.
                                             </Alert>
                                         </>
                                     ) : (
@@ -1277,7 +1278,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
 
                                             {uploadProgress.skipped > 0 && (
                                                 <Alert severity="warning" sx={{ mt: 2 }}>
-                                                    <strong>{uploadProgress.skipped} lead(s) skipped</strong> due to duplicate email addresses. These leads already exist in the system.
+                                                    <strong>{uploadProgress.skipped} lead(s) skipped</strong> because that email or phone is already in the system. Repeated rows in this file were kept.
                                                 </Alert>
                                             )}
 
@@ -1983,7 +1984,6 @@ const LeadsPage = () => {
     const [anchorEl, setAnchorEl] = useState(null);
     const [selectedLead, setSelectedLead] = useState(null);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [uploadHistoryOpen, setUploadHistoryOpen] = useState(false);
     const [viewDetailsOpen, setViewDetailsOpen] = useState(false);
     const [editDialogOpen, setEditDialogOpen] = useState(false);
     const [sendEmailDialogOpen, setSendEmailDialogOpen] = useState(false);
@@ -3941,7 +3941,29 @@ const LeadsPage = () => {
                                 </Typography>
                             </Box>
                         </Box>
-                        <Box sx={{ display: "flex", alignItems: "center" }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                            {(isSuperAdmin || authUser()?.user?.role === "superadmin") && (
+                                <Button
+                                    variant="outlined"
+                                    size="small"
+                                    startIcon={<AutoMode />}
+                                    onClick={() => navigate("/admin/crm/lead-automation")}
+                                    sx={{ borderRadius: 2, flexShrink: 0 }}
+                                >
+                                    Automation
+                                </Button>
+                            )}
+                            {(isSuperAdmin || authUser()?.user?.role === "superadmin") && (
+                                <Button
+                                    variant="outlined"
+                                    size="small"
+                                    startIcon={<History />}
+                                    onClick={() => navigate("/admin/crm/upload-history")}
+                                    sx={{ borderRadius: 2, flexShrink: 0 }}
+                                >
+                                    Upload history
+                                </Button>
+                            )}
                             <CrmAppBarActions />
                         </Box>
                     </Toolbar>
@@ -4247,19 +4269,6 @@ const LeadsPage = () => {
                             >
                                 Export
                             </Button>
-                            )}
-                            {isSuperAdmin && (
-                                <Button
-                                    variant="outlined"
-                                    size="small"
-                                    sx={{
-                                        borderRadius: 2,
-                                        flex: { xs: '1 1 auto', sm: '0 0 auto' }
-                                    }}
-                                    onClick={() => setUploadHistoryOpen(true)}
-                                >
-                                    Upload history
-                                </Button>
                             )}
                             {isSuperAdmin && leads.length > 0 && (
                                 <Button
@@ -5511,12 +5520,6 @@ const LeadsPage = () => {
                     </MenuItem>
                 )}
             </Menu>
-
-            <LeadUploadHistory
-                open={uploadHistoryOpen}
-                onClose={() => setUploadHistoryOpen(false)}
-                onDeleted={() => fetchLeads(pagination.currentPage)}
-            />
 
             {/* Create Lead Dialog */}
             <CreateLeadDialog

@@ -93,7 +93,8 @@ const CrmProfile = () => {
 
     // Optimistically update UI immediately so user sees new avatar instantly
     if (tempUrl) {
-      localStorage.setItem("user_avatar", tempUrl);
+      const { writeStoredAvatar } = require("./userAvatarStore");
+      writeStoredAvatar(userData._id || authUser()?.user?._id, tempUrl);
       const optimisticAvatar = {
         url: tempUrl,
         public_id: previousAvatar?.public_id || "",
@@ -126,7 +127,8 @@ const CrmProfile = () => {
         const nextAvatar = resp.avatar || { url: resp.user?.avatar?.url, public_id: resp.user?.avatar?.public_id };
         const savedUrl = nextAvatar.url || (typeof nextAvatar === "string" ? nextAvatar : "");
         if (savedUrl) {
-          localStorage.setItem("user_avatar", savedUrl);
+          const { writeStoredAvatar } = require("./userAvatarStore");
+          writeStoredAvatar(targetId, savedUrl);
         }
         setUserData((prev) => ({
           ...prev,
@@ -140,8 +142,8 @@ const CrmProfile = () => {
       } else {
         // Rollback to previous avatar on error
         const prevUrl = previousAvatar?.url || (typeof previousAvatar === "string" ? previousAvatar : "");
-        if (prevUrl) localStorage.setItem("user_avatar", prevUrl);
-        else localStorage.removeItem("user_avatar");
+        const { writeStoredAvatar } = require("./userAvatarStore");
+        writeStoredAvatar(userData._id || authUser()?.user?._id, prevUrl || "");
         setUserData((prev) => ({ ...prev, avatar: previousAvatar }));
         window.dispatchEvent(
           new CustomEvent("crm-user-profile-updated", {
@@ -154,8 +156,8 @@ const CrmProfile = () => {
       console.error("Avatar upload error:", err);
       // Rollback to previous avatar on error
       const prevUrl = previousAvatar?.url || (typeof previousAvatar === "string" ? previousAvatar : "");
-      if (prevUrl) localStorage.setItem("user_avatar", prevUrl);
-      else localStorage.removeItem("user_avatar");
+      const { writeStoredAvatar } = require("./userAvatarStore");
+      writeStoredAvatar(userData._id || authUser()?.user?._id, prevUrl || "");
       setUserData((prev) => ({ ...prev, avatar: previousAvatar }));
       window.dispatchEvent(
         new CustomEvent("crm-user-profile-updated", {
@@ -178,7 +180,8 @@ const CrmProfile = () => {
 
       if (resp.success) {
         toast.success("Profile picture removed");
-        localStorage.removeItem("user_avatar");
+        const { writeStoredAvatar } = require("./userAvatarStore");
+        writeStoredAvatar(targetId, "");
         const emptyAvatar = { url: "", public_id: "" };
         setUserData((prev) => ({
           ...prev,
@@ -228,9 +231,8 @@ const CrmProfile = () => {
 
       const profile = resp.signleUser;
       const loadedAvatar = profile?.avatar?.url || (typeof profile?.avatar === "string" ? profile?.avatar : "");
-      if (loadedAvatar) {
-        localStorage.setItem("user_avatar", loadedAvatar);
-      }
+      const { writeStoredAvatar } = require("./userAvatarStore");
+      writeStoredAvatar(currentUser._id, loadedAvatar || "");
 
       // For admin/subadmin, check profile edit permission
       if (
