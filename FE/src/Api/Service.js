@@ -411,6 +411,7 @@ export const deleteLeadUploadApi = (id) => deleteApi(`/crm/lead-uploads/${id}`);
 export const getReversalStatusesApi = () => getApi(`/crm/assignment-reversal/statuses`);
 export const getReversalPreviewApi = (params) => getApi(`/crm/assignment-reversal/preview${toQuery(params)}`);
 export const applyReversalApi = (body) => postApi(`/crm/assignment-reversal/apply`, body);
+export const sendBackLeadsApi = (leadIds, agentId) => postApi(`/crm/assignment-reversal/send-back`, { leadIds, agentId });
 export const getReversalHistoryApi = () => getApi(`/crm/assignment-reversal/history`);
 export const getLeadAutomationApi = () => getApi(`/crm/lead-automation`);
 export const saveLeadAutomationApi = (body) => putSimpleApi(`/crm/lead-automation`, body);

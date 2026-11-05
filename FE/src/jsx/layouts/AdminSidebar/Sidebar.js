@@ -1,6 +1,6 @@
 import logo_300x57_1 from "../../../assets/newlogo/logo-blue.png";
-import React, { useEffect, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuthUser, useSignOut } from "react-auth-kit";
 import { logoutApi, addUserByEmailApi, signleUsersApi } from "../../../Api/Service";
 import { clearStoredAvatars, readStoredAvatar, writeStoredAvatar } from "../../Admin/CRM/userAvatarStore";
@@ -64,6 +64,34 @@ const SideBar = (props) => {
     }
   };
   let Navigate = useNavigate();
+  const location = useLocation();
+  const navRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const node = navRef.current;
+    if (!node) return undefined;
+    let frame = 0;
+    let timer = 0;
+    const scrollActiveItemIntoView = () => {
+      const matches = [...node.querySelectorAll("a.active")];
+      const active = matches.sort((a, b) => (b.getAttribute("href") || "").length - (a.getAttribute("href") || "").length)[0];
+      if (!active || !active.getBoundingClientRect().height) return;
+      const nodeRect = node.getBoundingClientRect();
+      const itemRect = active.getBoundingClientRect();
+      const padding = 12;
+      const alreadyVisible = itemRect.top >= nodeRect.top + padding && itemRect.bottom <= nodeRect.bottom - padding;
+      if (alreadyVisible) return;
+      const itemOffset = itemRect.top - nodeRect.top + node.scrollTop;
+      node.scrollTop = Math.max(0, itemOffset - Math.max(padding, (node.clientHeight - itemRect.height) / 2));
+    };
+    scrollActiveItemIntoView();
+    frame = requestAnimationFrame(scrollActiveItemIntoView);
+    timer = window.setTimeout(scrollActiveItemIntoView, 50);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [location.pathname]);
   let addUser = async () => {
     if (email.trim() === "") {
       toast.error("Please enter email");
@@ -263,7 +291,7 @@ const SideBar = (props) => {
             </NavLink>
           </div>
         </div>
-        <div className={styles.nav}>
+        <div className={styles.nav} ref={navRef}>
           <ul id="sidebar-menu" className={styles.menu}>
             <li>
               <NavLink

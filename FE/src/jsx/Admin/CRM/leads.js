@@ -2039,6 +2039,7 @@ const LeadsPage = () => {
     });
     const [assignDialogOpen, setAssignDialogOpen] = useState(false);
     const [assigning, setAssigning] = useState(false);
+    const [unassignConfirmOpen, setUnassignConfirmOpen] = useState(false);
     const [statusDialogOpen, setStatusDialogOpen] = useState(false);
     const [bulkStatusUpdating, setBulkStatusUpdating] = useState(false);
     const [bulkStatusValue, setBulkStatusValue] = useState('');
@@ -2729,7 +2730,7 @@ const LeadsPage = () => {
     const showLeadColumn = useCallback((key) => (
         Array.isArray(leadColumns) && leadColumns.includes(key) && columnAllowed(key)
     ), [leadColumns, columnAllowed]);
-    const leadColumnCount = 4 + LEAD_COLUMN_OPTIONS.filter((column) => showLeadColumn(column.key)).length;
+    const leadColumnCount = 5 + LEAD_COLUMN_OPTIONS.filter((column) => showLeadColumn(column.key)).length;
 
     useEffect(() => {
         const stored = readStoredLeadColumns(signedInUserId);
@@ -3246,6 +3247,7 @@ const LeadsPage = () => {
             setSelectedLeads(new Set());
             setAllFilteredSelected(false);
             setAssignDialogOpen(false);
+            setUnassignConfirmOpen(false);
         } catch (err) {
             console.error("Unassign error:", err);
             toast.error("Error unassigning leads");
@@ -4069,7 +4071,7 @@ const LeadsPage = () => {
                                         <Button
                                             variant="contained"
                                             color="warning"
-                                            onClick={() => unassignSelectedLeads()}
+                                            onClick={() => setUnassignConfirmOpen(true)}
                                             disabled={assigning}
                                             size="small"
                                             sx={{
@@ -4787,6 +4789,9 @@ const LeadsPage = () => {
                                                     />
                                                 </TableCell>
                                                 <TableCell />
+                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", width: 88 }}>
+                                                    ID
+                                                </TableCell>
                                                 {showLeadColumn("contact") && (
                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 200 }}>
                                                     Contact
@@ -4878,6 +4883,9 @@ const LeadsPage = () => {
                                                             >
                                                                 {expandedLead === lead._id ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
                                                             </IconButton>
+                                                        </TableCell>
+                                                        <TableCell sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 700, color: "text.primary", whiteSpace: "nowrap" }}>
+                                                            {Number.isInteger(lead.leadNumber) ? lead.leadNumber.toLocaleString() : "—"}
                                                         </TableCell>
                                                         {showLeadColumn("contact") && (
                                                         <TableCell>
@@ -5621,6 +5629,39 @@ const LeadsPage = () => {
                 }}
             />
 
+            <Dialog
+                open={unassignConfirmOpen}
+                onClose={() => !assigning && setUnassignConfirmOpen(false)}
+                fullWidth
+                maxWidth="sm"
+            >
+                <DialogTitle>
+                    <Typography variant="h6">Unassign selected leads?</Typography>
+                </DialogTitle>
+                <DialogContent sx={{ px: { xs: 2, sm: 3 } }}>
+                    <Alert severity="warning" sx={{ mb: 2 }}>
+                        This takes the selected leads off the agents who have them now.
+                    </Alert>
+                    <Typography>
+                        Unassign <strong>{selectedLeads.size.toLocaleString()} lead{selectedLeads.size === 1 ? "" : "s"}</strong>?
+                    </Typography>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setUnassignConfirmOpen(false)} disabled={assigning}>
+                        Cancel
+                    </Button>
+                    <Button
+                        variant="contained"
+                        color="warning"
+                        onClick={unassignSelectedLeads}
+                        disabled={assigning || selectedLeads.size === 0}
+                        startIcon={assigning ? <CircularProgress size={18} color="inherit" /> : null}
+                    >
+                        {assigning ? "Unassigning..." : "Unassign"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
             {/* Delete Confirmation Dialog */}
             <Dialog
                 open={deleteConfirmOpen}
@@ -5903,6 +5944,7 @@ const LeadsPage = () => {
                 leadIds={assignLeadIds}
                 agents={agents}
                 currentUserId={currentAuthUser?.user?._id}
+                canSendBack={isSuperAdmin}
                 onAssigned={() => {
                     setSelectedLeads(new Set());
                     setAllFilteredSelected(false);

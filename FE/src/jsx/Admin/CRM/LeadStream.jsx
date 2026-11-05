@@ -2173,7 +2173,7 @@ const LeadStream = () => {
                                 {lead?.firstName || ''} {lead?.lastName || ''}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                                Lead ID: {leadId?.slice(-8) || 'N/A'} • {totalActivities} activities
+                                ID {Number.isInteger(lead?.leadNumber) ? lead.leadNumber.toLocaleString() : "—"} • {totalActivities} activities
                             </Typography>
                         </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>
@@ -4702,6 +4702,7 @@ const LeadStream = () => {
                 leadIds={assignLeadIds}
                 agents={agents}
                 currentUserId={currentUserLatest?._id}
+                canSendBack={currentUserLatest?.role === "superadmin"}
                 title="Assign Lead"
                 subtitle={`${lead?.firstName || ""} ${lead?.lastName || ""}`.trim() || "This lead"}
                 onAssigned={() => fetchLeadData(true)}

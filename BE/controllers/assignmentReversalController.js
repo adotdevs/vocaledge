@@ -15,6 +15,8 @@ const {
     applyPlan,
     buildHistoryDocs,
     toStoredActivities,
+    historyTree,
+    resolveGoBack,
 } = require("../utils/assignmentReversal");
 
 const STAFF_ROLES = ["superadmin", "admin", "subadmin", "manager"];
@@ -292,6 +294,78 @@ exports.applyReversal = async (req, res) => {
         }
     } catch (err) {
         console.error("Reverse assignment apply failed:", err);
+        return res.status(500).json({ success: false, msg: "Server Error", error: err.message });
+    }
+};
+
+// Send the selected leads back to one previous agent. Used from the assign window.
+// Only leads whose last saved agent is `agentId` are moved. The others stay.
+exports.sendBackSelected = async (req, res) => {
+    try {
+        if (!onlySuperAdmin(req, res)) return;
+        const agentId = String(req.body?.agentId || "").trim();
+        const leadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds.filter((id) => mongoose.isValidObjectId(id)) : [];
+        if (!agentId || !mongoose.isValidObjectId(agentId)) {
+            return res.status(400).json({ success: false, msg: "Choose the agent to send the leads back to" });
+        }
+        if (!leadIds.length) return res.status(400).json({ success: false, msg: "No leads selected" });
+        if (reversalRunning) {
+            return res.status(409).json({ success: false, msg: "Another reversal is still running. Wait a moment and try again." });
+        }
+        reversalRunning = true;
+        try {
+            const Lead = await getLeadModel();
+            const leads = await Lead.collection
+                .find({ _id: { $in: leadIds.map((id) => new mongoose.Types.ObjectId(id)) }, isDeleted: { $ne: true } }, { projection: { status: 1, agent: 1, pastAgentIds: 1 } })
+                .toArray();
+            const users = await User.find({ role: { $in: STAFF_ROLES } }).select("firstName lastName role adminPermissions permissions").lean();
+            const ctx = buildContext({ users, orphanIds: [], canReceive: userCanOpenCrm });
+            const target = ctx.receivers.get(agentId);
+            if (!target) return res.status(400).json({ success: false, msg: "That agent cannot take leads back" });
+
+            const items = [];
+            leads.forEach((lead) => {
+                const found = resolveGoBack(lead, ctx);
+                if (!found.ok || found.toId !== agentId) return;
+                items.push({
+                    lead,
+                    leadId: lead._id,
+                    rawStatus: lead.status ?? null,
+                    fromRaw: lead.agent ?? null,
+                    fromId: lead.agent ? String(lead.agent) : "",
+                    toId: found.toId,
+                    toObjectId: found.agent.objectId,
+                    toName: found.agent.name,
+                    toRole: found.agent.role,
+                });
+            });
+            if (!items.length) return res.status(400).json({ success: false, msg: "None of the selected leads go back to that agent" });
+
+            const now = new Date();
+            const batchId = new mongoose.Types.ObjectId();
+            clearReadCache();
+            const { changed, stoppedBecause } = await applyPlan(Lead.collection, items, { now });
+            if (changed.length) {
+                try {
+                    const Activity = await getActivityModel();
+                    const docs = toStoredActivities(new Activity({}).toObject(), buildHistoryDocs(changed, ctx, { actor: req.user, batchId }), now);
+                    await Activity.collection.insertMany(docs, { ordered: false });
+                } catch (historyError) {
+                    console.error("Send back: history entries failed:", historyError);
+                }
+            }
+            return res.status(stoppedBecause ? 500 : 200).json({
+                success: !stoppedBecause,
+                msg: stoppedBecause
+                    ? `Stopped early after ${countText(changed.length)}: ${stoppedBecause}`
+                    : `${countText(changed.length)} sent back to ${target.name}`,
+                data: { movedCount: changed.length, agentName: target.name, agentRole: target.role },
+            });
+        } finally {
+            reversalRunning = false;
+        }
+    } catch (err) {
+        console.error("Send back selected failed:", err);
         return res.status(500).json({ success: false, msg: "Server Error", error: err.message });
     }
 };

@@ -44,13 +44,18 @@ const leadSchema = new mongoose.Schema({
   screenSharingId: { type: String, default: "" },
   customerPotential: { type: Number, default: null },
   refillBatch: { type: mongoose.Schema.Types.ObjectId, default: null },
+  // Permanent public number. Never reused, even after the lead is deleted.
+  leadNumber: { type: Number, min: 1 },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date },
 });
 
-leadSchema.pre("save", function (next) {
+leadSchema.pre("save", async function () {
   this.updatedAt = new Date();
-  next();
+  if (!this.isNew) return;
+  if (Number.isInteger(this.leadNumber) && this.leadNumber > 0) return;
+  const { reserveLeadNumbers } = require("../../utils/leadNumber");
+  this.leadNumber = await reserveLeadNumbers(1);
 });
 
 // Create indexes for better performance
@@ -65,6 +70,10 @@ leadSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
 leadSchema.index({ isDeleted: 1, status: 1, agent: 1 });
 leadSchema.index({ source: 1 }); // For filtering public form leads (e.g. takebackanalytics)
 leadSchema.index({ uploadBatchId: 1, isDeleted: 1 });
+leadSchema.index(
+  { leadNumber: 1 },
+  { unique: true, partialFilterExpression: { leadNumber: { $type: "number" } } }
+);
 
 const getLeadModel = async () => {
   const crmDB = await connectCRMDatabase();

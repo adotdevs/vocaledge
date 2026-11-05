@@ -22,7 +22,7 @@ import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import DoNotDisturbOnRoundedIcon from "@mui/icons-material/DoNotDisturbOnRounded";
 import { toast } from "react-toastify";
-import { assignLeadsApi } from "../../../../Api/Service";
+import { assignLeadsApi, sendBackLeadsApi } from "../../../../Api/Service";
 
 const ASSIGNABLE_ROLES = ["superadmin", "admin", "subadmin"];
 
@@ -116,6 +116,109 @@ function CurrentOwners({ state, owners, unassigned }) {
     );
 }
 
+function TreeRow({ depth, last, label, action }) {
+    return (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, minHeight: 36 }}>
+            <Box sx={{ width: depth ? 18 + depth * 16 : 0, flexShrink: 0, position: "relative", alignSelf: "stretch" }}>
+                {depth > 0 && (
+                    <Box
+                        sx={{
+                            position: "absolute",
+                            left: 8 + (depth - 1) * 16,
+                            top: last ? 0 : -8,
+                            bottom: last ? "50%" : -8,
+                            borderLeft: "1px solid",
+                            borderColor: "divider",
+                        }}
+                    />
+                )}
+                {depth > 0 && (
+                    <Box
+                        sx={{
+                            position: "absolute",
+                            left: 8 + (depth - 1) * 16,
+                            top: "50%",
+                            width: 12,
+                            borderTop: "1px solid",
+                            borderColor: "divider",
+                        }}
+                    />
+                )}
+            </Box>
+            <Typography variant="body2" component="div" sx={{ flex: 1, minWidth: 0 }}>
+                {label}
+            </Typography>
+            {action}
+        </Box>
+    );
+}
+
+function PreviousTree({ history, canSendBack, sendingId, onSendBack }) {
+    const groups = history || [];
+    const hasBranch = groups.some((group) => (group.branches || []).length > 0);
+    return (
+        <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, px: 1.5, py: 1.25 }}>
+            <Typography variant="overline" sx={{ display: "block", fontWeight: 700, letterSpacing: 0.8, color: "text.secondary", lineHeight: 1.6 }}>
+                Previously assigned
+            </Typography>
+            {!hasBranch && (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 0.5 }}>
+                    No earlier agent is saved for these leads.
+                </Typography>
+            )}
+            {groups.map((group) => (
+                <Box key={group.agentId || "none"}>
+                    <TreeRow
+                        depth={0}
+                        label={(
+                            <>
+                                <strong>{leadsText(group.count)}</strong>
+                                {group.agentName ? <> with <strong>{adminLabel(group.agentName, group.agentRole)}</strong> now</> : " not assigned now"}
+                            </>
+                        )}
+                    />
+                    {group.branches.map((branch, index) => (
+                        <Box key={branch.agentId}>
+                            <TreeRow
+                                depth={1}
+                                last={index === group.branches.length - 1 && branch.earlier.length === 0}
+                                label={(
+                                    <>
+                                        <strong>{leadsText(branch.count)}</strong> were with <strong>{adminLabel(branch.agentName, branch.agentRole)}</strong>
+                                    </>
+                                )}
+                                action={canSendBack && branch.canSendBack ? (
+                                    <Button
+                                        size="small"
+                                        variant="outlined"
+                                        disabled={Boolean(sendingId)}
+                                        onClick={() => onSendBack(branch)}
+                                        sx={{ flexShrink: 0, cursor: "pointer", textTransform: "none", fontWeight: 700 }}
+                                    >
+                                        {sendingId === branch.agentId ? "Sending…" : "Send back"}
+                                    </Button>
+                                ) : null}
+                            />
+                            {branch.earlier.map((earlier, earlierIndex) => (
+                                <TreeRow
+                                    key={earlier.agentId}
+                                    depth={2}
+                                    last={earlierIndex === branch.earlier.length - 1 && index === group.branches.length - 1}
+                                    label={(
+                                        <>
+                                            <strong>{leadsText(earlier.count)}</strong> were with <strong>{adminLabel(earlier.agentName, earlier.agentRole)}</strong> before that
+                                        </>
+                                    )}
+                                />
+                            ))}
+                        </Box>
+                    ))}
+                </Box>
+            ))}
+        </Box>
+    );
+}
+
 function ResultLine({ tone, icon, children }) {
     return (
         <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
@@ -185,6 +288,7 @@ export default function AssignLeadsDialog({
     currentUserId,
     title = "Assign Selected Leads",
     subtitle = "",
+    canSendBack = false,
     onAssigned,
 }) {
     const [agentId, setAgentId] = useState("");
@@ -193,6 +297,8 @@ export default function AssignLeadsDialog({
     const [summary, setSummary] = useState(null);
     const [preview, setPreview] = useState(null); // { key, data } or { key, error }
     const [owners, setOwners] = useState(null); // { ids, data } or { ids, error }
+    const [historyTick, setHistoryTick] = useState(0);
+    const [sendingBackId, setSendingBackId] = useState("");
 
     const reset = useCallback(() => {
         setAgentId("");
@@ -201,6 +307,8 @@ export default function AssignLeadsDialog({
         setSummary(null);
         setPreview(null);
         setOwners(null);
+        setHistoryTick(0);
+        setSendingBackId("");
     }, []);
 
     useEffect(() => {
@@ -241,7 +349,7 @@ export default function AssignLeadsDialog({
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, leadIds]);
+    }, [open, leadIds, historyTick]);
 
     // Only when the box is ticked: ask the server what would happen (nothing is changed).
     useEffect(() => {
@@ -286,6 +394,25 @@ export default function AssignLeadsDialog({
     const nothingToAssign = skip && Boolean(shown) && shown.assigned === 0;
     const canAssign = Boolean(chosen) && total > 0 && !assigning && !nothingToAssign;
     const assignLabel = shown ? `Assign ${leadsText(shown.assigned)}` : "Assign";
+
+    const handleSendBack = async (branch) => {
+        setSendingBackId(branch.agentId);
+        try {
+            const res = await sendBackLeadsApi(ids, branch.agentId);
+            if (!res?.success) {
+                toast.error(res?.msg || "Could not send these leads back");
+                return;
+            }
+            toast.success(res.msg || `${leadsText(branch.count)} sent back`);
+            setPreview(null);
+            setHistoryTick((tick) => tick + 1);
+            if (onAssigned) onAssigned(res.data);
+        } catch (error) {
+            toast.error("Could not send these leads back");
+        } finally {
+            setSendingBackId("");
+        }
+    };
 
     const handleClose = () => {
         if (!assigning) onClose();
@@ -436,6 +563,15 @@ export default function AssignLeadsDialog({
                                     </Box>
                                 }
                             />
+
+                            {skip && (
+                                <PreviousTree
+                                    history={ownersNow?.data?.history || []}
+                                    canSendBack={canSendBack}
+                                    sendingId={sendingBackId}
+                                    onSendBack={handleSendBack}
+                                />
+                            )}
 
                             {checking && (
                                 <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, color: "text.secondary" }}>

@@ -591,6 +591,7 @@ const RecycleBin = () => {
                                                     onChange={toggleAll}
                                                 />
                                             </TableCell>
+                                            <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary', width: 88 }}>ID</TableCell>
                                             <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>Name</TableCell>
                                             <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>Email</TableCell>
                                             <TableCell sx={{ fontWeight: 'bold', color: 'text.secondary' }}>Agent</TableCell>
@@ -604,6 +605,9 @@ const RecycleBin = () => {
                                             <TableRow key={l._id} hover>
                                                 <TableCell padding="checkbox">
                                                     <Checkbox checked={selected.has(l._id)} onChange={() => toggleOne(l._id)} />
+                                                </TableCell>
+                                                <TableCell sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                                                    {Number.isInteger(l.leadNumber) ? l.leadNumber.toLocaleString() : "—"}
                                                 </TableCell>
                                                 <TableCell>{l.firstName} {l.lastName}</TableCell>
                                                 <TableCell>{l.email}</TableCell>

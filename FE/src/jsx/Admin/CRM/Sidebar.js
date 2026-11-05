@@ -416,9 +416,33 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
 
   useLayoutEffect(() => {
     const node = menuScrollRef.current;
-    if (!node) return;
+    if (!node) return undefined;
     node.scrollTop = savedSidebarScroll;
-  }, [location.pathname]);
+
+    let frame = 0;
+    let timer = 0;
+    const scrollActiveItemIntoView = () => {
+      const active = node.querySelector('[data-sidebar-active="true"]');
+      if (!active || !active.getBoundingClientRect().height) return;
+      const nodeRect = node.getBoundingClientRect();
+      const itemRect = active.getBoundingClientRect();
+      const padding = 12;
+      const alreadyVisible = itemRect.top >= nodeRect.top + padding && itemRect.bottom <= nodeRect.bottom - padding;
+      if (!alreadyVisible) {
+        const itemOffset = itemRect.top - nodeRect.top + node.scrollTop;
+        node.scrollTop = Math.max(0, itemOffset - Math.max(padding, (node.clientHeight - itemRect.height) / 2));
+      }
+      savedSidebarScroll = node.scrollTop;
+    };
+
+    scrollActiveItemIntoView();
+    frame = requestAnimationFrame(scrollActiveItemIntoView);
+    timer = window.setTimeout(scrollActiveItemIntoView, 280);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [location.pathname, callMenuOpen, chatMenuOpen, sidebarChats.length, isCollapsed]);
 
   return (
     <Drawer
@@ -485,11 +509,14 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
           {menuItems.map((item, index) => {
             // Insert Call Dashboard dropdown after the first item (Leads)
             const shouldShowCallMenu = index === 0 && canAccessCallDashboard && callMenuItems.length > 0;
+            const itemActive = isActiveLink(item.link);
+            const specificChatOpen = item.chats && sidebarChats.some((chat) => location.pathname.includes(String(chat._id)));
 
             return (
               <React.Fragment key={index}>
                 <ListItem disablePadding sx={{ mb: 0.5 }}>
                   <ListItemButton
+                    data-sidebar-active={itemActive && !specificChatOpen ? "true" : undefined}
                     component={item.chats && !isCollapsed ? 'div' : Link}
                     to={item.chats && !isCollapsed ? undefined : item.link}
                     onClick={() => {
@@ -501,10 +528,10 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                     }}
                     sx={{
                       borderRadius: 2,
-                      color: isActiveLink(item.link) ? 'primary.main' : 'text.secondary',
-                      backgroundColor: isActiveLink(item.link) ? 'action.selected' : 'transparent',
+                      color: itemActive ? 'primary.main' : 'text.secondary',
+                      backgroundColor: itemActive ? 'action.selected' : 'transparent',
                       '&:hover': {
-                        backgroundColor: isActiveLink(item.link) ? 'action.selected' : 'action.hover'
+                        backgroundColor: itemActive ? 'action.selected' : 'action.hover'
                       },
                       justifyContent: isCollapsed ? 'center' : 'flex-start',
                       px: 2,
@@ -537,7 +564,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                         primary={item.label}
                         primaryTypographyProps={{
                           fontSize: '0.875rem',
-                          fontWeight: isActiveLink(item.link) ? 600 : 500,
+                          fontWeight: itemActive ? 600 : 500,
                         }}
                       />
                     )}
@@ -579,6 +606,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                         return (
                           <ListItem key={chat._id} disablePadding sx={{ mb: 0.25 }}>
                             <ListItemButton
+                              data-sidebar-active={active ? "true" : undefined}
                               component={Link}
                               to={href}
                               onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}
@@ -630,6 +658,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                   <>
                     <ListItem disablePadding sx={{ mb: 0.5 }}>
                       <ListItemButton
+                        data-sidebar-active={callMenuItems.some(item => isActiveLink(item.link)) && !(callMenuOpen && !isCollapsed) ? "true" : undefined}
                         onClick={() => !isCollapsed && setCallMenuOpen(prev => { const next = !prev; localStorage.setItem('call-menu-open', JSON.stringify(next)); return next; })}
                         sx={{
                           borderRadius: 2,
@@ -673,6 +702,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                           return (
                             <ListItem key={itemIndex} disablePadding sx={{ mb: 0.5, pl: 4 }}>
                               <ListItemButton
+                                data-sidebar-active={isActive ? "true" : undefined}
                                 component={Link}
                                 to={item.link}
                                 onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}

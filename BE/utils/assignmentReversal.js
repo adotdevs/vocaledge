@@ -250,6 +250,54 @@ function toStoredActivities(blank, docs, at = new Date()) {
     }));
 }
 
+// Previous agents of these leads, grouped under whoever has them now.
+// A branch is the last agent before the current one. "earlier" is the agent before that.
+// canSendBack is true only when that previous agent can still take leads.
+function historyTree(leads, ctx) {
+    const describe = (id) => {
+        const user = id ? ctx.known.get(id) : null;
+        return {
+            agentId: id || null,
+            agentName: id ? (user ? personName(user) : "Removed user") : "",
+            agentRole: user?.role || "",
+        };
+    };
+    const groups = new Map();
+    (leads || []).forEach((lead) => {
+        const holder = idText(lead.agent);
+        if (!groups.has(holder)) groups.set(holder, { ...describe(holder), count: 0, noPrevious: 0, branches: new Map() });
+        const group = groups.get(holder);
+        group.count += 1;
+        const saved = (Array.isArray(lead.pastAgentIds) ? lead.pastAgentIds : []).map(idText).filter(Boolean);
+        const before = saved.filter((id) => id !== holder && !ctx.superIds.has(id));
+        if (!before.length) {
+            group.noPrevious += 1;
+            return;
+        }
+        const prevId = before[before.length - 1];
+        const earlierId = before.length > 1 ? before[before.length - 2] : "";
+        if (!group.branches.has(prevId)) {
+            group.branches.set(prevId, { ...describe(prevId), count: 0, canSendBack: ctx.receivers.has(prevId), earlier: new Map() });
+        }
+        const branch = group.branches.get(prevId);
+        branch.count += 1;
+        if (earlierId) {
+            const earlier = branch.earlier.get(earlierId) || { ...describe(earlierId), count: 0 };
+            earlier.count += 1;
+            branch.earlier.set(earlierId, earlier);
+        }
+    });
+    const byCount = (a, b) => b.count - a.count || String(a.agentName).localeCompare(String(b.agentName));
+    return [...groups.values()]
+        .map((group) => ({
+            ...group,
+            branches: [...group.branches.values()]
+                .map((branch) => ({ ...branch, earlier: [...branch.earlier.values()].sort(byCount) }))
+                .sort(byCount),
+        }))
+        .sort(byCount);
+}
+
 module.exports = {
     RECEIVING_ROLES,
     personName,
@@ -262,4 +310,5 @@ module.exports = {
     applyPlan,
     buildHistoryDocs,
     toStoredActivities,
+    historyTree,
 };

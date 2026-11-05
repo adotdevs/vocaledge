@@ -15,6 +15,7 @@ const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = 
 const { hasCrmPermission, denyCrmPermission, canViewLeadSource } = require('../utils/crmPermissions');
 const { addCustomerSearch, applyCustomerFilters, normalizeCustomerFields, bodyHasCustomerFields } = require('../utils/leadCustomerFields');
 const { isNewStatus, refillOwners, refillAllEligibleAgents, listRequestCanRefill, ownerIdOf, userCanOpenCrm, refillIfEmpty } = require('../utils/leadRefill');
+const { stampLeadNumbers } = require('../utils/leadNumber');
 
 const hidePrivateLeadFields = (lead, user) => {
   if (!lead) return lead;
@@ -1130,6 +1131,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
 
             if (leadsToInsert.length > 0) {
                 try {
+                    await stampLeadNumbers(leadsToInsert);
                     const result = await Lead.insertMany(leadsToInsert, { ordered: false });
                     processedCount += result.length;
                     createdLeadIds.push(...result.map(lead => lead._id.toString()));
@@ -1262,6 +1264,7 @@ exports.getLeads = async (req, res) => {
                 { lastName: regexGlobal },
                 { email: regexGlobal },
                 { phone: regexGlobal },
+                ...(/^\d+$/.test(searchTrimmed) ? [{ leadNumber: Number(searchTrimmed) }] : []),
                 ...(hasCrmPermission(req.user, "canViewLeadBrand") ? [{ Brand: regexGlobal }] : []),
                 ...(hasCrmPermission(req.user, "canViewLeadFileName") ? [{ fileName: regexGlobal }] : []),
                 { Address: regexGlobal },
@@ -1728,6 +1731,11 @@ exports.assignLeadsToAgent = async (req, res) => {
         }
 
         if (dryRun) {
+            const { buildContext, historyTree } = require("../utils/assignmentReversal");
+            const staff = await User.find({ role: { $in: ["superadmin", "admin", "subadmin", "manager"] } })
+                .select("firstName lastName role adminPermissions permissions")
+                .lean();
+            const history = historyTree(leadsToUpdate, buildContext({ users: staff, canReceive: userCanOpenCrm }));
             return res.status(200).json({
                 success: true,
                 dryRun: true,
@@ -1742,6 +1750,7 @@ exports.assignLeadsToAgent = async (req, res) => {
                     notAssignedByAdmin,
                     currentOwners,
                     unassignedCount,
+                    history,
                     agentName,
                     agentRole,
                     skipPreviouslyAssigned,
@@ -2653,7 +2662,9 @@ exports.acceptLeadUploadDuplicates = async (req, res) => {
             },
         }));
         try {
-            await Lead.insertMany(planned.map((item) => item.doc), { ordered: false });
+            const docs = planned.map((item) => item.doc);
+            await stampLeadNumbers(docs);
+            await Lead.insertMany(docs, { ordered: false });
             planned.forEach((item) => createdByKey.set(item.key, item.doc));
         } catch (error) {
             if (!error.writeErrors) throw error;
@@ -2823,6 +2834,7 @@ exports.exportLeads = async (req, res) => {
 
         // Define available fields and their headers
         const availableFields = {
+            leadNumber: 'ID',
             firstName: 'First Name',
             lastName: 'Last Name',
             email: 'Email',
@@ -2929,6 +2941,7 @@ exports.getDeletedLeads = async (req, res) => {
                 { lastName: regexGlobal },
                 { email: regexGlobal },
                 { phone: regexGlobal },
+                ...(/^\d+$/.test(searchTrimmed) ? [{ leadNumber: Number(searchTrimmed) }] : []),
                 ...(hasCrmPermission(req.user, "canViewLeadBrand") ? [{ Brand: regexGlobal }] : []),
                 ...(hasCrmPermission(req.user, "canViewLeadFileName") ? [{ fileName: regexGlobal }] : []),
                 { Address: regexGlobal },
