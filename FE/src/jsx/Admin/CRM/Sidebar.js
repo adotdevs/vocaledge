@@ -41,6 +41,7 @@ import {
   Forum,
   History,
   AutoMode,
+  SettingsBackupRestore,
 } from '@mui/icons-material';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useAuthUser, useSignOut } from "react-auth-kit";
@@ -345,6 +346,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   if (user()?.user?.role === 'superadmin') {  // Commented out for now
     menuItems.push({ icon: <AutoMode />, label: 'Automation', link: "/admin/crm/lead-automation" });
     menuItems.push({ icon: <History />, label: 'Upload history', link: "/admin/crm/upload-history" });
+    menuItems.push({ icon: <SettingsBackupRestore />, label: 'Reverse assignment', link: "/admin/crm/reverse-assignment" });
     menuItems.push({ icon: <DeleteForeverIcon />, label: 'Recycle Bin', link: "/admin/dashboard/crm/recycle-bin" });
     menuItems.push({ icon: <EmailOutlined />, label: 'Email', link: "/admin/crm/email-queue", badge: true });
   }

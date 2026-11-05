@@ -406,6 +406,12 @@ export const getLeadUploadApi = (id, params) => getApi(`/crm/lead-uploads/${id}$
 export const acceptLeadUploadDuplicatesApi = (id, body) => postApi(`/crm/lead-uploads/${id}/accept`, body);
 export const declineLeadUploadDuplicatesApi = (id, body) => postApi(`/crm/lead-uploads/${id}/decline`, body);
 export const deleteLeadUploadApi = (id) => deleteApi(`/crm/lead-uploads/${id}`);
+
+// Super admin: send leads that are with the admin back to the agent who had them before.
+export const getReversalStatusesApi = () => getApi(`/crm/assignment-reversal/statuses`);
+export const getReversalPreviewApi = (params) => getApi(`/crm/assignment-reversal/preview${toQuery(params)}`);
+export const applyReversalApi = (body) => postApi(`/crm/assignment-reversal/apply`, body);
+export const getReversalHistoryApi = () => getApi(`/crm/assignment-reversal/history`);
 export const getLeadAutomationApi = () => getApi(`/crm/lead-automation`);
 export const saveLeadAutomationApi = (body) => putSimpleApi(`/crm/lead-automation`, body);
 export const saveLeadAutomationAdminApi = (id, body) => putSimpleApi(`/crm/lead-automation/${id}`, body);

@@ -60,6 +60,7 @@ leadSchema.index({ status: 1 }); // For filtering by status
 leadSchema.index({ createdAt: -1 }); // For sorting by date
 leadSchema.index({ isDeleted: 1, createdAt: -1 });
 leadSchema.index({ isDeleted: 1, agent: 1, createdAt: -1 });
+leadSchema.index({ agent: 1, isDeleted: 1, status: 1 });
 leadSchema.index({ isDeleted: 1, status: 1, createdAt: -1 });
 leadSchema.index({ isDeleted: 1, status: 1, agent: 1 });
 leadSchema.index({ source: 1 }); // For filtering public form leads (e.g. takebackanalytics)

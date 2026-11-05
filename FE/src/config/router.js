@@ -15,6 +15,7 @@ import LeadsPage from "../jsx/Admin/CRM/leads.js";
 import RecycleBin from "../jsx/Admin/CRM/RecycleBin.jsx";
 import UploadHistory from "../jsx/Admin/CRM/UploadHistory.jsx";
 import LeadAutomation from "../jsx/Admin/CRM/LeadAutomation.jsx";
+import AssignmentReversal from "../jsx/Admin/CRM/AssignmentReversal.jsx";
 import EmailQueue from "../jsx/Admin/CRM/EmailQueue.jsx";
 import LeadStream from "../jsx/Admin/CRM/LeadStream.jsx";
 import CallDashboard from "../jsx/Admin/CRM/CallDashboard.jsx";
@@ -164,6 +165,14 @@ export default function Router() {
               element={
                 <RequireAuth loginPath={"/auth/login/crm"}>
                   <LeadAutomation />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/crm/reverse-assignment"
+              element={
+                <RequireAuth loginPath={"/auth/login/crm"}>
+                  <AssignmentReversal />
                 </RequireAuth>
               }
             />

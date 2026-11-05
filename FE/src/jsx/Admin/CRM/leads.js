@@ -98,6 +98,7 @@ import {
     ViewColumn,
     History,
     AutoMode,
+    SettingsBackupRestore,
 } from "@mui/icons-material";
 import {
     adminCrmLeadsApi,
@@ -3980,6 +3981,17 @@ const LeadsPage = () => {
                                     sx={{ borderRadius: 2, flexShrink: 0 }}
                                 >
                                     Upload history
+                                </Button>
+                            )}
+                            {(isSuperAdmin || authUser()?.user?.role === "superadmin") && (
+                                <Button
+                                    variant="outlined"
+                                    size="small"
+                                    startIcon={<SettingsBackupRestore />}
+                                    onClick={() => navigate("/admin/crm/reverse-assignment")}
+                                    sx={{ borderRadius: 2, flexShrink: 0 }}
+                                >
+                                    Reverse assignment
                                 </Button>
                             )}
                             <CrmAppBarActions />

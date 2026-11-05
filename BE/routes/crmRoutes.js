@@ -4,6 +4,7 @@ const { authorizedRoles, isAuthorizedUser, checkCrmAccess, requireSuperAdmin } =
 
 const singleUpload = require("../middlewares/multer");
 const { uploadCSV, loginCRM, getLeads, exportLeads, createLead, importUsersAsLeads, deleteLead, deleteAllLeads, bulkDeleteLeads, editLead, assignLeadsToAgent, bulkUpdateLeadStatus, getDeletedLeads, restoreLead, hardDeleteLead, bulkRestoreLeads, bulkHardDeleteLeads, restoreAllLeads, hardDeleteAllLeads, createPublicLead, listLeadUploads, getLeadUpload, acceptLeadUploadDuplicates, declineLeadUploadDuplicates, deleteLeadUpload, leadListStatistics, getLeadViewColumns, updateLeadViewColumns, getLeadAutomation, updateLeadAutomation, updateLeadAutomationAdmin, listLeadShortageAlerts, ignoreLeadShortageAlert, removeLeadBrand } = require("../controllers/crmController");
+const { getReversalStatuses, previewReversal, applyReversal, listReversals } = require("../controllers/assignmentReversalController");
 const { activateLead, bulkActivateLeads: bulkActivateLeadsOld, getActivationProgress, getFailedEmails, resendFailedEmails, deleteFailedEmails } = require("../controllers/activateLeads");
 const { bulkActivateLeads, getEmailQueueStatus, processEmailQueueNow, clearEmailQueue } = require("../controllers/activateLeadsNew");
 const { requirePublicLeadApiKey, rateLimitPublicLead, honeypotPublicLead } = require("../middlewares/publicLeadForm");
@@ -206,6 +207,10 @@ router.route("/crm/lead-automation").get(isAuthorizedUser, requireSuperAdmin, ch
 router.route("/crm/lead-automation").put(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, updateLeadAutomation);
 router.route("/crm/lead-automation/:id").put(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, updateLeadAutomationAdmin);
 router.route("/crm/lead-brands/remove").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, removeLeadBrand);
+router.route("/crm/assignment-reversal/statuses").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, getReversalStatuses);
+router.route("/crm/assignment-reversal/preview").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, previewReversal);
+router.route("/crm/assignment-reversal/apply").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, applyReversal);
+router.route("/crm/assignment-reversal/history").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, listReversals);
 router.route("/crm/lead-uploads").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, listLeadUploads);
 router.route("/crm/lead-uploads/:id").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, getLeadUpload);
 router.route("/crm/lead-uploads/:id/accept").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, acceptLeadUploadDuplicates);
