@@ -14,6 +14,7 @@ import {
     IconButton,
     InputLabel,
     MenuItem,
+    Chip,
     Select,
     Typography,
 } from "@mui/material";
@@ -23,6 +24,8 @@ import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import DoNotDisturbOnRoundedIcon from "@mui/icons-material/DoNotDisturbOnRounded";
 import { toast } from "react-toastify";
 import { assignLeadsApi, sendBackLeadsApi } from "../../../../Api/Service";
+import { fetchLeadStatuses, getCachedLeadStatuses } from "./leadStatusCache";
+import { getStatusChipSx, getStatusColor } from "./leadStatusStyles";
 
 const ASSIGNABLE_ROLES = ["superadmin", "admin", "subadmin"];
 
@@ -31,15 +34,12 @@ const adminLabel = (name, role) => `${name || "this admin"}${role ? ` (${role})`
 const leadsText = (count) => `${count} ${count === 1 ? "lead" : "leads"}`;
 const toCount = (value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 
-// "1 lead already assigned to Hina Arooj (subadmin)"
-// "1 lead already assigned to the selected admin, admin admin (admin)"
 const SKIP_PHRASE = {
     already_assigned: "already assigned to",
     already_with_admin: "already assigned to the selected admin,",
     previously_assigned: "previously assigned to the selected admin,",
 };
 
-// Leads that are left as they are: one row per reason (and per admin who has them). Counts add up with "assigned".
 const skipItems = (items, fallbackAdmin) =>
     (Array.isArray(items) ? items : [])
         .filter((item) => toCount(item?.count) > 0)
@@ -47,10 +47,7 @@ const skipItems = (items, fallbackAdmin) =>
             key: `${item.reason}-${item.agentId}`,
             reason: item.reason,
             count: toCount(item.count),
-            who: adminLabel(
-                item.agentName || fullName(fallbackAdmin) || "another admin",
-                item.agentRole || fallbackAdmin?.role
-            ),
+            who: adminLabel(item.agentName || fullName(fallbackAdmin) || "another admin", item.agentRole || fallbackAdmin?.role),
         }));
 
 function Dot() {
@@ -187,10 +184,10 @@ function PreviousTree({ history, canSendBack, sendingId, onSendBack }) {
                                         <strong>{leadsText(branch.count)}</strong> were with <strong>{adminLabel(branch.agentName, branch.agentRole)}</strong>
                                     </>
                                 )}
-                                action={canSendBack && branch.canSendBack ? (
+                                action={canSendBack && branch.agentId ? (
                                     <Button
                                         size="small"
-                                        variant="outlined"
+                                        variant="contained"
                                         disabled={Boolean(sendingId)}
                                         onClick={() => onSendBack(branch)}
                                         sx={{ flexShrink: 0, cursor: "pointer", textTransform: "none", fontWeight: 700 }}
@@ -209,6 +206,17 @@ function PreviousTree({ history, canSendBack, sendingId, onSendBack }) {
                                             <strong>{leadsText(earlier.count)}</strong> were with <strong>{adminLabel(earlier.agentName, earlier.agentRole)}</strong> before that
                                         </>
                                     )}
+                                    action={canSendBack && earlier.agentId ? (
+                                        <Button
+                                            size="small"
+                                            variant="contained"
+                                            disabled={Boolean(sendingId)}
+                                            onClick={() => onSendBack(earlier)}
+                                            sx={{ flexShrink: 0, cursor: "pointer", textTransform: "none", fontWeight: 700 }}
+                                        >
+                                            {sendingId === earlier.agentId ? "Sending…" : "Send back"}
+                                        </Button>
+                                    ) : null}
                                 />
                             ))}
                         </Box>
@@ -228,8 +236,7 @@ function ResultLine({ tone, icon, children }) {
     );
 }
 
-// Every selected lead is counted once: assigned to the chosen admin, or left with whoever has it.
-function ResultPanel({ future, targetLabel, assigned, skipped, noneNote }) {
+function ResultPanel({ future, targetLabel, assigned, skipped }) {
     const assignedVerb = future ? "will be" : assigned === 1 ? "was" : "were";
     return (
         <Box
@@ -260,12 +267,124 @@ function ResultPanel({ future, targetLabel, assigned, skipped, noneNote }) {
                     {future ? "These leads stay as they are." : "These leads were left as they are."}
                 </Typography>
             )}
-            {skipped.length === 0 && noneNote && (
-                <Typography variant="body2" color="text.secondary" sx={{ pl: "30px" }}>
-                    {future
-                        ? "None of the selected leads are already assigned."
-                        : "None of the selected leads were already assigned."}
+        </Box>
+    );
+}
+
+function StatusChips({ summary, statuses, align = "flex-end" }) {
+    const rows = Array.isArray(summary) ? summary : [];
+    if (!rows.length) return null;
+    return (
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, justifyContent: align, maxWidth: align === "flex-end" ? 280 : "none" }}>
+            {rows.map((row) => (
+                <Chip
+                    key={row.status}
+                    size="small"
+                    label={`${row.count} ${row.status}`}
+                    sx={{
+                        height: 24,
+                        fontWeight: 700,
+                        ...getStatusChipSx(getStatusColor(row.status, statuses), { filled: true }),
+                    }}
+                />
+            ))}
+        </Box>
+    );
+}
+
+function CountLine({ count, text, emphasis }) {
+    return (
+        <Box sx={{ display: "flex", alignItems: "baseline", gap: 1.5, py: 0.6 }}>
+            <Typography
+                sx={{
+                    minWidth: 64,
+                    fontWeight: 800,
+                    fontSize: emphasis ? 28 : 22,
+                    lineHeight: 1,
+                    fontVariantNumeric: "tabular-nums",
+                    color: emphasis ? "success.main" : "text.primary",
+                }}
+            >
+                {count}
+            </Typography>
+            <Typography variant="body1" sx={{ fontWeight: emphasis ? 700 : 500 }}>
+                {text}
+            </Typography>
+        </Box>
+    );
+}
+
+// Shown under the agent dropdown. If this admin had some of these leads before,
+// the choice here decides whether those leads are assigned again.
+function AssignBreakdown({ name, selected, past, alreadyWith, willAssign, skip, done, loading, assignAgain, onAssignAgain, statusSummary, statusOptions }) {
+    const pastText = past === 1
+        ? `lead was assigned to ${name} before`
+        : `leads were assigned to ${name} before`;
+    const alreadyText = alreadyWith === 1
+        ? `lead is already with ${name}`
+        : `leads are already with ${name}`;
+    const assignText = done
+        ? `${willAssign === 1 ? "lead was" : "leads were"} assigned to ${name}`
+        : `${willAssign === 1 ? "lead will be" : "leads will be"} assigned to ${name}`;
+
+    return (
+        <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, px: 2, py: 1.5 }}>
+            <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1.5 }}>
+                <Typography variant="overline" sx={{ fontWeight: 700, letterSpacing: 0.8, color: "text.secondary" }}>
+                    {name}
                 </Typography>
+                <StatusChips summary={statusSummary} statuses={statusOptions} />
+            </Box>
+            <CountLine count={selected} text={selected === 1 ? "lead selected" : "leads selected"} />
+            {loading ? (
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, py: 1, color: "text.secondary" }}>
+                    <CircularProgress size={16} color="inherit" />
+                    <Typography variant="body2">Checking this admin’s history…</Typography>
+                </Box>
+            ) : (
+                <>
+                    {past > 0 && <CountLine count={past} text={pastText} />}
+                    {alreadyWith > 0 && <CountLine count={alreadyWith} text={alreadyText} />}
+                    <CountLine count={willAssign} text={assignText} emphasis />
+                    {past > 0 && (
+                        <Typography variant="body2" color="text.secondary" sx={{ pt: 0.5 }}>
+                            {skip
+                                ? `Those ${leadsText(past)} stay where they are.`
+                                : `Those ${leadsText(past)} are included.`}
+                        </Typography>
+                    )}
+                    {!done && (
+                        <FormControlLabel
+                            sx={{
+                                alignItems: "flex-start",
+                                ml: "-12px",
+                                mr: 0,
+                                mt: 0.5,
+                                cursor: "pointer",
+                                "& .MuiFormControlLabel-label": { pt: "10px" },
+                            }}
+                            control={
+                                <Checkbox
+                                    checked={assignAgain}
+                                    onChange={(event) => onAssignAgain(event.target.checked)}
+                                    sx={{ cursor: "pointer" }}
+                                />
+                            }
+                            label={
+                                <Box component="span" sx={{ display: "block" }}>
+                                    <Typography component="span" variant="body2" sx={{ display: "block", fontWeight: 700 }}>
+                                        Assign previously assigned leads again
+                                    </Typography>
+                                    <Typography component="span" variant="body2" color="text.secondary" sx={{ display: "block", mt: 0.25 }}>
+                                        {assignAgain
+                                            ? "Leads this admin had before will be assigned again too."
+                                            : "Only leads that were never assigned to this admin will be assigned."}
+                                    </Typography>
+                                </Box>
+                            }
+                        />
+                    )}
+                </>
             )}
         </Box>
     );
@@ -292,7 +411,10 @@ export default function AssignLeadsDialog({
     onAssigned,
 }) {
     const [agentId, setAgentId] = useState("");
-    const [skip, setSkip] = useState(false);
+    const [skip, setSkip] = useState(true);
+    const [leaveWithCurrent, setLeaveWithCurrent] = useState(false);
+    const [finalStatus, setFinalStatus] = useState("");
+    const [statusOptions, setStatusOptions] = useState(() => getCachedLeadStatuses() || []);
     const [assigning, setAssigning] = useState(false);
     const [summary, setSummary] = useState(null);
     const [preview, setPreview] = useState(null); // { key, data } or { key, error }
@@ -302,7 +424,9 @@ export default function AssignLeadsDialog({
 
     const reset = useCallback(() => {
         setAgentId("");
-        setSkip(false);
+        setSkip(true);
+        setLeaveWithCurrent(false);
+        setFinalStatus("");
         setAssigning(false);
         setSummary(null);
         setPreview(null);
@@ -314,6 +438,19 @@ export default function AssignLeadsDialog({
     useEffect(() => {
         if (open) reset();
     }, [open, reset]);
+
+    useEffect(() => {
+        if (!open) return undefined;
+        let cancelled = false;
+        fetchLeadStatuses()
+            .then((rows) => {
+                if (!cancelled && Array.isArray(rows)) setStatusOptions(rows);
+            })
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [open]);
 
     const options = useMemo(
         () => (Array.isArray(agents) ? agents : []).filter((agent) => ASSIGNABLE_ROLES.includes(agent?.role)),
@@ -328,7 +465,7 @@ export default function AssignLeadsDialog({
     if (Array.isArray(leadIds) && leadIds.length > 0) idsRef.current = leadIds;
     const ids = idsRef.current;
     const total = ids.length;
-    const previewKey = `${agentId}|${skip}|${total}`;
+    const previewKey = `${agentId}|${total}|${skip}|${leaveWithCurrent}`;
 
     // As soon as the dialog opens: who has these leads right now (no admin needed, nothing is changed).
     useEffect(() => {
@@ -351,13 +488,18 @@ export default function AssignLeadsDialog({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, leadIds, historyTick]);
 
-    // Only when the box is ticked: ask the server what would happen (nothing is changed).
+    // As soon as an admin is chosen: how many of these leads were ever assigned to that admin.
+    // The checkbox only decides whether those leads are included. Nothing is changed here.
     useEffect(() => {
-        if (!open || summary || !agentId || !skip || ids.length === 0) return undefined;
+        if (!open || summary || !agentId || ids.length === 0) return undefined;
         let cancelled = false;
         const timer = setTimeout(async () => {
             try {
-                const res = await assignLeadsApi(ids, agentId, { skipPreviouslyAssigned: true, dryRun: true });
+                const res = await assignLeadsApi(ids, agentId, {
+                    skipPreviouslyAssigned: skip,
+                    leaveWithCurrentAdmin: leaveWithCurrent,
+                    dryRun: true,
+                });
                 if (cancelled) return;
                 if (res?.success && res.data) setPreview({ key: previewKey, data: res.data });
                 else setPreview({ key: previewKey, error: res?.msg || "Could not check these leads." });
@@ -370,30 +512,36 @@ export default function AssignLeadsDialog({
             clearTimeout(timer);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, summary, agentId, skip, leadIds]);
+    }, [open, summary, agentId, skip, leaveWithCurrent, leadIds]);
 
     const ownersNow = owners && owners.ids === ids ? owners : null;
     const ownersState = !ownersNow ? "loading" : ownersNow.error ? "error" : "ready";
 
     // Only use a preview that was made for the current admin + box state.
     const current = preview && preview.key === previewKey ? preview : null;
-    const checking = Boolean(chosen) && skip && !current;
-    const checkError = Boolean(chosen) && skip && current?.error ? current.error : "";
+    const checking = Boolean(chosen) && !current;
+    const checkError = Boolean(chosen) && current?.error ? current.error : "";
+    const pastCount = toCount(current?.data?.previouslyAssignedCount, toCount(current?.data?.skippedPreviousCount));
+    const alreadyWithCount = toCount(current?.data?.alreadyAssignedCount);
 
     let shown = null;
-    if (chosen && !summary) {
-        if (!skip) {
-            shown = { assigned: total, skipped: [] };
-        } else if (current?.data) {
+    if (chosen && !summary && current?.data) {
             shown = {
-                assigned: toCount(current.data.assignedCount),
-                skipped: skipItems(current.data.notAssignedByAdmin, chosen),
-            };
-        }
+            assigned: toCount(current.data.assignedCount),
+            past: pastCount,
+            alreadyWith: alreadyWithCount,
+            skipped: skipItems(current.data.notAssignedByAdmin, chosen),
+        };
     }
-    const nothingToAssign = skip && Boolean(shown) && shown.assigned === 0;
-    const canAssign = Boolean(chosen) && total > 0 && !assigning && !nothingToAssign;
-    const assignLabel = shown ? `Assign ${leadsText(shown.assigned)}` : "Assign";
+    const nothingToAssign = Boolean(shown) && shown.assigned === 0;
+    const canAssign = Boolean(chosen) && total > 0 && !assigning && !checkError && !(skip && checking) && !nothingToAssign;
+    const assignCountLabel = shown
+        ? `Assign ${leadsText(shown.assigned)}`
+        : (!skip && chosen ? `Assign ${leadsText(total)}` : "Assign");
+    const assignLabel = finalStatus && assignCountLabel !== "Assign"
+        ? `${assignCountLabel} as ${finalStatus}`
+        : assignCountLabel;
+    const statusSummary = ownersNow?.data?.statusSummary || [];
 
     const handleSendBack = async (branch) => {
         setSendingBackId(branch.agentId);
@@ -425,7 +573,11 @@ export default function AssignLeadsDialog({
         }
         setAssigning(true);
         try {
-            const res = await assignLeadsApi(ids, agentId, { skipPreviouslyAssigned: skip });
+            const res = await assignLeadsApi(ids, agentId, {
+                skipPreviouslyAssigned: skip,
+                leaveWithCurrentAdmin: leaveWithCurrent,
+                status: finalStatus,
+            });
             if (!res?.success) {
                 toast.error(res?.msg || "Failed to assign leads");
                 return;
@@ -435,12 +587,15 @@ export default function AssignLeadsDialog({
             const label = adminLabel(data.agentName || fullName(chosen), data.agentRole || chosen.role);
             setSummary({
                 assigned,
-                skipped: skipItems(data.notAssignedByAdmin, chosen),
+                past: toCount(data.skippedPreviousCount),
+                alreadyWith: toCount(data.alreadyAssignedCount),
                 skipMode: skip,
                 total: toCount(data.selectedCount, total),
                 label,
             });
-            toast.success(`${leadsText(assigned)} assigned to ${label}`);
+            toast.success(finalStatus
+                ? `${leadsText(assigned)} assigned to ${label} as ${finalStatus}`
+                : `${leadsText(assigned)} assigned to ${label}`);
             if (onAssigned) onAssigned(data);
         } catch (error) {
             toast.error("Error assigning leads");
@@ -484,12 +639,14 @@ export default function AssignLeadsDialog({
             <DialogContent>
                 <Box sx={{ display: "grid", gap: 2.5, pt: 1 }}>
                     {summary ? (
-                        <ResultPanel
-                            future={false}
-                            targetLabel={summary.label}
-                            assigned={summary.assigned}
-                            skipped={summary.skipped}
-                            noneNote={summary.skipMode}
+                        <AssignBreakdown
+                            name={summary.label}
+                            selected={summary.total}
+                            past={summary.past}
+                            alreadyWith={summary.alreadyWith}
+                            willAssign={summary.assigned}
+                            skip={summary.skipMode}
+                            done
                         />
                     ) : (
                         <>
@@ -498,6 +655,14 @@ export default function AssignLeadsDialog({
                                 owners={ownersNow?.data?.currentOwners || []}
                                 unassigned={toCount(ownersNow?.data?.unassignedCount)}
                             />
+                            {!chosen && statusSummary.length > 0 && (
+                                <Box>
+                                    <Typography variant="overline" sx={{ display: "block", mb: 0.75, fontWeight: 700, letterSpacing: 0.8, color: "text.secondary" }}>
+                                        Status
+                                    </Typography>
+                                    <StatusChips summary={statusSummary} statuses={statusOptions} align="flex-start" />
+                                </Box>
+                            )}
 
                             <FormControl fullWidth size="small">
                                 <InputLabel id="assign-leads-admin-label">Assign to</InputLabel>
@@ -530,6 +695,22 @@ export default function AssignLeadsDialog({
                                 </Select>
                             </FormControl>
 
+                            {chosen && !checkError && (
+                                <AssignBreakdown
+                                    name={targetLabel}
+                                    selected={total}
+                                    past={pastCount}
+                                    alreadyWith={alreadyWithCount}
+                                    willAssign={shown ? shown.assigned : (skip ? 0 : total)}
+                                    skip={skip}
+                                    loading={checking}
+                                    assignAgain={!skip}
+                                    onAssignAgain={(checked) => setSkip(!checked)}
+                                    statusSummary={statusSummary}
+                                    statusOptions={statusOptions}
+                                />
+                            )}
+
                             <FormControlLabel
                                 sx={{
                                     alignItems: "flex-start",
@@ -540,8 +721,8 @@ export default function AssignLeadsDialog({
                                 }}
                                 control={
                                     <Checkbox
-                                        checked={skip}
-                                        onChange={(event) => setSkip(event.target.checked)}
+                                        checked={leaveWithCurrent}
+                                        onChange={(event) => setLeaveWithCurrent(event.target.checked)}
                                         sx={{ cursor: "pointer" }}
                                     />
                                 }
@@ -550,21 +731,14 @@ export default function AssignLeadsDialog({
                                         <Typography component="span" variant="body2" sx={{ display: "block", fontWeight: 700 }}>
                                             Remove Previously Assigned
                                         </Typography>
-                                        <Typography
-                                            component="span"
-                                            variant="body2"
-                                            color="text.secondary"
-                                            sx={{ display: "block", mt: 0.25 }}
-                                        >
-                                            {skip
-                                                ? "Leave out leads that already have an admin, or that this admin had before."
-                                                : "Assign all selected leads, even if another admin already has them."}
+                                        <Typography component="span" variant="body2" color="text.secondary" sx={{ display: "block", mt: 0.25 }}>
+                                            Leave out leads that already have an admin.
                                         </Typography>
                                     </Box>
                                 }
                             />
 
-                            {skip && (
+                            {leaveWithCurrent && (
                                 <PreviousTree
                                     history={ownersNow?.data?.history || []}
                                     canSendBack={canSendBack}
@@ -573,13 +747,13 @@ export default function AssignLeadsDialog({
                                 />
                             )}
 
-                            {checking && (
-                                <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, color: "text.secondary" }}>
-                                    <CircularProgress size={16} color="inherit" />
-                                    <Typography variant="body2" color="text.secondary">
-                                        Checking which leads can be assigned…
-                                    </Typography>
-                                </Box>
+                            {leaveWithCurrent && chosen && shown && (
+                                <ResultPanel
+                                    future
+                                    targetLabel={targetLabel}
+                                    assigned={shown.assigned}
+                                    skipped={shown.skipped}
+                                />
                             )}
 
                             {checkError && (
@@ -588,14 +762,29 @@ export default function AssignLeadsDialog({
                                 </Alert>
                             )}
 
-                            {skip && shown && (
-                                <ResultPanel
-                                    future
-                                    targetLabel={targetLabel}
-                                    assigned={shown.assigned}
-                                    skipped={shown.skipped}
-                                    noneNote
-                                />
+                            {chosen && (
+                                <FormControl fullWidth size="small">
+                                    <InputLabel id="assign-final-status-label">Final status</InputLabel>
+                                    <Select
+                                        labelId="assign-final-status-label"
+                                        label="Final status"
+                                        value={finalStatus}
+                                        onChange={(event) => setFinalStatus(event.target.value)}
+                                        sx={{ cursor: "pointer" }}
+                                    >
+                                        <MenuItem value="">Keep current status</MenuItem>
+                                        {statusOptions.map((status) => (
+                                            <MenuItem key={status._id || status.label} value={status.label} sx={{ cursor: "pointer" }}>
+                                                {status.label}
+                                            </MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
+                            )}
+                            {chosen && finalStatus && (
+                                <Typography variant="body2" color="text.secondary">
+                                    Leads that are assigned will be set to {finalStatus}. Leads that stay behind keep their status.
+                                </Typography>
                             )}
                         </>
                     )}

@@ -489,6 +489,8 @@ export const assignLeadsApi = (leadIds, agentId, options = {}) => {
     leadIds,
     agentId,
     skipPreviouslyAssigned: options.skipPreviouslyAssigned === true,
+    leaveWithCurrentAdmin: options.leaveWithCurrentAdmin === true,
+    status: options.status || "",
     dryRun: options.dryRun === true,
   });
 };

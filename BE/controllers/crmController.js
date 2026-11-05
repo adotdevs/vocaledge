@@ -1600,6 +1600,8 @@ exports.assignLeadsToAgent = async (req, res) => {
         const leadsToUpdate = await Lead.find({ _id: { $in: leadIds }, isDeleted: false }).select('_id agent status pastAgentIds');
         const skipFlag = req.body?.skipPreviouslyAssigned;
         const skipPreviouslyAssigned = !unassign && (skipFlag === true || skipFlag === "true" || skipFlag === 1 || skipFlag === "1");
+        const leaveFlag = req.body?.leaveWithCurrentAdmin;
+        const leaveWithCurrentAdmin = !unassign && (leaveFlag === true || leaveFlag === "true" || leaveFlag === 1 || leaveFlag === "1");
         const agentName = agentUser ? `${agentUser.firstName || ""} ${agentUser.lastName || ""}`.trim() : "";
         const normalizeAgentName = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
         const targetName = normalizeAgentName(agentName);
@@ -1616,7 +1618,7 @@ exports.assignLeadsToAgent = async (req, res) => {
         };
         const ignoredNames = new Set(["", "unassigned", "assigned"]);
         const previouslyAssignedIds = new Set();
-        if (skipPreviouslyAssigned) {
+        if (!unassign && targetId) {
             const getActivityModel = require("../crmDB/models/activityModel");
             const Activity = await getActivityModel();
             const idList = leadsToUpdate.map((lead) => lead._id);
@@ -1647,24 +1649,37 @@ exports.assignLeadsToAgent = async (req, res) => {
         const skippedPrevious = [];
         const heldByOther = [];
         const toAssign = [];
+        let previouslyAssignedCount = 0;
         leadsToUpdate.forEach((lead) => {
             const currentId = lead.agent ? String(lead.agent) : "";
             const hadThisAgent = previouslyAssignedIds.has(String(lead._id))
                 || (Array.isArray(lead.pastAgentIds) && lead.pastAgentIds.some((id) => String(id) === targetId));
-            if (!unassign && skipPreviouslyAssigned && currentId && currentId !== targetId) {
+            if (hadThisAgent && currentId !== targetId) previouslyAssignedCount += 1;
+            // "Remove Previously Assigned": leave a lead with the admin who has it now.
+            if (leaveWithCurrentAdmin && currentId && currentId !== targetId) {
                 heldByOther.push(lead);
                 return;
             }
-            if (!unassign && skipPreviouslyAssigned && currentId === targetId) {
+            if (!unassign && currentId === targetId) {
                 alreadyWithAgent.push(lead);
                 return;
             }
-            if (!unassign && skipPreviouslyAssigned && hadThisAgent) {
+            // "Assign previously assigned leads again" is off: skip this admin's own history.
+            if (skipPreviouslyAssigned && hadThisAgent) {
                 skippedPrevious.push(lead);
                 return;
             }
             toAssign.push(lead);
         });
+
+        const statusTotals = new Map();
+        leadsToUpdate.forEach((lead) => {
+            const label = String(lead.status || "").trim() || "New";
+            statusTotals.set(label, (statusTotals.get(label) || 0) + 1);
+        });
+        const statusSummary = [...statusTotals.entries()]
+            .map(([status, count]) => ({ status, count }))
+            .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status));
 
         const selectedCount = leadsToUpdate.length;
         const assignedCount = unassign ? 0 : toAssign.length;
@@ -1744,11 +1759,13 @@ exports.assignLeadsToAgent = async (req, res) => {
                     selectedCount,
                     assignedCount: unassign ? toAssign.filter((lead) => lead.agent).length : assignedCount,
                     skippedPreviousCount: skippedPrevious.length,
+                    previouslyAssignedCount,
                     alreadyAssignedCount: alreadyWithAgent.length,
                     keptWithOtherCount: heldByOther.length,
                     notAssignedCount: skippedPrevious.length + alreadyWithAgent.length + heldByOther.length,
                     notAssignedByAdmin,
                     currentOwners,
+                    statusSummary,
                     unassignedCount,
                     history,
                     agentName,
@@ -1760,6 +1777,18 @@ exports.assignLeadsToAgent = async (req, res) => {
 
         const now = new Date();
         const nextAgentId = unassign ? null : agentId;
+        let nextStatus = "";
+        const requestedStatus = String(req.body?.status || "").trim();
+        if (!unassign && requestedStatus) {
+            if (!hasCrmPermission(req.user, "canChangeLeadStatus")) {
+                return denyCrmPermission(res, "You do not have permission to change lead status");
+            }
+            const labels = await getLeadStatusLabels();
+            if (!labels.includes(requestedStatus)) {
+                return res.status(400).json({ success: false, msg: "Choose a status from the list" });
+            }
+            nextStatus = requestedStatus;
+        }
         const ops = toAssign.map((lead) => {
             const pastIds = [];
             if (lead.agent && String(lead.agent) !== String(nextAgentId || "")) pastIds.push(lead.agent);
@@ -1768,7 +1797,11 @@ exports.assignLeadsToAgent = async (req, res) => {
                 updateOne: {
                     filter: { _id: lead._id, isDeleted: false },
                     update: {
-                        $set: { agent: nextAgentId, updatedAt: now },
+                        $set: {
+                            agent: nextAgentId,
+                            updatedAt: now,
+                            ...(nextStatus ? { status: nextStatus } : {}),
+                        },
                         ...(pastIds.length ? { $addToSet: { pastAgentIds: { $each: pastIds } } } : {}),
                     },
                 },
@@ -1839,6 +1872,37 @@ exports.assignLeadsToAgent = async (req, res) => {
             }
         }
 
+        if (nextStatus) {
+            try {
+                const getActivityModel = require("../crmDB/models/activityModel");
+                const Activity = await getActivityModel();
+                const actorName = `${req.user.firstName || ""} ${req.user.lastName || ""}`.trim() || "User";
+                const docs = toAssign
+                    .filter((lead) => String(lead.status || "").trim() !== nextStatus)
+                    .map((lead) => ({
+                        leadId: lead._id,
+                        type: "status_change",
+                        isSystemGenerated: true,
+                        createdBy: {
+                            userId: req.user._id,
+                            userName: actorName,
+                            userRole: req.user.role || "user",
+                        },
+                        changes: {
+                            field: "status",
+                            oldValue: lead.status || "New",
+                            newValue: nextStatus,
+                        },
+                    }));
+                for (let index = 0; index < docs.length; index += 1000) {
+                    const slice = docs.slice(index, index + 1000);
+                    if (slice.length) await Activity.insertMany(slice, { ordered: false });
+                }
+            } catch (activityError) {
+                console.error("Assign status activity log failed:", activityError);
+            }
+        }
+
         const targetAgentId = unassign ? null : agentId;
         const lostNewOwners = toAssign
             .filter((lead) => isNewStatus(lead.status) && lead.agent && String(lead.agent) !== String(targetAgentId))
@@ -1880,6 +1944,7 @@ exports.assignLeadsToAgent = async (req, res) => {
                 selectedCount,
                 assignedCount: unassign ? result.modifiedCount : assignedCount,
                 skippedPreviousCount: skippedPrevious.length,
+                previouslyAssignedCount,
                 alreadyAssignedCount: alreadyWithAgent.length,
                 keptWithOtherCount: heldByOther.length,
                 notAssignedCount: skippedPrevious.length + alreadyWithAgent.length + heldByOther.length,

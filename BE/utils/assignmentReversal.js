@@ -282,7 +282,11 @@ function historyTree(leads, ctx) {
         const branch = group.branches.get(prevId);
         branch.count += 1;
         if (earlierId) {
-            const earlier = branch.earlier.get(earlierId) || { ...describe(earlierId), count: 0 };
+            const earlier = branch.earlier.get(earlierId) || {
+                ...describe(earlierId),
+                count: 0,
+                canSendBack: ctx.receivers.has(earlierId),
+            };
             earlier.count += 1;
             branch.earlier.set(earlierId, earlier);
         }

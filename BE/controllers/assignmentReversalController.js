@@ -325,18 +325,20 @@ exports.sendBackSelected = async (req, res) => {
 
             const items = [];
             leads.forEach((lead) => {
-                const found = resolveGoBack(lead, ctx);
-                if (!found.ok || found.toId !== agentId) return;
+                const holder = lead.agent ? String(lead.agent) : "";
+                if (holder === agentId) return;
+                const saved = (Array.isArray(lead.pastAgentIds) ? lead.pastAgentIds : []).map((id) => String(id));
+                if (!saved.includes(agentId)) return;
                 items.push({
                     lead,
                     leadId: lead._id,
                     rawStatus: lead.status ?? null,
                     fromRaw: lead.agent ?? null,
-                    fromId: lead.agent ? String(lead.agent) : "",
-                    toId: found.toId,
-                    toObjectId: found.agent.objectId,
-                    toName: found.agent.name,
-                    toRole: found.agent.role,
+                    fromId: holder,
+                    toId: agentId,
+                    toObjectId: target.objectId,
+                    toName: target.name,
+                    toRole: target.role,
                 });
             });
             if (!items.length) return res.status(400).json({ success: false, msg: "None of the selected leads go back to that agent" });
