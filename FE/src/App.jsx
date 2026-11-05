@@ -9,6 +9,7 @@ import "./assets/css/style.css";
 import "./assets/css/styles.css";
 import "./assets/css/main.css";
 import "./assets/css/stylemain.css";
+import "./assets/css/scrollbars.css"; // must stay after the stylesheets above: it overrides their faint scrollbars
 
 // import { AuthProvider } from "react-auth-kit"; // Ensure this is correct
 // // import Login from './jsx/pages/authentication/Login'

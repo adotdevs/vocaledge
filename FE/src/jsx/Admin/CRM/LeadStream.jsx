@@ -65,7 +65,6 @@ import {
     Comment as CommentIcon,
     Info,
     CalendarToday,
-    People,
     Delete as DeleteIcon,
     MoreVert,
     ThumbUp,
@@ -110,9 +109,8 @@ import InlineLeadStatusCell from './components/InlineLeadStatusCell';
 import { 
     getLeadWithActivityApi, 
     addLeadCommentApi, 
-    updateLeadApi, 
-    allUsersApi, 
-    assignLeadsApi,
+    updateLeadApi,
+    allUsersApi,
     editCommentApi,
     deleteCommentApi,
     toggleLikeCommentApi,
@@ -143,6 +141,7 @@ import { CustomerFieldsEditor, CustomerFieldsView } from './components/CustomerF
 import { applyCustomerFieldChange, customerFieldsFromLead } from './leadCustomerFields';
 import useLiveCrmUser from './useLiveCrmUser';
 import CrmAccessDenied from './components/CrmAccessDenied';
+import AssignLeadsDialog from './components/AssignLeadsDialog';
 
 const resolveCallMetadata = (call) => {
     const metadata = call?.metadata || {};
@@ -339,8 +338,7 @@ const LeadStream = () => {
     const [currentUserLatest, setCurrentUserLatest] = useState(null);
     const [agents, setAgents] = useState([]);
     const [assignDialogOpen, setAssignDialogOpen] = useState(false);
-    const [selectedAgentId, setSelectedAgentId] = useState('');
-    const [assigning, setAssigning] = useState(false);
+    const assignLeadIds = useMemo(() => (leadId ? [leadId] : []), [leadId]);
     
     // ✅ NEW: Comment Feature States
     const [commentMenuAnchor, setCommentMenuAnchor] = useState(null);
@@ -2275,20 +2273,6 @@ const LeadStream = () => {
                         flex: 1,
                         overflow: 'auto',
                         p: { xs: 2, sm: 3 },
-                        '&::-webkit-scrollbar': {
-                            width: '10px',
-                        },
-                        '&::-webkit-scrollbar-track': {
-                            background: 'background.default',
-                            borderRadius: '5px',
-                        },
-                        '&::-webkit-scrollbar-thumb': {
-                            background: '#bdbdbd',
-                            borderRadius: '5px',
-                            '&:hover': {
-                                background: '#9e9e9e',
-                            },
-                        },
                     }}>
                         <Box sx={{ maxWidth: 1600, mx: 'auto', width: '100%' }}>
                             <Grid container spacing={3} alignItems="flex-start">
@@ -3317,19 +3301,6 @@ const LeadStream = () => {
                                         flex: 1,
                                         overflow: 'auto',
                                         p: 3,
-                                        '&::-webkit-scrollbar': {
-                                            width: '8px',
-                                        },
-                                        '&::-webkit-scrollbar-track': {
-                                            background: 'background.default',
-                                        },
-                                        '&::-webkit-scrollbar-thumb': {
-                                            background: '#c0c0c0',
-                                            borderRadius: '4px',
-                                            '&:hover': {
-                                                background: '#a0a0a0',
-                                            },
-                                        },
                                     }}>
                                         {loadingCallHistory ? (
                                             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -3735,19 +3706,6 @@ const LeadStream = () => {
                                         flex: 1,
                                         overflow: 'auto',
                                         p: 3,
-                                        '&::-webkit-scrollbar': {
-                                            width: '8px',
-                                        },
-                                        '&::-webkit-scrollbar-track': {
-                                            background: 'background.default',
-                                        },
-                                        '&::-webkit-scrollbar-thumb': {
-                                            background: '#c0c0c0',
-                                            borderRadius: '4px',
-                                            '&:hover': {
-                                                background: '#a0a0a0',
-                                            },
-                                        },
                                     }}>
                                         {loadingCallHistory ? (
                                             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -3982,19 +3940,6 @@ const LeadStream = () => {
                                     flex: 1,
                                     overflow: 'auto',
                                     p: 3,
-                                    '&::-webkit-scrollbar': {
-                                        width: '8px',
-                                    },
-                                    '&::-webkit-scrollbar-track': {
-                                        background: 'background.default',
-                                    },
-                                    '&::-webkit-scrollbar-thumb': {
-                                        background: '#c0c0c0',
-                                        borderRadius: '4px',
-                                        '&:hover': {
-                                            background: '#a0a0a0',
-                                        },
-                                    },
                                 }}>
                                     {filteredStreamItems.length === 0 ? (
                                         <Paper 
@@ -4751,81 +4696,16 @@ const LeadStream = () => {
                 </Box>
 
             {/* Assign Agent Dialog */}
-            <Dialog 
-                open={assignDialogOpen} 
+            <AssignLeadsDialog
+                open={assignDialogOpen}
                 onClose={() => setAssignDialogOpen(false)}
-                fullWidth
-                maxWidth="sm"
-            >
-                <DialogTitle>
-                    <Box display="flex" justifyContent="space-between" alignItems="center">
-                        <Typography variant="h6">Assign Lead to Agent</Typography>
-                        <IconButton onClick={() => setAssignDialogOpen(false)}>
-                            <Close />
-                        </IconButton>
-                    </Box>
-                </DialogTitle>
-                <DialogContent sx={{ px: { xs: 2, sm: 3 }, pt: 2 }}>
-                    <Typography sx={{ mb: 2 }}>
-                        Assign <strong>{lead?.firstName} {lead?.lastName}</strong> to an agent:
-                    </Typography>
-                    <FormControl fullWidth size="small">
-                        <InputLabel>Agent</InputLabel>
-                        <Select
-                            value={selectedAgentId}
-                            label="Agent"
-                            onChange={(e) => setSelectedAgentId(e.target.value)}
-                        >
-                            <MenuItem value="">
-                                <em>Unassigned</em>
-                            </MenuItem>
-                            {agents
-                                .filter(a => a.role === 'admin' || a.role === 'subadmin' || a.role === 'superadmin')
-                                .map(agent => (
-                                    <MenuItem key={agent._id} value={agent._id}>
-                                        {agent.firstName} {agent.lastName} ({agent.role}) - {agent.email}
-                                        {currentUserLatest?._id === agent._id ? ' (self)' : ''}
-                                    </MenuItem>
-                                ))}
-                        </Select>
-                    </FormControl>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setAssignDialogOpen(false)} disabled={assigning}>
-                        Cancel
-                    </Button>
-                    <Button
-                        variant="contained"
-                        onClick={async () => {
-                            try {
-                                if (!selectedAgentId) {
-                                    toast.error('Please select an agent');
-                                    return;
-                                }
-                                setAssigning(true);
-                                const res = await assignLeadsApi([leadId], selectedAgentId);
-                                if (res.success) {
-                                    toast.success('Lead assigned successfully');
-                                    setSelectedAgentId("");
-                                    setAssignDialogOpen(false);
-                                    fetchLeadData(true);
-                                } else {
-                                    toast.error(res.msg || 'Failed to assign lead');
-                                }
-                            } catch (err) {
-                                console.error('Assign error:', err);
-                                toast.error('Error assigning lead');
-                            } finally {
-                                setAssigning(false);
-                            }
-                        }}
-                        disabled={assigning || !selectedAgentId}
-                        startIcon={assigning ? <CircularProgress size={20} /> : <People />}
-                    >
-                        {assigning ? 'Assigning...' : 'Assign'}
-                    </Button>
-                </DialogActions>
-            </Dialog>
+                leadIds={assignLeadIds}
+                agents={agents}
+                currentUserId={currentUserLatest?._id}
+                title="Assign Lead"
+                subtitle={`${lead?.firstName || ""} ${lead?.lastName || ""}`.trim() || "This lead"}
+                onAssigned={() => fetchLeadData(true)}
+            />
 
             {/* ✅ Comment Action Menu */}
             <Menu

@@ -3,7 +3,7 @@ let express = require("express");
 const { authorizedRoles, isAuthorizedUser, checkCrmAccess, requireSuperAdmin } = require("../middlewares/auth");
 
 const singleUpload = require("../middlewares/multer");
-const { uploadCSV, loginCRM, getLeads, exportLeads, createLead, importUsersAsLeads, deleteLead, deleteAllLeads, bulkDeleteLeads, editLead, assignLeadsToAgent, bulkUpdateLeadStatus, getDeletedLeads, restoreLead, hardDeleteLead, bulkRestoreLeads, bulkHardDeleteLeads, restoreAllLeads, hardDeleteAllLeads, createPublicLead, listLeadUploads, getLeadUpload, acceptLeadUploadDuplicates, declineLeadUploadDuplicates, deleteLeadUpload, leadListStatistics, getLeadViewColumns, updateLeadViewColumns, getLeadAutomation, updateLeadAutomation, updateLeadAutomationAdmin, listLeadShortageAlerts, ignoreLeadShortageAlert } = require("../controllers/crmController");
+const { uploadCSV, loginCRM, getLeads, exportLeads, createLead, importUsersAsLeads, deleteLead, deleteAllLeads, bulkDeleteLeads, editLead, assignLeadsToAgent, bulkUpdateLeadStatus, getDeletedLeads, restoreLead, hardDeleteLead, bulkRestoreLeads, bulkHardDeleteLeads, restoreAllLeads, hardDeleteAllLeads, createPublicLead, listLeadUploads, getLeadUpload, acceptLeadUploadDuplicates, declineLeadUploadDuplicates, deleteLeadUpload, leadListStatistics, getLeadViewColumns, updateLeadViewColumns, getLeadAutomation, updateLeadAutomation, updateLeadAutomationAdmin, listLeadShortageAlerts, ignoreLeadShortageAlert, removeLeadBrand } = require("../controllers/crmController");
 const { activateLead, bulkActivateLeads: bulkActivateLeadsOld, getActivationProgress, getFailedEmails, resendFailedEmails, deleteFailedEmails } = require("../controllers/activateLeads");
 const { bulkActivateLeads, getEmailQueueStatus, processEmailQueueNow, clearEmailQueue } = require("../controllers/activateLeadsNew");
 const { requirePublicLeadApiKey, rateLimitPublicLead, honeypotPublicLead } = require("../middlewares/publicLeadForm");
@@ -205,6 +205,7 @@ router.route("/crm/lead-shortage-alerts/:id/ignore").post(isAuthorizedUser, requ
 router.route("/crm/lead-automation").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, getLeadAutomation);
 router.route("/crm/lead-automation").put(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, updateLeadAutomation);
 router.route("/crm/lead-automation/:id").put(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, updateLeadAutomationAdmin);
+router.route("/crm/lead-brands/remove").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, removeLeadBrand);
 router.route("/crm/lead-uploads").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, listLeadUploads);
 router.route("/crm/lead-uploads/:id").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, getLeadUpload);
 router.route("/crm/lead-uploads/:id/accept").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, acceptLeadUploadDuplicates);

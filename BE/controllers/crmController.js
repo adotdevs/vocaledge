@@ -306,6 +306,39 @@ async function getDistinctLeadBrands(user) {
     return brands;
 }
 
+// Super admin only: take a brand away from every lead that has it, which also removes it from the Brand filter list.
+// The leads themselves are kept, only their Brand value is cleared. With dryRun it only counts the leads.
+exports.removeLeadBrand = async (req, res) => {
+    try {
+        const brand = String(req.body?.brand ?? '').trim();
+        if (!brand) {
+            return res.status(400).json({ success: false, msg: 'Brand is required' });
+        }
+        const dryRun = req.body?.dryRun === true || req.body?.dryRun === 'true';
+        const Lead = await getLeadModel();
+
+        // Same rule as the filter list: stored values are compared after trimming spaces, and case matters.
+        // Deleted (trash) leads are included so the brand cannot come back when one is restored.
+        const sameBrand = { Brand: new RegExp(`^\\s*${escapeRegex(brand)}\\s*$`) };
+        const leadCount = await Lead.countDocuments(sameBrand);
+        if (dryRun) {
+            return res.status(200).json({ success: true, dryRun: true, data: { brand, leadCount } });
+        }
+
+        const result = await Lead.updateMany(sameBrand, { $set: { Brand: '' } });
+        brandCache.clear();
+        const modifiedCount = result.modifiedCount ?? leadCount;
+        return res.status(200).json({
+            success: true,
+            msg: `Brand "${brand}" removed from ${modifiedCount} lead${modifiedCount === 1 ? '' : 's'}`,
+            data: { brand, leadCount, modifiedCount },
+        });
+    } catch (err) {
+        console.error('Error removing lead brand:', err);
+        return res.status(500).json({ success: false, msg: 'Server Error', error: err.message });
+    }
+};
+
 exports.loginCRM = catchAsyncErrors(async (req, res, next) => {
     try {
         const email = String(req.body.email || "").trim();
@@ -1526,13 +1559,19 @@ exports.assignLeadsToAgent = async (req, res) => {
     try {
         const Lead = await getLeadModel();
         const { leadIds, agentId } = req.body;
+        // Preview only: same rules as a real assign, but nothing is written.
+        const dryRun = req.body?.dryRun === true || req.body?.dryRun === "true";
         const unassign = agentId === null || agentId === undefined || String(agentId).trim() === "" || String(agentId) === "unassign";
 
         if (!Array.isArray(leadIds) || leadIds.length === 0) {
             return res.status(400).json({ success: false, msg: 'leadIds are required' });
         }
-        if (unassign && req.user?.role !== "superadmin") {
+        if (unassign && !dryRun && req.user?.role !== "superadmin") {
             return res.status(403).json({ success: false, msg: 'Only a super admin can unassign leads' });
+        }
+        // A preview without an admin only lists who currently has the selected leads.
+        if (unassign && dryRun && req.user && req.user.role !== "superadmin" && !hasCrmPermission(req.user, "canAssignLeads")) {
+            return denyCrmPermission(res, "You do not have permission to assign leads");
         }
         if (!unassign && !agentId) {
             return res.status(400).json({ success: false, msg: 'agentId and leadIds are required' });
@@ -1555,18 +1594,196 @@ exports.assignLeadsToAgent = async (req, res) => {
             }
         }
 
-        const leadsToUpdate = await Lead.find({ _id: { $in: leadIds }, isDeleted: false }).select('_id agent status');
-        const result = await Lead.updateMany(
-            { _id: { $in: leadIds }, isDeleted: false },
-            { $set: { agent: unassign ? null : agentId, updatedAt: new Date() } }
-        );
+        const leadsToUpdate = await Lead.find({ _id: { $in: leadIds }, isDeleted: false }).select('_id agent status pastAgentIds');
+        const skipFlag = req.body?.skipPreviouslyAssigned;
+        const skipPreviouslyAssigned = !unassign && (skipFlag === true || skipFlag === "true" || skipFlag === 1 || skipFlag === "1");
+        const agentName = agentUser ? `${agentUser.firstName || ""} ${agentUser.lastName || ""}`.trim() : "";
+        const normalizeAgentName = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+        const targetName = normalizeAgentName(agentName);
+        const targetId = String(agentId || "");
+        const idOf = (value) => {
+            if (!value) return "";
+            if (typeof value === "object" && value._id) return String(value._id);
+            return String(value);
+        };
+        const metaObject = (metadata) => {
+            if (!metadata) return {};
+            if (metadata instanceof Map) return Object.fromEntries(metadata);
+            return metadata;
+        };
+        const ignoredNames = new Set(["", "unassigned", "assigned"]);
+        const previouslyAssignedIds = new Set();
+        if (skipPreviouslyAssigned) {
+            const getActivityModel = require("../crmDB/models/activityModel");
+            const Activity = await getActivityModel();
+            const idList = leadsToUpdate.map((lead) => lead._id);
+            for (let index = 0; index < idList.length; index += 1000) {
+                const chunk = idList.slice(index, index + 1000);
+                const activities = await Activity.find({
+                    leadId: { $in: chunk },
+                    type: "assignment_change",
+                }).select("leadId changes metadata").lean();
+                activities.forEach((activity) => {
+                    const metadata = metaObject(activity.metadata);
+                    const recordedIds = [
+                        idOf(metadata?.assignedTo?.userId),
+                        idOf(metadata?.newAgentId),
+                        idOf(metadata?.previousAgentId),
+                    ].filter(Boolean);
+                    const recordedNames = [
+                        normalizeAgentName(activity.changes?.newValue),
+                        normalizeAgentName(activity.changes?.oldValue),
+                    ].filter((name) => !ignoredNames.has(name));
+                    const sameAgent = recordedIds.some((id) => id === targetId)
+                        || (targetName && recordedNames.some((name) => name === targetName));
+                    if (sameAgent) previouslyAssignedIds.add(String(activity.leadId));
+                });
+            }
+        }
+        const alreadyWithAgent = [];
+        const skippedPrevious = [];
+        const heldByOther = [];
+        const toAssign = [];
+        leadsToUpdate.forEach((lead) => {
+            const currentId = lead.agent ? String(lead.agent) : "";
+            const hadThisAgent = previouslyAssignedIds.has(String(lead._id))
+                || (Array.isArray(lead.pastAgentIds) && lead.pastAgentIds.some((id) => String(id) === targetId));
+            if (!unassign && skipPreviouslyAssigned && currentId && currentId !== targetId) {
+                heldByOther.push(lead);
+                return;
+            }
+            if (!unassign && skipPreviouslyAssigned && currentId === targetId) {
+                alreadyWithAgent.push(lead);
+                return;
+            }
+            if (!unassign && skipPreviouslyAssigned && hadThisAgent) {
+                skippedPrevious.push(lead);
+                return;
+            }
+            toAssign.push(lead);
+        });
+
+        const selectedCount = leadsToUpdate.length;
+        const assignedCount = unassign ? 0 : toAssign.length;
+        const agentRole = agentUser?.role || "";
+        const agentLabel = agentRole ? `${agentName} (${agentRole})` : agentName;
+        const leadWord = (count) => `${count} lead${count === 1 ? "" : "s"}`;
+
+        // Who has the selected leads right now (before any change): one row per admin + how many have nobody.
+        const ownerCounts = new Map();
+        let unassignedCount = 0;
+        leadsToUpdate.forEach((lead) => {
+            const ownerId = lead.agent ? String(lead.agent) : "";
+            if (!ownerId) {
+                unassignedCount += 1;
+                return;
+            }
+            ownerCounts.set(ownerId, (ownerCounts.get(ownerId) || 0) + 1);
+        });
+        const ownerIds = [...ownerCounts.keys()];
+        const ownerUsers = ownerIds.length
+            ? await User.find({ _id: { $in: ownerIds } }).select("firstName lastName role").lean()
+            : [];
+        const ownerById = new Map(ownerUsers.map((user) => [String(user._id), user]));
+        const ownerInfo = (ownerId) => {
+            const user = ownerById.get(ownerId);
+            return {
+                agentId: ownerId,
+                agentName: `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "Unknown user",
+                agentRole: user?.role || "",
+            };
+        };
+        const currentOwners = ownerIds
+            .map((ownerId) => ({ ...ownerInfo(ownerId), count: ownerCounts.get(ownerId) }))
+            .sort((a, b) => b.count - a.count);
+
+        const heldCounts = new Map();
+        heldByOther.forEach((lead) => {
+            const ownerId = String(lead.agent);
+            heldCounts.set(ownerId, (heldCounts.get(ownerId) || 0) + 1);
+        });
+        const notAssignedByAdmin = [];
+        [...heldCounts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([ownerId, count]) => {
+                notAssignedByAdmin.push({ count, ...ownerInfo(ownerId), reason: "already_assigned" });
+            });
+        if (skippedPrevious.length) {
+            notAssignedByAdmin.push({
+                count: skippedPrevious.length,
+                agentId: targetId,
+                agentName,
+                agentRole,
+                reason: "previously_assigned",
+            });
+        }
+        if (alreadyWithAgent.length) {
+            notAssignedByAdmin.push({
+                count: alreadyWithAgent.length,
+                agentId: targetId,
+                agentName,
+                agentRole,
+                reason: "already_with_admin",
+            });
+        }
+
+        if (dryRun) {
+            return res.status(200).json({
+                success: true,
+                dryRun: true,
+                data: {
+                    unassigned: unassign,
+                    selectedCount,
+                    assignedCount: unassign ? toAssign.filter((lead) => lead.agent).length : assignedCount,
+                    skippedPreviousCount: skippedPrevious.length,
+                    alreadyAssignedCount: alreadyWithAgent.length,
+                    keptWithOtherCount: heldByOther.length,
+                    notAssignedCount: skippedPrevious.length + alreadyWithAgent.length + heldByOther.length,
+                    notAssignedByAdmin,
+                    currentOwners,
+                    unassignedCount,
+                    agentName,
+                    agentRole,
+                    skipPreviouslyAssigned,
+                },
+            });
+        }
+
+        const now = new Date();
+        const nextAgentId = unassign ? null : agentId;
+        const ops = toAssign.map((lead) => {
+            const pastIds = [];
+            if (lead.agent && String(lead.agent) !== String(nextAgentId || "")) pastIds.push(lead.agent);
+            if (!unassign && agentId) pastIds.push(agentId);
+            return {
+                updateOne: {
+                    filter: { _id: lead._id, isDeleted: false },
+                    update: {
+                        $set: { agent: nextAgentId, updatedAt: now },
+                        ...(pastIds.length ? { $addToSet: { pastAgentIds: { $each: pastIds } } } : {}),
+                    },
+                },
+            };
+        });
+        if (skipPreviouslyAssigned && skippedPrevious.length) {
+            await Lead.updateMany(
+                { _id: { $in: skippedPrevious.map((lead) => lead._id) } },
+                { $addToSet: { pastAgentIds: agentId } }
+            );
+        }
+        let modifiedCount = 0;
+        for (let index = 0; index < ops.length; index += 500) {
+            const bulk = await Lead.bulkWrite(ops.slice(index, index + 500), { ordered: false });
+            modifiedCount += bulk.modifiedCount || 0;
+        }
+        const result = { modifiedCount };
 
         if (unassign) {
             try {
                 const getActivityModel = require("../crmDB/models/activityModel");
                 const Activity = await getActivityModel();
                 const actorName = `${req.user.firstName || ""} ${req.user.lastName || ""}`.trim() || "Super admin";
-                const docs = leadsToUpdate.filter((lead) => lead.agent).map((lead) => ({
+                const docs = toAssign.filter((lead) => lead.agent).map((lead) => ({
                     leadId: lead._id,
                     type: "assignment_change",
                     isSystemGenerated: true,
@@ -1581,13 +1798,16 @@ exports.assignLeadsToAgent = async (req, res) => {
                         newValue: "Unassigned",
                         description: "Unassigned by super admin",
                     },
+                    metadata: {
+                        previousAgentId: String(lead.agent),
+                    },
                 }));
                 if (docs.length) await Activity.insertMany(docs, { ordered: false });
             } catch (activityError) {
                 console.error("Unassign activity log failed:", activityError);
             }
         } else {
-            for (const lead of leadsToUpdate) {
+            for (const lead of toAssign) {
                 let oldAgentName = 'Unassigned';
                 if (lead.agent) {
                     const oldAgent = await User.findById(lead.agent).select('firstName lastName');
@@ -1600,28 +1820,67 @@ exports.assignLeadsToAgent = async (req, res) => {
                     changes: {
                         field: 'agent',
                         oldValue: oldAgentName,
-                        newValue: `${agentUser.firstName} ${agentUser.lastName}`
-                    }
+                        newValue: agentName,
+                    },
+                    metadata: {
+                        newAgentId: targetId,
+                        previousAgentId: lead.agent ? String(lead.agent) : "",
+                    },
                 });
             }
         }
 
         const targetAgentId = unassign ? null : agentId;
-        const lostNewOwners = leadsToUpdate
+        const lostNewOwners = toAssign
             .filter((lead) => isNewStatus(lead.status) && lead.agent && String(lead.agent) !== String(targetAgentId))
             .map((lead) => lead.agent);
         if (lostNewOwners.length) await refillOwners(lostNewOwners, req.user);
-        if (!unassign && result.modifiedCount > 0) {
+        if (!unassign && toAssign.length > 0) {
             const { resolveShortageAlert } = require("../utils/leadShortageAlert");
             await resolveShortageAlert(agentId);
         }
 
+        let msg;
+        if (unassign) {
+            msg = `${leadWord(result.modifiedCount)} unassigned`;
+        } else if (skipPreviouslyAssigned) {
+            const parts = [
+                `${leadWord(assignedCount)} ${assignedCount === 1 ? "was" : "were"} assigned to ${agentLabel}.`,
+            ];
+            notAssignedByAdmin.forEach((item) => {
+                const itemLabel = item.agentRole ? `${item.agentName} (${item.agentRole})` : item.agentName;
+                if (item.reason === "already_assigned") {
+                    parts.push(`${leadWord(item.count)} already assigned to ${itemLabel}.`);
+                } else if (item.reason === "previously_assigned") {
+                    parts.push(`${leadWord(item.count)} previously assigned to the selected admin, ${itemLabel}.`);
+                } else if (item.reason === "already_with_admin") {
+                    parts.push(`${leadWord(item.count)} already assigned to the selected admin, ${itemLabel}.`);
+                }
+            });
+            msg = parts.join(" ");
+        } else {
+            msg = `${leadWord(assignedCount)} ${assignedCount === 1 ? "was" : "were"} assigned to ${agentLabel}.`;
+        }
+
         return res.status(200).json({
             success: true,
-            msg: unassign
-                ? `${result.modifiedCount} lead(s) unassigned`
-                : `${result.modifiedCount} lead(s) assigned to ${agentUser.firstName} ${agentUser.lastName}`,
-            data: { modifiedCount: result.modifiedCount, unassigned: unassign }
+            msg,
+            data: {
+                modifiedCount: result.modifiedCount,
+                unassigned: unassign,
+                selectedCount,
+                assignedCount: unassign ? result.modifiedCount : assignedCount,
+                skippedPreviousCount: skippedPrevious.length,
+                alreadyAssignedCount: alreadyWithAgent.length,
+                keptWithOtherCount: heldByOther.length,
+                notAssignedCount: skippedPrevious.length + alreadyWithAgent.length + heldByOther.length,
+                notAssignedByAdmin,
+                currentOwners,
+                unassignedCount,
+                agentName,
+                agentRole,
+                skipPreviouslyAssigned,
+            }
         });
     } catch (err) {
         console.error('Error assigning leads:', err);

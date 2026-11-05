@@ -18,6 +18,7 @@ const leadSchema = new mongoose.Schema({
   fileName: { type: String, default: "" },
   Address: String,
   agent: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  pastAgentIds: { type: [mongoose.Schema.Types.ObjectId], default: [] },
   status: {
     type: String,
     default: "New",

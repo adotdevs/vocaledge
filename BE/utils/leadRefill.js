@@ -280,7 +280,10 @@ const claimNewLeads = async (owner) => {
                 : owner._id;
             await Lead.updateMany(
                 { _id: { $in: ids }, isDeleted: false },
-                { $set: { agent: ownerObjectId, status: "New", updatedAt: now, createdAt: now } }
+                {
+                    $set: { agent: ownerObjectId, status: "New", updatedAt: now, createdAt: now },
+                    $addToSet: { pastAgentIds: ownerObjectId },
+                }
             );
             const leads = await Lead.find({ _id: { $in: ids }, agent: ownerObjectId, isDeleted: false }).lean();
             if (!leads.length) return emptyResult();

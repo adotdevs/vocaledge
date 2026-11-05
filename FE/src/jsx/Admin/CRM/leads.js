@@ -150,6 +150,8 @@ import {
 import { contrastText, getStatusChipSx, getStatusColor } from './components/leadStatusStyles';
 import useLiveCrmUser from './useLiveCrmUser';
 import SendLeadEmailDialog from './components/SendLeadEmailDialog';
+import AssignLeadsDialog from './components/AssignLeadsDialog';
+import RemoveBrandDialog, { brandOptionRenderer } from './components/RemoveBrandDialog';
 import LeadRemindersSection from './components/LeadRemindersSection';
 import ReminderModal from './components/ReminderModal';
 import { CustomerFieldsEditor, CustomerFieldsFilters, CustomerFieldsView } from './components/CustomerFields';
@@ -1863,6 +1865,7 @@ const LeadsPage = () => {
     const [tempCountrySearch, setTempCountrySearch] = useState("");
     const [tempBrandSearch, setTempBrandSearch] = useState("");
     const [brandOptions, setBrandOptions] = useState([]);
+    const [brandToRemove, setBrandToRemove] = useState(""); // brand waiting for the super admin's confirmation
     const [copiedPhones, setCopiedPhones] = useState(() => new Set());
     const handlePhoneCopied = useCallback((phoneNumber) => {
         setCopiedPhones((prev) => {
@@ -2038,7 +2041,6 @@ const LeadsPage = () => {
     const [statusDialogOpen, setStatusDialogOpen] = useState(false);
     const [bulkStatusUpdating, setBulkStatusUpdating] = useState(false);
     const [bulkStatusValue, setBulkStatusValue] = useState('');
-    const [selectedAgentId, setSelectedAgentId] = useState("");
     const [emailQueueStatus, setEmailQueueStatus] = useState({
         pending: 0,
         processing: 0,
@@ -2797,6 +2799,11 @@ const LeadsPage = () => {
         fetchLeadStatuses().catch(() => {});
     }, []);
     const isSuperAdmin = currentUserLatest?.role === 'superadmin';
+    // Stable array for the assign dialog (it asks the server for a preview whenever this changes).
+    const assignLeadIds = useMemo(
+        () => (assignDialogOpen ? Array.from(selectedLeads) : []),
+        [assignDialogOpen, selectedLeads]
+    );
     const canSendLeadEmail = can('canSendLeadEmail');
     const canMakeCalls = can('canMakeCalls');
     if (!callAccessRef.current.stoppedDashboard) {
@@ -3235,7 +3242,6 @@ const LeadsPage = () => {
                 }));
             }
             toast.success(res.msg || "Leads unassigned");
-            setSelectedAgentId("");
             setSelectedLeads(new Set());
             setAllFilteredSelected(false);
             setAssignDialogOpen(false);
@@ -3698,6 +3704,18 @@ const LeadsPage = () => {
             };
         });
     }, [tempBrandSearch]);
+
+    // A brand was removed everywhere: drop it from the list, clear the filter if it was the one in use, refresh the table.
+    const handleBrandRemoved = (brand) => {
+        const normalize = (value) => String(value || "").trim().toLowerCase();
+        setBrandOptions((prev) => prev.filter((option) => String(option).trim() !== String(brand).trim()));
+        if (normalize(tempBrandSearch) === normalize(brand)) setTempBrandSearch("");
+        if (normalize(filtersRef.current.brandSearch) === normalize(brand)) {
+            setFilters((prev) => ({ ...prev, brandSearch: "" })); // changing the filter reloads the table
+        } else {
+            fetchLeads(pagination.currentPage);
+        }
+    };
 
     // Handle Enter key in search field
     const handleSearchKeyPress = useCallback((e) => {
@@ -4409,6 +4427,7 @@ const LeadsPage = () => {
                                                 option.toLowerCase().includes(query)
                                             );
                                         }}
+                                        renderOption={brandOptionRenderer(isSuperAdmin, setBrandToRemove)}
                                         renderInput={(params) => (
                                             <TextField
                                                 {...params}
@@ -5856,81 +5875,28 @@ const LeadsPage = () => {
                 </DialogActions>
             </Dialog>
 
+            {/* Remove a brand everywhere (super admin) */}
+            {isSuperAdmin && (
+                <RemoveBrandDialog
+                    brand={brandToRemove}
+                    onClose={() => setBrandToRemove("")}
+                    onRemoved={handleBrandRemoved}
+                />
+            )}
+
             {/* Assign Leads Dialog */}
-            <Dialog
+            <AssignLeadsDialog
                 open={assignDialogOpen}
                 onClose={() => setAssignDialogOpen(false)}
-                fullWidth
-                maxWidth="sm"
-            >
-                <DialogTitle>Assign Selected Leads</DialogTitle>
-                <DialogContent sx={{ px: { xs: 2, sm: 3 } }}>
-                    <Typography sx={{ mb: 2 }}>Select an agent to assign {selectedLeads.size} lead(s):</Typography>
-                    <FormControl fullWidth size="small">
-                        <InputLabel>Agent</InputLabel>
-                        <Select
-                            value={selectedAgentId}
-                            label="Agent"
-                            onChange={(e) => setSelectedAgentId(e.target.value)}
-                        >
-                            {agents
-                                .filter(a => a.role === 'admin' || a.role === 'subadmin' || a.role === 'superadmin')
-                                .map(agent => (
-                                    <MenuItem key={agent._id} value={agent._id}>
-                                        {agent.firstName} {agent.lastName} ({agent.role}) - {agent.email}{currentAuthUser?.user?._id === agent._id ? ' (self)' : ''}
-                                    </MenuItem>
-                                ))}
-                        </Select>
-                    </FormControl>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setAssignDialogOpen(false)}>Cancel</Button>
-                    {isSuperAdmin && (
-                        <Button
-                            color="warning"
-                            onClick={unassignSelectedLeads}
-                            disabled={assigning || selectedLeads.size === 0}
-                        >
-                            Unassign
-                        </Button>
-                    )}
-                    <Button
-                        variant="contained"
-                        onClick={async () => {
-                            try {
-                                if (!selectedAgentId) {
-                                    toast.error('Please select an agent');
-                                    return;
-                                }
-                                setAssigning(true);
-                                const res = await assignLeadsApi(Array.from(selectedLeads), selectedAgentId);
-                                if (res.success) {
-                                    toast.success(res.msg || 'Leads assigned successfully');
-                                    // Fetch leads first before closing modal
-                                    await fetchLeads(pagination.currentPage);
-                                    // Reset state before closing
-                                    setSelectedAgentId("");
-                                    setSelectedLeads(new Set());
-                                    setAllFilteredSelected(false);
-                                    setAssigning(false);
-                                    // Close modal last
-                                    setAssignDialogOpen(false);
-                                } else {
-                                    toast.error(res.msg || 'Failed to assign leads');
-                                    setAssigning(false);
-                                }
-                            } catch (err) {
-                                console.error('Assign error:', err);
-                                toast.error('Error assigning leads');
-                                setAssigning(false);
-                            }
-                        }}
-                        disabled={assigning || selectedLeads.size === 0}
-                    >
-                        {assigning ? <CircularProgress size={24} /> : 'Assign'}
-                    </Button>
-                </DialogActions>
-            </Dialog>
+                leadIds={assignLeadIds}
+                agents={agents}
+                currentUserId={currentAuthUser?.user?._id}
+                onAssigned={() => {
+                    setSelectedLeads(new Set());
+                    setAllFilteredSelected(false);
+                    fetchLeads(pagination.currentPage);
+                }}
+            />
 
             {/* Blocking Activation Modal */}
             <Dialog

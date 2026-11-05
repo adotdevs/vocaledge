@@ -1,0 +1,76 @@
+/*
+ * CRM scrollbars
+ *
+ * The template styles loaded just before this file (style.css, main.css, ...) turn every scrollbar into a 5px
+ * sliver at 10% opacity and hide the page's own scrollbar, so scrolling areas look like they cannot scroll.
+ * Chrome and Edge also ignore ::-webkit-scrollbar rules on any element that has scrollbar-width or
+ * scrollbar-color set, and the template sets both.
+ *
+ * So this file (1) puts those two properties back to "auto" and (2) draws a clearly visible scrollbar that is
+ * always shown (custom scrollbars never auto-hide).
+ *
+ * Keep this import AFTER the other global stylesheets in App.jsx.
+ */
+
+/* 1) Undo the template's "thin" / "none" / faint colour, using the same selectors it used. */
+html,
+body,
+body > *,
+div,
+span,
+ol,
+ul {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+}
+
+/* 2) Chrome, Edge, Safari */
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+    opacity: 1;
+}
+
+/* the page's own scrollbar was hidden with display:none */
+body::-webkit-scrollbar {
+    display: block;
+}
+
+::-webkit-scrollbar-track {
+    background: #eef0f4;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: #8f99ac;
+    background-clip: padding-box;
+    border: 2px solid transparent; /* leaves a gap so the handle floats inside the track */
+    border-radius: 8px;
+    min-width: 40px;
+    min-height: 40px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: #7b869b;
+}
+
+::-webkit-scrollbar-thumb:active {
+    background-color: #657189;
+}
+
+::-webkit-scrollbar-corner {
+    background: #eef0f4;
+}
+
+/* 3) Firefox has no ::-webkit-scrollbar, so it gets the standard properties instead. */
+@supports not selector(::-webkit-scrollbar) {
+    html,
+    body,
+    body > *,
+    div,
+    span,
+    ol,
+    ul {
+        scrollbar-width: auto;
+        scrollbar-color: #8f99ac #eef0f4;
+    }
+}

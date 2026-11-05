@@ -477,8 +477,17 @@ export const updateLeadApi = (leadId, leadData) => {
 export const exportLeadsApi = (filters = {}) => {
   return getBlobApi(`/exportLeads`,filters);
 };
-export const assignLeadsApi = (leadIds, agentId) => {
-  return postApi(`/crm/assignLeads`, { leadIds, agentId });
+export const assignLeadsApi = (leadIds, agentId, options = {}) => {
+  return postApi(`/crm/assignLeads`, {
+    leadIds,
+    agentId,
+    skipPreviouslyAssigned: options.skipPreviouslyAssigned === true,
+    dryRun: options.dryRun === true,
+  });
+};
+// Super admin: clear a brand from every lead that has it (dryRun only counts them).
+export const removeLeadBrandApi = (brand, options = {}) => {
+  return postApi(`/crm/lead-brands/remove`, { brand, dryRun: options.dryRun === true });
 };
 export const bulkUpdateLeadStatusApi = (leadIds, status) => {
   return postApi(`/crm/bulkUpdateLeadStatus`, { leadIds, status });
