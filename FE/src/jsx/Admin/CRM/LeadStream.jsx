@@ -2173,7 +2173,7 @@ const LeadStream = () => {
                                 {lead?.firstName || ''} {lead?.lastName || ''}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                                ID {Number.isInteger(lead?.leadNumber) ? lead.leadNumber.toLocaleString() : "—"} • {totalActivities} activities
+                                {Number.isInteger(lead?.leadNumber) ? `#${lead.leadNumber}` : "—"} • {totalActivities} activities
                             </Typography>
                         </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>

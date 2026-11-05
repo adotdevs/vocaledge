@@ -4789,7 +4789,7 @@ const LeadsPage = () => {
                                                     />
                                                 </TableCell>
                                                 <TableCell />
-                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", width: 88 }}>
+                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 96 }}>
                                                     ID
                                                 </TableCell>
                                                 {showLeadColumn("contact") && (
@@ -4885,7 +4885,7 @@ const LeadsPage = () => {
                                                             </IconButton>
                                                         </TableCell>
                                                         <TableCell sx={{ fontVariantNumeric: "tabular-nums", fontWeight: 700, color: "text.primary", whiteSpace: "nowrap" }}>
-                                                            {Number.isInteger(lead.leadNumber) ? lead.leadNumber.toLocaleString() : "—"}
+                                                            {Number.isInteger(lead.leadNumber) ? `#${lead.leadNumber}` : "—"}
                                                         </TableCell>
                                                         {showLeadColumn("contact") && (
                                                         <TableCell>
