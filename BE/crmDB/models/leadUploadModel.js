@@ -10,6 +10,8 @@ const leadUploadSchema = new mongoose.Schema({
   skippedCount: { type: Number, default: 0 },
   duplicateCount: { type: Number, default: 0 },
   acceptedCount: { type: Number, default: 0 },
+  declinedCount: { type: Number, default: 0 },
+  mergedCount: { type: Number, default: 0 },
   duplicates: { type: [mongoose.Schema.Types.Mixed], default: [] },
   deletedAt: { type: Date, default: null },
   deletedCount: { type: Number, default: 0 },

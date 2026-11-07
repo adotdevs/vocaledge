@@ -405,6 +405,7 @@ export const getLeadUploadsApi = (params) => getApi(`/crm/lead-uploads${toQuery(
 export const getLeadUploadApi = (id, params) => getApi(`/crm/lead-uploads/${id}${toQuery(params)}`);
 export const acceptLeadUploadDuplicatesApi = (id, body) => postApi(`/crm/lead-uploads/${id}/accept`, body);
 export const declineLeadUploadDuplicatesApi = (id, body) => postApi(`/crm/lead-uploads/${id}/decline`, body);
+export const mergeLeadUploadDuplicateApi = (id, body) => postApi(`/crm/lead-uploads/${id}/merge`, body);
 export const deleteLeadUploadApi = (id) => deleteApi(`/crm/lead-uploads/${id}`);
 
 // Super admin: send leads that are with the admin back to the agent who had them before.

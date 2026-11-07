@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthUser } from "react-auth-kit";
 import {
+  Alert,
   AppBar,
   Box,
   Button,
@@ -15,6 +16,7 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  LinearProgress,
   MenuItem,
   Pagination,
   Tab,
@@ -29,7 +31,12 @@ import {
   Toolbar,
   Typography,
 } from "@mui/material";
-import { ArrowBack, DeleteOutline, History, Menu as MenuIcon, OpenInNew } from "@mui/icons-material";
+import ArrowBack from "@mui/icons-material/ArrowBack";
+import DeleteOutline from "@mui/icons-material/DeleteOutline";
+import History from "@mui/icons-material/History";
+import MenuIcon from "@mui/icons-material/Menu";
+import MergeType from "@mui/icons-material/MergeType";
+import OpenInNew from "@mui/icons-material/OpenInNew";
 import { toast } from "react-toastify";
 import Sidebar from "./Sidebar.js";
 import CrmAppBarActions from "./components/CrmAppBarActions";
@@ -39,6 +46,7 @@ import {
   deleteLeadUploadApi,
   getLeadUploadApi,
   getLeadUploadsApi,
+  mergeLeadUploadDuplicateApi,
 } from "../../../Api/Service";
 
 const when = (value) => {
@@ -102,6 +110,40 @@ const isMatchedDuplicate = (label, incoming, stored) => {
   return Boolean(left) && left === right;
 };
 
+const MERGE_FIELDS = [
+  { key: "firstName", label: "First name" },
+  { key: "lastName", label: "Last name" },
+  { key: "email", label: "Email" },
+  { key: "phone", label: "Phone" },
+  { key: "country", label: "Country" },
+  { key: "Brand", label: "Brand" },
+  { key: "source", label: "Source" },
+  { key: "fileName", label: "File name" },
+  { key: "Address", label: "Address" },
+  { key: "status", label: "Status" },
+];
+const mergeFieldLabel = new Map(MERGE_FIELDS.map((field) => [field.key, field.label]));
+
+const normalized = (key, value) => {
+  const cleaned = String(value ?? "").trim();
+  return key === "email" ? cleaned.toLowerCase() : cleaned;
+};
+
+const mergeFieldRows = (row) => MERGE_FIELDS.map((field) => {
+  const incoming = normalized(field.key, row?.[field.key]);
+  const stored = normalized(field.key, row?.existing?.[field.key]);
+  return {
+    ...field,
+    incoming,
+    stored,
+    same: incoming === stored,
+    selectable: Boolean(incoming) && incoming !== stored,
+    fillsBlank: Boolean(incoming) && !stored,
+  };
+});
+
+const mergeActor = (row) => row?.mergedBy?.userName || "Super admin";
+
 const Stat = ({ label, value, tone }) => (
   <Card elevation={0} sx={{ border: 1, borderColor: "divider", borderRadius: 2, flex: "1 1 140px" }}>
     <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
@@ -128,7 +170,7 @@ const UploadHistory = () => {
   const [listLoading, setListLoading] = useState(false);
 
   const [detail, setDetail] = useState(null);
-  const [duplicates, setDuplicates] = useState({ rows: [], page: 1, pages: 1, total: 0, pending: 0, accepted: 0, declined: 0 });
+  const [duplicates, setDuplicates] = useState({ rows: [], page: 1, pages: 1, total: 0, pending: 0, accepted: 0, declined: 0, merged: 0 });
   const [added, setAdded] = useState({ rows: [], page: 1, pages: 1, total: 0 });
   const [tab, setTab] = useState("pending");
   const [duplicatePage, setDuplicatePage] = useState(1);
@@ -137,12 +179,20 @@ const UploadHistory = () => {
   const [leadPage, setLeadPage] = useState(1);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selected, setSelected] = useState([]);
+  const [allPendingSelected, setAllPendingSelected] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [confirmAccept, setConfirmAccept] = useState(null);
   const [confirmDeclineAll, setConfirmDeclineAll] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [mergeTarget, setMergeTarget] = useState(null);
+  const [mergeFields, setMergeFields] = useState([]);
+  const [merging, setMerging] = useState(false);
+  const [mergeConflict, setMergeConflict] = useState("");
+  const [bulkMergeOpen, setBulkMergeOpen] = useState(false);
+  const [bulkMerging, setBulkMerging] = useState(false);
+  const [bulkMergeProgress, setBulkMergeProgress] = useState({ done: 0, total: 0, merged: 0, failed: 0 });
 
   const role = user?.user?.role;
   useEffect(() => {
@@ -182,7 +232,7 @@ const UploadHistory = () => {
       return;
     }
     setDetail(response.upload);
-    setDuplicates(response.duplicates || { rows: [], page: 1, pages: 1, total: 0, pending: 0, accepted: 0 });
+    setDuplicates(response.duplicates || { rows: [], page: 1, pages: 1, total: 0, pending: 0, accepted: 0, declined: 0, merged: 0 });
     setAdded(response.leads || { rows: [], page: 1, pages: 1, total: 0 });
     setSelected([]);
   };
@@ -220,6 +270,7 @@ const UploadHistory = () => {
       return;
     }
     toast.success(response.msg || "Leads added");
+    setAllPendingSelected(false);
     forgetRows({
       kind: "accept",
       keys: response.keys || plan.keys || [],
@@ -245,6 +296,145 @@ const UploadHistory = () => {
       all: Boolean(response.all || body.all),
       count: response.declined || (body.keys || []).length,
     });
+  };
+
+  const openMerge = (row) => {
+    const fields = mergeFieldRows(row);
+    setMergeTarget(row);
+    // Safe default: fill only fields that are blank on the saved lead.
+    // Replacing a non-empty saved value always requires an explicit click.
+    setMergeFields(fields.filter((field) => field.fillsBlank).map((field) => field.key));
+    setMergeConflict("");
+  };
+
+  const closeMerge = () => {
+    if (merging) return;
+    setMergeTarget(null);
+    setMergeFields([]);
+    setMergeConflict("");
+  };
+
+  const toggleMergeField = (key) => {
+    setMergeFields((current) => (
+      current.includes(key) ? current.filter((field) => field !== key) : [...current, key]
+    ));
+    setMergeConflict("");
+  };
+
+  const mergeDuplicate = async () => {
+    if (!mergeTarget || !mergeFields.length) return;
+    const expected = Object.fromEntries(
+      mergeFields.map((field) => [field, mergeTarget.existing?.[field] ?? ""])
+    );
+    setMerging(true);
+    const response = await mergeLeadUploadDuplicateApi(uploadId, {
+      key: String(mergeTarget.key),
+      fields: mergeFields,
+      expected,
+    });
+    setMerging(false);
+    if (!response?.success) {
+      const message = response?.msg || "Could not merge this duplicate";
+      if (response?.code === "MERGE_CONFLICT") setMergeConflict(message);
+      toast.error(message);
+      return;
+    }
+    toast.success(response.msg || "Duplicate merged into the saved lead");
+    setMergeTarget(null);
+    setMergeFields([]);
+    setMergeConflict("");
+    await loadDetail(duplicatePage, leadPage, tab, duplicateSort, duplicatePageSize);
+  };
+
+  const openBulkMerge = () => {
+    const rows = (duplicates.rows || []).filter((row) => selected.includes(String(row.key)));
+    const total = allPendingSelected ? (duplicates.pending || 0) : rows.length;
+    if (!total) return;
+    setBulkMergeProgress({ done: 0, total, merged: 0, failed: 0 });
+    setBulkMergeOpen(true);
+  };
+
+  const closeBulkMerge = () => {
+    if (bulkMerging) return;
+    setBulkMergeOpen(false);
+  };
+
+  const mergeSelected = async () => {
+    let rows = (duplicates.rows || []).filter((row) => selected.includes(String(row.key)));
+    const requestedTotal = allPendingSelected ? (duplicates.pending || 0) : rows.length;
+    if (!requestedTotal) return;
+    setBulkMerging(true);
+    setBulkMergeProgress({ done: 0, total: requestedTotal, merged: 0, failed: 0 });
+
+    if (allPendingSelected) {
+      rows = [];
+      const pages = Math.max(1, Math.ceil(requestedTotal / 100));
+      for (let page = 1; page <= pages; page += 1) {
+        const response = await getLeadUploadApi(uploadId, {
+          duplicatePage: page,
+          duplicateLimit: 100,
+          duplicateStatus: "pending",
+          duplicateSort,
+          leadPage: 1,
+          leadLimit: 1,
+        });
+        if (!response?.success) break;
+        rows.push(...(response.duplicates?.rows || []));
+      }
+    }
+
+    let merged = 0;
+    let failed = Math.max(0, requestedTotal - rows.length);
+    if (failed) {
+      setBulkMergeProgress({ done: failed, total: requestedTotal, merged, failed });
+    }
+    for (const row of rows) {
+      let success = false;
+      if (row.existing?._id && !row.existing?.isDeleted) {
+        const safeFields = mergeFieldRows(row).filter((field) => field.fillsBlank).map((field) => field.key);
+        const expected = Object.fromEntries(
+          safeFields.map((field) => [field, row.existing?.[field] ?? ""])
+        );
+        let response = await mergeLeadUploadDuplicateApi(uploadId, {
+          key: String(row.key),
+          fields: safeFields,
+          expected,
+          resolveNoChanges: true,
+          policy: "fill_blanks",
+        });
+        // A previous row in the same upload may have just filled this saved lead.
+        // Existing values win in bulk mode, so resolve that later duplicate without replacing them.
+        if (!response?.success && ["MERGE_CONFLICT", "MERGE_VALUE_CONFLICT"].includes(response?.code)) {
+          response = await mergeLeadUploadDuplicateApi(uploadId, {
+            key: String(row.key),
+            fields: [],
+            expected: {},
+            resolveNoChanges: true,
+            policy: "fill_blanks",
+          });
+        }
+        success = Boolean(response?.success);
+      }
+      if (success) merged += 1;
+      else failed += 1;
+      setBulkMergeProgress({
+        done: merged + failed,
+        total: requestedTotal,
+        merged,
+        failed,
+      });
+    }
+
+    setBulkMerging(false);
+    setAllPendingSelected(false);
+    setSelected([]);
+    if (failed) {
+      toast.warning(`${merged} duplicate${merged === 1 ? "" : "s"} merged, ${failed} could not be merged`);
+    } else {
+      toast.success(`${merged} duplicate${merged === 1 ? "" : "s"} merged safely`);
+    }
+    setDuplicatePage(1);
+    await loadDetail(1, leadPage, tab, duplicateSort, duplicatePageSize);
   };
 
   const forgetRows = ({ kind, keys = [], all = false, count = 0, fromDeclined = false }) => {
@@ -275,6 +465,7 @@ const UploadHistory = () => {
       } : current);
     }
     setSelected((current) => (all ? [] : current.filter((key) => !drop.has(String(key)))));
+    if (all) setAllPendingSelected(false);
   };
 
   const removeUpload = async () => {
@@ -295,8 +486,11 @@ const UploadHistory = () => {
 
   const pageKeys = (duplicates.rows || []).filter((row) => !row.acceptedLeadId && !row.declinedAt).map((row) => String(row.key));
   const selectedOnPage = pageKeys.filter((key) => selected.includes(key));
-  const allPageSelected = pageKeys.length > 0 && selectedOnPage.length === pageKeys.length;
-  const somePageSelected = selectedOnPage.length > 0 && !allPageSelected;
+  const selectedCount = allPendingSelected ? (duplicates.pending || 0) : selected.length;
+  const allPageSelected = allPendingSelected || (pageKeys.length > 0 && selectedOnPage.length === pageKeys.length);
+  const somePageSelected = !allPendingSelected && selectedOnPage.length > 0 && !allPageSelected;
+  const mergeRows = mergeTarget ? mergeFieldRows(mergeTarget) : [];
+  const selectedMergeRows = mergeRows.filter((field) => mergeFields.includes(field.key));
 
   return (
     <Box sx={{ display: "block", minHeight: "100vh", bgcolor: "background.default" }}>
@@ -379,7 +573,8 @@ const UploadHistory = () => {
                           <TableCell>Uploaded</TableCell>
                           <TableCell>Added</TableCell>
                           <TableCell>Duplicates</TableCell>
-                          <TableCell>Accepted</TableCell>
+                          <TableCell>Added separately</TableCell>
+                          <TableCell>Merged</TableCell>
                           <TableCell>Status</TableCell>
                           <TableCell align="right">Actions</TableCell>
                         </TableRow>
@@ -404,6 +599,7 @@ const UploadHistory = () => {
                             <TableCell>{upload.leadCount || 0}</TableCell>
                             <TableCell>{upload.duplicateCount ?? upload.skippedCount ?? 0}</TableCell>
                             <TableCell>{upload.acceptedCount || 0}</TableCell>
+                            <TableCell>{upload.mergedCount || 0}</TableCell>
                             <TableCell>
                               {upload.deletedAt ? (
                                 <Chip size="small" color="error" label={`Removed ${when(upload.deletedAt)}`} />
@@ -413,6 +609,20 @@ const UploadHistory = () => {
                             </TableCell>
                             <TableCell align="right">
                               <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, flexWrap: "wrap" }}>
+                                {!upload.deletedAt && (upload.duplicateCount ?? upload.skippedCount ?? 0) > 0 && (
+                                  <Button
+                                    color="success"
+                                    variant="outlined"
+                                    size="small"
+                                    startIcon={<MergeType />}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      navigate(`/admin/crm/upload-history/${upload._id}`);
+                                    }}
+                                  >
+                                    Merge duplicates
+                                  </Button>
+                                )}
                                 {!upload.deletedAt && (
                                 <Button
                                   variant="contained"
@@ -466,7 +676,8 @@ const UploadHistory = () => {
                 <Stat label="Duplicates" value={detail.duplicateCount ?? detail.skippedCount ?? 0} tone="warning.main" />
                 <Stat label="Still to sort" value={duplicates.pending || 0} />
                 <Stat label="Declined" value={duplicates.declined || 0} />
-                <Stat label="Added anyway" value={duplicates.accepted || detail.acceptedCount || 0} tone="success.main" />
+                <Stat label="Added separately" value={duplicates.accepted || detail.acceptedCount || 0} tone="success.main" />
+                <Stat label="Safely merged" value={duplicates.merged || detail.mergedCount || 0} tone="success.dark" />
               </Box>
 
               <Card elevation={0} sx={{ mb: 2, borderRadius: 3, border: 1, borderColor: "divider" }}>
@@ -493,12 +704,15 @@ const UploadHistory = () => {
                     setTab(value);
                     setDuplicatePage(1);
                     setLeadPage(1);
+                    setSelected([]);
+                    setAllPendingSelected(false);
                   }}
                   sx={{ px: 2, borderBottom: 1, borderColor: "divider" }}
                 >
                   <Tab value="pending" label={`To sort (${duplicates.pending || 0})`} />
                   <Tab value="declined" label={`Declined (${duplicates.declined || 0})`} />
-                  <Tab value="accepted" label={`Added anyway (${duplicates.accepted || 0})`} />
+                  <Tab value="accepted" label={`Added separately (${duplicates.accepted || 0})`} />
+                  <Tab value="merged" label={`Merged (${duplicates.merged || 0})`} />
                   <Tab value="added" label={`Uploaded leads (${added.total || 0})`} />
                 </Tabs>
 
@@ -530,11 +744,33 @@ const UploadHistory = () => {
                                 size="small"
                                 checked={allPageSelected}
                                 indeterminate={somePageSelected}
-                                onChange={() => setSelected(allPageSelected ? selected.filter((key) => !pageKeys.includes(key)) : [...new Set([...selected, ...pageKeys])])}
+                                onChange={() => {
+                                  if (allPendingSelected) {
+                                    setAllPendingSelected(false);
+                                    setSelected([]);
+                                    return;
+                                  }
+                                  setSelected(allPageSelected ? selected.filter((key) => !pageKeys.includes(key)) : [...new Set([...selected, ...pageKeys])]);
+                                }}
                                 sx={{ p: 0.5, mr: 0.5 }}
                               />
                               <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>Select this page</Typography>
                             </Box>
+                          )}
+                          {tab === "pending" && (duplicates.pending || 0) > 0 && !detail.deletedAt && (
+                            <Button
+                              size="small"
+                              variant={allPendingSelected ? "contained" : "outlined"}
+                              onClick={() => {
+                                setAllPendingSelected((current) => !current);
+                                setSelected([]);
+                              }}
+                              sx={{ whiteSpace: "nowrap", fontWeight: 700 }}
+                            >
+                              {allPendingSelected
+                                ? `All ${(duplicates.pending || 0).toLocaleString()} selected`
+                                : `Select all ${(duplicates.pending || 0).toLocaleString()}`}
+                            </Button>
                           )}
                           <TextField
                             select
@@ -553,12 +789,33 @@ const UploadHistory = () => {
                           </TextField>
                         </Box>
                         {tab === "pending" && !detail.deletedAt && (
-                          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                            <Button size="small" color="error" variant="outlined" disabled={!selected.length || declining} onClick={() => decline({ keys: selected })}>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <Button
+                              size="small"
+                              color="error"
+                              variant="outlined"
+                              disabled={!selectedCount || declining}
+                              onClick={() => decline(allPendingSelected ? { all: true } : { keys: selected })}
+                            >
                               Decline selected
                             </Button>
-                            <Button size="small" variant="contained" disabled={!selected.length || accepting} onClick={() => askAccept(selected)}>
-                              Add selected
+                            <Button
+                              size="small"
+                              color="success"
+                              variant="contained"
+                              startIcon={<MergeType />}
+                              disabled={!selectedCount || bulkMerging}
+                              onClick={openBulkMerge}
+                            >
+                              Merge selected
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              disabled={!selectedCount || accepting}
+                              onClick={() => askAccept(allPendingSelected ? [] : selected, allPendingSelected)}
+                            >
+                              Add selected separately
                             </Button>
                             <Button size="small" color="error" variant="text" disabled={!duplicates.pending || declining} onClick={() => setConfirmDeclineAll(true)}>
                               Decline all
@@ -603,6 +860,8 @@ const UploadHistory = () => {
                           ? "This upload was saved before duplicate names were kept, so these people cannot be compared."
                           : tab === "accepted"
                             ? "No duplicates have been added as new leads."
+                            : tab === "merged"
+                              ? "No duplicates have been merged into saved leads."
                             : tab === "declined"
                               ? "No duplicates have been declined."
                               : "Nothing left to sort."}
@@ -610,8 +869,14 @@ const UploadHistory = () => {
                     )}
                     {duplicates.rows.map((row) => {
                       const pairs = compareRows(row);
-                      const checked = selected.includes(String(row.key));
+                      const checked = allPendingSelected || selected.includes(String(row.key));
                       const canSort = tab === "pending" && !row.acceptedLeadId && !row.declinedAt && !detail.deletedAt;
+                      const canMerge = ["pending", "declined"].includes(tab)
+                        && !row.acceptedLeadId
+                        && !row.mergedAt
+                        && Boolean(row.existing?._id)
+                        && !row.existing?.isDeleted
+                        && !detail.deletedAt;
                       return (
                         <Box key={row.key} sx={{ border: "1px solid", borderColor: "divider", borderRadius: "10px", mb: 2, overflow: "hidden", bgcolor: "background.paper" }}>
                           <Box sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", gap: 1, borderBottom: "1px solid", borderColor: "divider", flexWrap: "wrap", bgcolor: "action.hover" }}>
@@ -619,17 +884,25 @@ const UploadHistory = () => {
                               <Checkbox
                                 size="small"
                                 checked={checked}
-                                onChange={() => setSelected((current) => (
+                              onChange={() => {
+                                if (allPendingSelected) {
+                                  setAllPendingSelected(false);
+                                  setSelected(pageKeys.filter((key) => key !== String(row.key)));
+                                  return;
+                                }
+                                setSelected((current) => (
                                   current.includes(String(row.key))
                                     ? current.filter((key) => key !== String(row.key))
                                     : [...current, String(row.key)]
-                                ))}
+                                ));
+                              }}
                               />
                             )}
                             <Typography fontWeight={800}>{personName(row) || "Unnamed"}</Typography>
                             {row.reason && <Chip size="small" label={row.reason} color="warning" />}
                             {row.declinedAt && <Chip size="small" label={`Declined ${when(row.declinedAt)}`} />}
                             {row.acceptedLeadId && <Chip size="small" color="success" label={`Added ${when(row.acceptedAt)}`} />}
+                            {row.mergedAt && <Chip size="small" color="success" label={`Merged ${when(row.mergedAt)}`} />}
                             <Box sx={{ flex: 1 }} />
                             {row.existing?._id && (
                               <Button size="small" endIcon={<OpenInNew />} onClick={() => navigate(`/admin/crm/lead/${row.existing._id}/stream`)}>
@@ -646,21 +919,49 @@ const UploadHistory = () => {
                                 <Button size="small" color="error" variant="outlined" disabled={declining} onClick={() => decline({ keys: [String(row.key)] })}>
                                   Decline
                                 </Button>
+                                {canMerge && (
+                                  <Button size="small" color="success" variant="outlined" startIcon={<MergeType />} disabled={merging} onClick={() => openMerge(row)}>
+                                    Merge safely
+                                  </Button>
+                                )}
                                 <Button size="small" variant="contained" disabled={accepting} onClick={() => askAccept([String(row.key)])}>
-                                  Add lead
+                                  Add separately
                                 </Button>
                               </>
                             )}
                             {tab === "declined" && !detail.deletedAt && (
-                              <Button size="small" variant="contained" disabled={accepting} onClick={() => askAccept([String(row.key)])}>
-                                Add lead
-                              </Button>
+                              <>
+                                {canMerge && (
+                                  <Button size="small" color="success" variant="outlined" startIcon={<MergeType />} disabled={merging} onClick={() => openMerge(row)}>
+                                    Merge safely
+                                  </Button>
+                                )}
+                                <Button size="small" variant="contained" disabled={accepting} onClick={() => askAccept([String(row.key)])}>
+                                  Add separately
+                                </Button>
+                              </>
                             )}
                           </Box>
                           {!row.existing && (
                             <Typography variant="body2" color="text.secondary" sx={{ px: 2, pt: 1.25 }}>
                               The saved lead could not be loaded.
                             </Typography>
+                          )}
+                          {row.existing?.isDeleted && !row.mergedAt && (
+                            <Typography variant="body2" color="error" sx={{ px: 2, pt: 1.25 }}>
+                              Restore the saved lead from the recycle bin before merging into it.
+                            </Typography>
+                          )}
+                          {row.mergedAt && (
+                            <Box sx={{ px: 2, py: 1.25, bgcolor: "rgba(34, 197, 94, 0.08)", borderBottom: "1px solid", borderColor: "divider" }}>
+                              <Typography variant="body2" sx={{ fontWeight: 700, color: "success.dark" }}>
+                                Merged into the saved lead by {mergeActor(row)} · {when(row.mergedAt)}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {(row.mergedFields || []).map((field) => mergeFieldLabel.get(field) || field).join(", ") || "Saved values updated"}.
+                                The lead ID, assignments, notes, calls and activity history were preserved.
+                              </Typography>
+                            </Box>
                           )}
                           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "120px 1fr 1fr" } }}>
                             <Box sx={{ display: { xs: "none", md: "block" }, px: 2, py: 0.85, borderBottom: "1px solid", borderColor: "divider" }} />
@@ -752,8 +1053,219 @@ const UploadHistory = () => {
         </Box>
       </Box>
 
+      <Dialog open={bulkMergeOpen} onClose={closeBulkMerge} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <MergeType color="success" />
+            <Box>
+              <Typography variant="h6" fontWeight={800}>Merge selected duplicates</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {bulkMergeProgress.total} selected
+              </Typography>
+            </Box>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="success" variant="outlined" sx={{ mb: 2 }}>
+            Safe bulk merge keeps each original saved lead and its complete history.
+          </Alert>
+          <Box sx={{ display: "grid", gap: 1, mb: 2 }}>
+            {[
+              ["Fill blanks", "Uploaded values fill fields that are empty on the saved lead."],
+              ["Keep saved values", "Existing non-empty values are never replaced in a bulk merge."],
+              ["Record history", "Every duplicate is marked as merged and gets an activity audit entry."],
+            ].map(([title, description], index) => (
+              <Box key={title} sx={{ display: "flex", gap: 1.25, p: 1.25, border: 1, borderColor: "divider", borderRadius: 2 }}>
+                <Box sx={{ width: 26, height: 26, borderRadius: "50%", bgcolor: "success.main", color: "success.contrastText", display: "grid", placeItems: "center", fontWeight: 800, flexShrink: 0 }}>
+                  {index + 1}
+                </Box>
+                <Box>
+                  <Typography variant="body2" fontWeight={800}>{title}</Typography>
+                  <Typography variant="body2" color="text.secondary">{description}</Typography>
+                </Box>
+              </Box>
+            ))}
+          </Box>
+
+          {(bulkMerging || bulkMergeProgress.done > 0) && (
+            <Box sx={{ mt: 2 }}>
+              <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mb: 0.75 }}>
+                <Typography variant="body2" fontWeight={700}>
+                  {bulkMerging ? "Merging…" : "Merge complete"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {bulkMergeProgress.done} / {bulkMergeProgress.total}
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={bulkMergeProgress.total ? (bulkMergeProgress.done / bulkMergeProgress.total) * 100 : 0}
+                color={bulkMergeProgress.failed ? "warning" : "success"}
+                sx={{ height: 8, borderRadius: 4 }}
+              />
+              <Box sx={{ display: "flex", gap: 1, mt: 1.25, flexWrap: "wrap" }}>
+                <Chip size="small" color="success" label={`${bulkMergeProgress.merged} merged`} />
+                {bulkMergeProgress.failed > 0 && (
+                  <Chip size="small" color="warning" label={`${bulkMergeProgress.failed} could not merge`} />
+                )}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          {bulkMergeProgress.done === bulkMergeProgress.total && bulkMergeProgress.total > 0 && !bulkMerging ? (
+            <Button variant="contained" onClick={closeBulkMerge}>Done</Button>
+          ) : (
+            <>
+              <Button onClick={closeBulkMerge} disabled={bulkMerging}>Cancel</Button>
+              <Button
+                variant="contained"
+                color="success"
+                startIcon={bulkMerging ? <CircularProgress size={18} color="inherit" /> : <MergeType />}
+                onClick={mergeSelected}
+                disabled={bulkMerging || bulkMergeProgress.total === 0}
+              >
+                {bulkMerging ? "Merging..." : `Merge all ${bulkMergeProgress.total}`}
+              </Button>
+            </>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(mergeTarget)} onClose={closeMerge} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <MergeType color="success" />
+            <Box>
+              <Typography variant="h6" fontWeight={800}>Merge into the saved lead</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {personName(mergeTarget) || "Uploaded duplicate"} → {personName(mergeTarget?.existing) || "Saved lead"}
+              </Typography>
+            </Box>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="success" variant="outlined" sx={{ mb: 2 }}>
+            The saved lead stays in place. Its ID, assignment, notes, calls and full activity timeline are preserved.
+            Only the uploaded values you tick below will change.
+          </Alert>
+
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 1, mb: 2 }}>
+            {[
+              ["1", "Uploaded", when(detail?.createdAt)],
+              ["2", "Duplicate found", mergeTarget?.reason || "Matched saved lead"],
+              ["3", "Merge safely", `${selectedMergeRows.length} value${selectedMergeRows.length === 1 ? "" : "s"} selected`],
+            ].map(([step, label, value]) => (
+              <Box key={step} sx={{ display: "flex", gap: 1, p: 1.25, border: 1, borderColor: "divider", borderRadius: 2 }}>
+                <Box sx={{ width: 26, height: 26, borderRadius: "50%", bgcolor: "primary.main", color: "primary.contrastText", display: "grid", placeItems: "center", fontWeight: 800, flexShrink: 0 }}>
+                  {step}
+                </Box>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={700}>{label}</Typography>
+                  <Typography variant="caption" color="text.secondary">{value}</Typography>
+                </Box>
+              </Box>
+            ))}
+          </Box>
+
+          {mergeConflict && (
+            <Alert
+              severity="error"
+              sx={{ mb: 2 }}
+              action={(
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={async () => {
+                    setMergeTarget(null);
+                    setMergeFields([]);
+                    setMergeConflict("");
+                    await loadDetail(duplicatePage, leadPage, tab, duplicateSort, duplicatePageSize);
+                  }}
+                >
+                  Reload
+                </Button>
+              )}
+            >
+              {mergeConflict}
+            </Alert>
+          )}
+
+          <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.75 }}>
+            Choose uploaded values
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Blank uploaded values can never erase saved data. Blank fields on the saved lead are preselected;
+            replacing an existing value is always your choice.
+          </Typography>
+
+          <TableContainer sx={{ border: 1, borderColor: "divider", borderRadius: 2, maxHeight: 390 }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox" />
+                  <TableCell sx={{ fontWeight: 800 }}>Field</TableCell>
+                  <TableCell sx={{ fontWeight: 800 }}>Saved lead</TableCell>
+                  <TableCell sx={{ fontWeight: 800 }}>Uploaded value</TableCell>
+                  <TableCell sx={{ fontWeight: 800 }}>Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {mergeRows.map((field) => {
+                  const checked = mergeFields.includes(field.key);
+                  const action = field.same
+                    ? { label: "Already same", color: "default" }
+                    : !field.incoming
+                      ? { label: "No uploaded value", color: "default" }
+                      : field.fillsBlank
+                        ? { label: "Fill blank", color: "success" }
+                        : { label: "Replace saved value", color: "warning" };
+                  return (
+                    <TableRow key={field.key} hover={field.selectable} selected={checked}>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          size="small"
+                          checked={checked}
+                          disabled={!field.selectable || merging || Boolean(mergeConflict)}
+                          onChange={() => toggleMergeField(field.key)}
+                          inputProps={{ "aria-label": `Use uploaded ${field.label}` }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>{field.label}</TableCell>
+                      <TableCell sx={{ wordBreak: "break-word" }}>{text(field.stored)}</TableCell>
+                      <TableCell sx={{ wordBreak: "break-word", fontWeight: checked ? 700 : 400 }}>{text(field.incoming)}</TableCell>
+                      <TableCell>
+                        <Chip size="small" color={action.color} variant={field.fillsBlank ? "filled" : "outlined"} label={action.label} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          {selectedMergeRows.some((field) => !field.fillsBlank) && (
+            <Alert severity="warning" variant="outlined" sx={{ mt: 2 }}>
+              You selected at least one replacement. The previous value will remain in the merge activity log.
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button onClick={closeMerge} disabled={merging}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={merging ? <CircularProgress size={18} color="inherit" /> : <MergeType />}
+            onClick={mergeDuplicate}
+            disabled={merging || !mergeFields.length || Boolean(mergeConflict)}
+          >
+            {merging ? "Merging..." : `Merge ${mergeFields.length} value${mergeFields.length === 1 ? "" : "s"}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={Boolean(confirmAccept)} onClose={() => setConfirmAccept(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Add {confirmAccept?.count === 1 ? "this lead" : "these leads"}</DialogTitle>
+        <DialogTitle>Add {confirmAccept?.count === 1 ? "as a separate lead" : "as separate leads"}</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
             Create {confirmAccept?.count || 0} new lead{(confirmAccept?.count || 0) === 1 ? "" : "s"} from the file. The saved lead stays.
@@ -761,7 +1273,7 @@ const UploadHistory = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmAccept(null)}>Cancel</Button>
-          <Button variant="contained" onClick={accept} disabled={accepting}>Add lead</Button>
+          <Button variant="contained" onClick={accept} disabled={accepting}>Add separately</Button>
         </DialogActions>
       </Dialog>
 

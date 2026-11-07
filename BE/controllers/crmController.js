@@ -16,6 +16,7 @@ const { hasCrmPermission, denyCrmPermission, canViewLeadSource } = require('../u
 const { addCustomerSearch, applyCustomerFilters, normalizeCustomerFields, bodyHasCustomerFields } = require('../utils/leadCustomerFields');
 const { isNewStatus, refillOwners, refillAllEligibleAgents, listRequestCanRefill, ownerIdOf, userCanOpenCrm, refillIfEmpty } = require('../utils/leadRefill');
 const { stampLeadNumbers } = require('../utils/leadNumber');
+const { MERGE_FIELDS, buildLeadMergePlan, findMergeConflicts, selectedMergeFields, valuesMatch } = require('../utils/leadMerge');
 
 const hidePrivateLeadFields = (lead, user) => {
   if (!lead) return lead;
@@ -32,6 +33,16 @@ const stream = require('stream');
 const userPermissionCache = new Map();
 const subadminCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+let crmTransactionSupportPromise = null;
+
+const crmSupportsTransactions = (Lead) => {
+    if (!crmTransactionSupportPromise) {
+        crmTransactionSupportPromise = Lead.db.db.admin().command({ hello: 1 })
+            .then((hello) => Boolean(hello.setName || hello.msg === "isdbgrid"))
+            .catch(() => false);
+    }
+    return crmTransactionSupportPromise;
+};
 
 // Helper function to get cached user permissions
 async function getCachedUserPermissions(userId) {
@@ -2552,7 +2563,7 @@ const superAdminOnly = (req, res) => {
     return false;
 };
 
-const leadCompareFields = "firstName lastName email phone country Brand status fileName source Address createdAt isDeleted";
+const leadCompareFields = "leadNumber firstName lastName email phone country Brand status fileName source Address createdAt updatedAt isDeleted";
 
 exports.listLeadUploads = async (req, res) => {
     try {
@@ -2600,7 +2611,7 @@ exports.getLeadUpload = async (req, res) => {
         const leadLimit = Math.min(100, Math.max(1, parseInt(req.query.leadLimit, 10) || 25));
         const duplicatePage = Math.max(1, parseInt(req.query.duplicatePage, 10) || 1);
         const duplicateLimit = Math.min(100, Math.max(1, parseInt(req.query.duplicateLimit, 10) || 10));
-        const duplicateStatus = ["pending", "accepted", "declined", "all"].includes(req.query.duplicateStatus)
+        const duplicateStatus = ["pending", "accepted", "declined", "merged", "all"].includes(req.query.duplicateStatus)
             ? req.query.duplicateStatus
             : "pending";
         const duplicateSort = ["name", "email", "phone"].includes(req.query.duplicateSort)
@@ -2611,22 +2622,24 @@ exports.getLeadUpload = async (req, res) => {
             ...row,
             key: row.key || String(index),
         }));
-        const accepted = duplicates.filter((row) => row.acceptedLeadId).length;
-        const declined = duplicates.filter((row) => row.declinedAt && !row.acceptedLeadId).length;
-        const pending = duplicates.length - accepted - declined;
+        const merged = duplicates.filter((row) => row.mergedAt).length;
+        const accepted = duplicates.filter((row) => row.acceptedLeadId && !row.mergedAt).length;
+        const declined = duplicates.filter((row) => row.declinedAt && !row.acceptedLeadId && !row.mergedAt).length;
+        const pending = duplicates.length - accepted - declined - merged;
         const sortText = (row) => {
             if (duplicateSort === "email") return String(row.email || "").toLowerCase();
             if (duplicateSort === "phone") return String(row.phone || "");
             return `${row.firstName || ""} ${row.lastName || ""}`.trim().toLowerCase();
         };
         const filtered = duplicates.filter((row) => {
-            if (duplicateStatus === "accepted") return Boolean(row.acceptedLeadId);
-            if (duplicateStatus === "declined") return Boolean(row.declinedAt) && !row.acceptedLeadId;
-            if (duplicateStatus === "pending") return !row.acceptedLeadId && !row.declinedAt;
+            if (duplicateStatus === "accepted") return Boolean(row.acceptedLeadId) && !row.mergedAt;
+            if (duplicateStatus === "declined") return Boolean(row.declinedAt) && !row.acceptedLeadId && !row.mergedAt;
+            if (duplicateStatus === "merged") return Boolean(row.mergedAt);
+            if (duplicateStatus === "pending") return !row.acceptedLeadId && !row.declinedAt && !row.mergedAt;
             return true;
         }).sort((a, b) => sortText(a).localeCompare(sortText(b)));
         const pageRows = filtered.slice((duplicatePage - 1) * duplicateLimit, duplicatePage * duplicateLimit);
-        const relatedIds = pageRows.flatMap((row) => [row.existingLeadId, row.acceptedLeadId]).filter(Boolean);
+        const relatedIds = pageRows.flatMap((row) => [row.existingLeadId, row.acceptedLeadId, row.mergedIntoLeadId]).filter(Boolean);
         const related = relatedIds.length
             ? await Lead.find({ _id: { $in: relatedIds } }).select(leadCompareFields).lean()
             : [];
@@ -2646,7 +2659,7 @@ exports.getLeadUpload = async (req, res) => {
         const { duplicates: unusedDuplicates, ...summary } = upload;
         res.json({
             success: true,
-            upload: { ...summary, acceptedCount: accepted },
+            upload: { ...summary, acceptedCount: accepted, declinedCount: declined, mergedCount: merged },
             duplicates: {
                 rows: duplicateRows,
                 page: duplicatePage,
@@ -2655,6 +2668,7 @@ exports.getLeadUpload = async (req, res) => {
                 pending,
                 accepted,
                 declined,
+                merged,
                 status: duplicateStatus,
                 sort: duplicateSort,
             },
@@ -2696,8 +2710,8 @@ exports.acceptLeadUploadDuplicates = async (req, res) => {
             return row;
         });
         let chosen = rows.filter((row) => {
-            if (row.acceptedLeadId) return false;
-            if (acceptAll) return !row.declinedAt;
+            if (row.acceptedLeadId || row.mergedAt) return false;
+            if (acceptAll) return !row.declinedAt && !row.mergedAt;
             return wanted.has(String(row.key));
         });
         if (!chosen.length) {
@@ -2807,7 +2821,7 @@ exports.declineLeadUploadDuplicates = async (req, res) => {
             const source = entry && typeof entry.toObject === "function" ? entry.toObject() : entry;
             const row = source && typeof source === "object" ? { ...source } : {};
             row.key = row.key || String(index);
-            if (row.acceptedLeadId || row.declinedAt) return row;
+            if (row.acceptedLeadId || row.declinedAt || row.mergedAt) return row;
             if (!declineAll && !wanted.has(String(row.key))) return row;
             declined += 1;
             declinedKeys.push(String(row.key));
@@ -2830,6 +2844,393 @@ exports.declineLeadUploadDuplicates = async (req, res) => {
     } catch (err) {
         console.error("Error declining upload duplicates:", err);
         res.status(500).json({ success: false, msg: "Could not decline these duplicates" });
+    }
+};
+
+// Merge one uploaded duplicate into the lead that already exists.
+// The saved lead keeps its _id, number, assignment, notes, calls and complete activity history.
+// Only explicitly selected, non-blank CSV fields are changed, inside one MongoDB transaction.
+exports.mergeLeadUploadDuplicate = async (req, res) => {
+    const fail = (status, message, code = "", details = undefined) => {
+        const error = new Error(message);
+        error.status = status;
+        error.code = code;
+        error.details = details;
+        return error;
+    };
+
+    let session;
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const duplicateKey = String(req.body?.key ?? "").trim();
+        const fields = selectedMergeFields(req.body?.fields);
+        const expected = req.body?.expected && typeof req.body.expected === "object" ? req.body.expected : {};
+        const resolveNoChanges = req.body?.resolveNoChanges === true;
+        const mergePolicy = req.body?.policy === "fill_blanks" ? "fill_blanks" : "field_selection";
+        if (!duplicateKey) return res.status(400).json({ success: false, msg: "Choose a duplicate to merge" });
+        if (!fields.length && !resolveNoChanges) {
+            return res.status(400).json({ success: false, msg: "Choose at least one uploaded value" });
+        }
+        const missingExpected = fields.filter((field) => !Object.prototype.hasOwnProperty.call(expected, field));
+        if (missingExpected.length) {
+            return res.status(400).json({ success: false, msg: "Reload this duplicate before merging" });
+        }
+
+        const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+        const getActivityModel = require("../crmDB/models/activityModel");
+        const LeadUpload = await getLeadUploadModel();
+        const Lead = await getLeadModel();
+        const Activity = await getActivityModel();
+        const statusLabels = await getLeadStatusLabels();
+        const rowsOf = (upload) => (upload?.duplicates || []).map((entry, index) => {
+            const source = entry && typeof entry.toObject === "function" ? entry.toObject() : entry;
+            const row = source && typeof source === "object" ? { ...source } : {};
+            row.key = row.key || String(index);
+            return row;
+        });
+        const withSession = (query, activeSession) => activeSession ? query.session(activeSession) : query;
+
+        const performMerge = async (activeSession = null, fallbackLock = null) => {
+            let rollback;
+            let activityIds = [];
+            let completed = false;
+            try {
+                const upload = await withSession(LeadUpload.findById(req.params.id), activeSession);
+                if (!upload) throw fail(404, "Upload not found");
+                if (upload.deletedAt) throw fail(400, "This upload was removed. Its duplicates cannot be merged.");
+
+                const rows = rowsOf(upload);
+                const rowIndex = rows.findIndex((row) => String(row.key) === duplicateKey);
+                if (rowIndex < 0) throw fail(404, "Duplicate not found");
+                const row = rows[rowIndex];
+                if (fallbackLock && row.mergeLock !== fallbackLock.token) {
+                    throw fail(409, "Another merge is already working on this duplicate", "MERGE_BUSY");
+                }
+                if (row.acceptedLeadId) throw fail(409, "This duplicate was already added as a separate lead", "ALREADY_SORTED");
+                if (row.mergedAt) throw fail(409, "This duplicate was already merged", "ALREADY_MERGED");
+                if (!row.existingLeadId || !mongoose.Types.ObjectId.isValid(row.existingLeadId)) {
+                    throw fail(400, "The saved lead for this duplicate is no longer available");
+                }
+
+                const lead = await withSession(
+                    Lead.findOne({ _id: row.existingLeadId, isDeleted: false }),
+                    activeSession
+                );
+                if (!lead) throw fail(404, "The saved lead no longer exists or is in the recycle bin");
+
+                const conflicts = findMergeConflicts({ lead, expected, fields });
+                if (conflicts.length) {
+                    throw fail(
+                        409,
+                        "The saved lead changed after you opened it. Reload and review the merge again.",
+                        "MERGE_CONFLICT",
+                        { conflicts }
+                    );
+                }
+
+                const plan = buildLeadMergePlan({ lead, duplicate: row, fields, statusLabels });
+                if (plan.rejected.some((item) => item.reason === "invalid_status")) {
+                    throw fail(400, "The uploaded status no longer exists. Choose another field or update the status first.");
+                }
+                if (!plan.changes.length && !resolveNoChanges) {
+                    throw fail(400, "The selected uploaded values are blank or already match the saved lead");
+                }
+                const changedFields = new Set(plan.changes.map((change) => change.field));
+                const ignoredFields = MERGE_FIELDS
+                    .filter((field) => String(row?.[field.key] ?? "").trim())
+                    .filter((field) => !valuesMatch(field.key, lead?.[field.key], row?.[field.key]))
+                    .filter((field) => !changedFields.has(field.key))
+                    .map((field) => field.key);
+
+                if (plan.changes.length && plan.updates.email) {
+                    const emailOwner = await withSession(
+                        Lead.findOne({
+                            _id: { $ne: lead._id },
+                            isDeleted: false,
+                            email: plan.updates.email,
+                        }).select("_id leadNumber"),
+                        activeSession
+                    );
+                    if (emailOwner) {
+                        throw fail(
+                            409,
+                            "That uploaded email belongs to another saved lead. It cannot be merged here.",
+                            "MERGE_VALUE_CONFLICT",
+                            { field: "email", leadId: String(emailOwner._id), leadNumber: emailOwner.leadNumber || null }
+                        );
+                    }
+                }
+                if (plan.changes.length && plan.updates.phone) {
+                    const phoneOwner = await withSession(
+                        Lead.findOne({
+                            _id: { $ne: lead._id },
+                            isDeleted: false,
+                            phone: { $in: getPhoneLookupValues(plan.updates.phone) },
+                        }).select("_id leadNumber"),
+                        activeSession
+                    );
+                    if (phoneOwner) {
+                        throw fail(
+                            409,
+                            "That uploaded phone belongs to another saved lead. It cannot be merged here.",
+                            "MERGE_VALUE_CONFLICT",
+                            { field: "phone", leadId: String(phoneOwner._id), leadNumber: phoneOwner.leadNumber || null }
+                        );
+                    }
+                }
+
+                if (plan.changes.length) {
+                    rollback = {
+                        leadId: lead._id,
+                        updatedAt: lead.updatedAt,
+                        values: Object.fromEntries(plan.changes.map((change) => [change.field, lead.get(change.field)])),
+                        after: Object.fromEntries(plan.changes.map((change) => [change.field, change.after])),
+                    };
+                    Object.entries(plan.updates).forEach(([field, value]) => {
+                        lead.set(field, value);
+                    });
+                    await lead.save(activeSession ? { session: activeSession } : undefined);
+                }
+
+                const now = new Date();
+                const actorName = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim() || "Super admin";
+                const description = plan.changes.length
+                    ? plan.changes
+                        .map((change) => `${change.label}: '${change.before || "blank"}' to '${change.after}'`)
+                        .join("; ")
+                    : "No saved values changed; existing non-empty values were kept";
+                const activityDocs = [{
+                    _id: new mongoose.Types.ObjectId(),
+                    leadId: lead._id,
+                    type: "field_update",
+                    isSystemGenerated: false,
+                    createdBy: {
+                        userId: req.user._id,
+                        userName: actorName,
+                        userRole: req.user.role,
+                    },
+                    changes: {
+                        field: "duplicate_merge",
+                        description: `Merged duplicate from ${upload.fileName || "CSV upload"}: ${description}`,
+                    },
+                    metadata: {
+                        merge: true,
+                        uploadId: String(upload._id),
+                        uploadFileName: upload.fileName || "upload.csv",
+                        duplicateKey,
+                        duplicateReason: row.reason || "",
+                        mergePolicy,
+                        mergedFields: plan.changes.map((change) => change.field),
+                        mergeChanges: plan.changes,
+                        ignoredFields,
+                    },
+                }];
+                const statusChange = plan.changes.find((change) => change.field === "status");
+                if (statusChange) {
+                    activityDocs.push({
+                        _id: new mongoose.Types.ObjectId(),
+                        leadId: lead._id,
+                        type: "status_change",
+                        isSystemGenerated: false,
+                        createdBy: {
+                            userId: req.user._id,
+                            userName: actorName,
+                            userRole: req.user.role,
+                        },
+                        changes: {
+                            field: "status",
+                            oldValue: statusChange.before || "New",
+                            newValue: statusChange.after,
+                            description: `Status updated while merging a duplicate from ${upload.fileName || "CSV upload"}`,
+                        },
+                        metadata: {
+                            merge: true,
+                            uploadId: String(upload._id),
+                            duplicateKey,
+                        },
+                    });
+                }
+                activityIds = activityDocs.map((doc) => doc._id);
+                const activities = await Activity.create(
+                    activityDocs,
+                    activeSession ? { session: activeSession } : undefined
+                );
+                const activity = activities[0];
+
+                const mergedRow = {
+                    ...row,
+                    declinedAt: null,
+                    mergedAt: now,
+                    mergedIntoLeadId: lead._id,
+                    mergedBy: {
+                        userId: req.user._id,
+                        userName: actorName,
+                        userRole: req.user.role,
+                    },
+                    mergedFields: plan.changes.map((change) => change.field),
+                    ignoredFields,
+                    mergePolicy,
+                    mergeActivityId: activity._id,
+                };
+                delete mergedRow.mergeLock;
+                delete mergedRow.mergeLockAt;
+                rows[rowIndex] = mergedRow;
+                const mergedCount = rows.filter((item) => item.mergedAt).length;
+                const declinedCount = rows.filter((item) => item.declinedAt && !item.acceptedLeadId && !item.mergedAt).length;
+
+                if (activeSession) {
+                    upload.duplicates = rows;
+                    upload.mergedCount = mergedCount;
+                    upload.declinedCount = declinedCount;
+                    upload.markModified("duplicates");
+                    await upload.save({ session: activeSession });
+                } else {
+                    const rowPath = `duplicates.${rowIndex}`;
+                    const auditWrite = await LeadUpload.collection.updateOne(
+                        { _id: upload._id, [`${rowPath}.mergeLock`]: fallbackLock.token },
+                        {
+                            $set: {
+                                [rowPath]: mergedRow,
+                                mergedCount,
+                                declinedCount,
+                            },
+                        }
+                    );
+                    if (auditWrite.modifiedCount !== 1) {
+                        throw fail(409, "The upload history changed while merging. Reload and try again.", "MERGE_CONFLICT");
+                    }
+                }
+
+                completed = true;
+                return {
+                    key: duplicateKey,
+                    leadId: String(lead._id),
+                    leadNumber: lead.leadNumber || null,
+                    ownerId: ownerIdOf(lead.agent),
+                    mergedAt: now,
+                    fields: plan.changes.map((change) => change.field),
+                    ignoredFields,
+                    policy: mergePolicy,
+                    changes: plan.changes,
+                    activityId: String(activity._id),
+                };
+            } catch (error) {
+                // Atlas uses the transaction above. A standalone local MongoDB cannot transact,
+                // so compensate carefully without ever overwriting a newer user edit.
+                if (!activeSession) {
+                    if (activityIds.length) {
+                        await Activity.deleteMany({ _id: { $in: activityIds } }).catch(() => {});
+                    }
+                    if (rollback) {
+                        const filter = { _id: rollback.leadId };
+                        Object.entries(rollback.after).forEach(([field, value]) => {
+                            filter[field] = value;
+                        });
+                        const set = {};
+                        const unset = {};
+                        Object.entries(rollback.values).forEach(([field, value]) => {
+                            if (value === undefined) unset[field] = "";
+                            else set[field] = value;
+                        });
+                        if (rollback.updatedAt === undefined) unset.updatedAt = "";
+                        else set.updatedAt = rollback.updatedAt;
+                        await Lead.collection.updateOne(
+                            filter,
+                            {
+                                ...(Object.keys(set).length ? { $set: set } : {}),
+                                ...(Object.keys(unset).length ? { $unset: unset } : {}),
+                            }
+                        ).catch(() => {});
+                    }
+                }
+                throw error;
+            } finally {
+                if (!activeSession && fallbackLock && !completed) {
+                    const rowPath = `duplicates.${fallbackLock.rowIndex}`;
+                    await LeadUpload.collection.updateOne(
+                        { _id: fallbackLock.uploadId, [`${rowPath}.mergeLock`]: fallbackLock.token },
+                        { $unset: { [`${rowPath}.mergeLock`]: "", [`${rowPath}.mergeLockAt`]: "" } }
+                    ).catch(() => {});
+                }
+            }
+        };
+
+        let merged;
+        const supportsTransactions = await crmSupportsTransactions(Lead);
+        if (supportsTransactions) {
+            session = await Lead.db.startSession();
+            await session.withTransaction(async () => {
+                merged = await performMerge(session);
+            });
+        } else {
+            // Local standalone fallback: lock this one duplicate row before changing the lead.
+            const upload = await LeadUpload.findById(req.params.id).lean();
+            if (!upload) throw fail(404, "Upload not found");
+            if (upload.deletedAt) throw fail(400, "This upload was removed. Its duplicates cannot be merged.");
+            const rows = rowsOf(upload);
+            const rowIndex = rows.findIndex((row) => String(row.key) === duplicateKey);
+            if (rowIndex < 0) throw fail(404, "Duplicate not found");
+            const row = rows[rowIndex];
+            if (row.acceptedLeadId) throw fail(409, "This duplicate was already added as a separate lead", "ALREADY_SORTED");
+            if (row.mergedAt) throw fail(409, "This duplicate was already merged", "ALREADY_MERGED");
+
+            const token = new mongoose.Types.ObjectId().toString();
+            const rowPath = `duplicates.${rowIndex}`;
+            const stale = new Date(Date.now() - 5 * 60 * 1000);
+            const locked = await LeadUpload.collection.updateOne(
+                {
+                    _id: upload._id,
+                    [`${rowPath}.acceptedLeadId`]: { $in: [null, ""] },
+                    [`${rowPath}.mergedAt`]: { $in: [null, ""] },
+                    $or: [
+                        { [`${rowPath}.mergeLock`]: { $exists: false } },
+                        { [`${rowPath}.mergeLock`]: null },
+                        { [`${rowPath}.mergeLockAt`]: { $lt: stale } },
+                    ],
+                },
+                {
+                    $set: {
+                        [`${rowPath}.mergeLock`]: token,
+                        [`${rowPath}.mergeLockAt`]: new Date(),
+                    },
+                }
+            );
+            if (locked.modifiedCount !== 1) {
+                throw fail(409, "Another merge is already working on this duplicate", "MERGE_BUSY");
+            }
+            merged = await performMerge(null, { token, rowIndex, uploadId: upload._id });
+        }
+
+        const mergedStatus = merged.changes.find((change) => change.field === "status");
+        if (
+            merged.ownerId
+            && mergedStatus
+            && isNewStatus(mergedStatus.before)
+            && !isNewStatus(mergedStatus.after)
+        ) {
+            refillOwners([merged.ownerId], req.user).catch((error) => {
+                console.error("Post-merge lead refill failed:", error);
+            });
+        }
+
+        return res.json({
+            success: true,
+            msg: merged.changes.length
+                ? `${merged.changes.length} field${merged.changes.length === 1 ? "" : "s"} merged into the saved lead`
+                : "Duplicate resolved; the saved lead already had all values",
+            data: merged,
+        });
+    } catch (err) {
+        const status = Number(err.status) || 500;
+        if (status >= 500) console.error("Error merging upload duplicate:", err);
+        return res.status(status).json({
+            success: false,
+            msg: status === 500 ? "Could not merge this duplicate" : err.message,
+            ...(err.code ? { code: err.code } : {}),
+            ...(err.details ? err.details : {}),
+        });
+    } finally {
+        if (session) await session.endSession().catch(() => {});
     }
 };
 

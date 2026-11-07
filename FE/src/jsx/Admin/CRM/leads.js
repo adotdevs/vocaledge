@@ -195,6 +195,7 @@ const AVAILABLE_FIELDS = [
 
 // Enhanced Create Lead Dialog Component - Memoized for performance
 const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUser, allowCsvUpload, allowManageStatuses, allowViewSource = false, allowViewBrand = false, allowViewFileName = false }) => {
+    const navigate = useNavigate();
     const leadFields = AVAILABLE_FIELDS.filter((field) => {
         if (field.key === 'source' && !allowViewSource) return false;
         if (field.key === 'Brand' && !allowViewBrand) return false;
@@ -230,6 +231,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
     const [uploadedLeadIds, setUploadedLeadIds] = useState([]);
     const [selectedFields, setSelectedFields] = useState({});
     const [uploading, setUploading] = useState(false);
+    const [completedUpload, setCompletedUpload] = useState(null);
     const [creating, setCreating] = useState(false);
     const [mappingComplete, setMappingComplete] = useState(false);
     const [selectedAgentId, setSelectedAgentId] = useState("");
@@ -513,6 +515,9 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                         isUploading: true
                     });
                 } else if (eventData.type === 'complete') {
+                    const reviewDuplicates = eventData.data.skipped > 0
+                        && eventData.data.uploadId
+                        && currentUser?.user?.role === "superadmin";
                     setUploadProgress({
                         total: eventData.data.processed + eventData.data.skipped,
                         uploaded: eventData.data.processed,
@@ -521,6 +526,10 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                         percentage: 100,
                         isUploading: false
                     });
+                    setCompletedUpload(reviewDuplicates ? {
+                        uploadId: eventData.data.uploadId,
+                        duplicates: eventData.data.skipped,
+                    } : null);
 
                     toast.success(eventData.msg);
 
@@ -540,18 +549,21 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                         setUploadedLeadIds(eventData.data.leadIds || []);
                     }
 
-                    // Wait a bit to show 100% completion
-                    setTimeout(() => {
-                        onLeadCreated();
+                    onLeadCreated();
 
-                        // If call after upload is enabled, initiate bulk calls
-                        if (callAfterUpload && eventData.data.processed > 0) {
-                            handleBulkCallAfterUpload(eventData.data.leadIds || []);
-                        }
+                    // If call after upload is enabled, initiate bulk calls
+                    if (callAfterUpload && eventData.data.processed > 0) {
+                        handleBulkCallAfterUpload(eventData.data.leadIds || []);
+                    }
 
-                        onClose();
-                        resetForm();
-                    }, 1500);
+                    // Keep the dialog open when duplicates need review, with a direct link
+                    // to the safe merge timeline. Otherwise preserve the quick auto-close.
+                    if (!reviewDuplicates) {
+                        setTimeout(() => {
+                            onClose();
+                            resetForm();
+                        }, 1500);
+                    }
                 } else if (eventData.type === 'error') {
                     // Stop upload immediately on error
                     setUploading(false);
@@ -611,6 +623,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
         setCallAfterUpload(false);
         setAddPhonePlusPrefix(false);
         setUploadedLeadIds([]);
+        setCompletedUpload(null);
         setManualForm({
             firstName: "",
             lastName: "",
@@ -707,6 +720,8 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
         </Box>
     );
 
+    const uploadCompleted = uploadProgress.percentage === 100 && !uploadProgress.isUploading;
+
     return (
         <Dialog
             open={open}
@@ -717,7 +732,9 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
         >
             <DialogTitle>
                 <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Typography variant="h6">Create New Lead</Typography>
+                    <Typography variant="h6">
+                        {uploadCompleted ? "Upload complete" : "Create New Lead"}
+                    </Typography>
                     <IconButton onClick={handleClose}>
                         <Close />
                     </IconButton>
@@ -1194,6 +1211,109 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                 This will import {csvPreview.length > 0 ? 'multiple' : 'all'} leads from the CSV file. Repeated rows in the file are kept. A row is skipped only when that email or phone is already in the system.
                                             </Alert>
                                         </>
+                                    ) : uploadCompleted ? (
+                                        <Box sx={{ py: { xs: 1, sm: 2 } }}>
+                                            <Box sx={{ textAlign: "center", mb: 3 }}>
+                                                <Box
+                                                    sx={{
+                                                        width: 64,
+                                                        height: 64,
+                                                        mx: "auto",
+                                                        mb: 1.5,
+                                                        borderRadius: "50%",
+                                                        display: "grid",
+                                                        placeItems: "center",
+                                                        bgcolor: "success.main",
+                                                        color: "success.contrastText",
+                                                    }}
+                                                >
+                                                    <CheckCircle sx={{ fontSize: 40 }} />
+                                                </Box>
+                                                <Typography variant="h5" fontWeight={800}>
+                                                    Leads uploaded successfully
+                                                </Typography>
+                                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                                    {csvFile?.name || "CSV file"} has finished processing.
+                                                </Typography>
+                                            </Box>
+
+                                            <Grid container spacing={2} sx={{ mb: 2.5 }}>
+                                                <Grid item xs={12} sm={4}>
+                                                    <Card variant="outlined" sx={{ height: "100%", borderColor: "success.main", bgcolor: "rgba(46, 125, 50, 0.07)" }}>
+                                                        <CardContent sx={{ textAlign: "center", py: 2, "&:last-child": { pb: 2 } }}>
+                                                            <Typography variant="h4" color="success.dark" fontWeight={800}>
+                                                                {uploadProgress.uploaded}
+                                                            </Typography>
+                                                            <Typography variant="body2" fontWeight={700}>
+                                                                Added to CRM
+                                                            </Typography>
+                                                        </CardContent>
+                                                    </Card>
+                                                </Grid>
+                                                <Grid item xs={12} sm={4}>
+                                                    <Card
+                                                        variant="outlined"
+                                                        sx={{
+                                                            height: "100%",
+                                                            borderColor: uploadProgress.skipped > 0 ? "warning.main" : "divider",
+                                                            bgcolor: uploadProgress.skipped > 0 ? "rgba(237, 108, 2, 0.07)" : "background.paper",
+                                                        }}
+                                                    >
+                                                        <CardContent sx={{ textAlign: "center", py: 2, "&:last-child": { pb: 2 } }}>
+                                                            <Typography variant="h4" color={uploadProgress.skipped > 0 ? "warning.dark" : "text.primary"} fontWeight={800}>
+                                                                {uploadProgress.skipped}
+                                                            </Typography>
+                                                            <Typography variant="body2" fontWeight={700}>
+                                                                Duplicates to review
+                                                            </Typography>
+                                                        </CardContent>
+                                                    </Card>
+                                                </Grid>
+                                                <Grid item xs={12} sm={4}>
+                                                    <Card variant="outlined" sx={{ height: "100%" }}>
+                                                        <CardContent sx={{ textAlign: "center", py: 2, "&:last-child": { pb: 2 } }}>
+                                                            <Typography variant="h4" fontWeight={800}>
+                                                                {uploadProgress.total}
+                                                            </Typography>
+                                                            <Typography variant="body2" fontWeight={700}>
+                                                                Rows processed
+                                                            </Typography>
+                                                        </CardContent>
+                                                    </Card>
+                                                </Grid>
+                                            </Grid>
+
+                                            {uploadProgress.skipped > 0 ? (
+                                                <Alert
+                                                    severity="warning"
+                                                    sx={{ alignItems: "center" }}
+                                                    action={completedUpload?.uploadId ? (
+                                                        <Button
+                                                            color="inherit"
+                                                            size="small"
+                                                            variant="outlined"
+                                                            onClick={() => {
+                                                                const id = completedUpload.uploadId;
+                                                                resetForm();
+                                                                onClose();
+                                                                navigate(`/admin/crm/upload-history/${id}`);
+                                                            }}
+                                                        >
+                                                            Review & merge
+                                                        </Button>
+                                                    ) : null}
+                                                >
+                                                    <strong>{uploadProgress.skipped} duplicate lead(s)</strong>{" "}
+                                                    {completedUpload?.uploadId
+                                                        ? "are ready to review. Merge selected values, add separately, or decline."
+                                                        : "were held back because their email or phone already exists. A superadmin can review them in Upload history."}
+                                                </Alert>
+                                            ) : (
+                                                <Alert severity="success">
+                                                    Every row was added. This window will close automatically.
+                                                </Alert>
+                                            )}
+                                        </Box>
                                     ) : (
                                         <Box>
                                             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1278,23 +1398,17 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                                     </Card>
                                                 </Grid>
                                             </Grid>
-
-                                            {uploadProgress.skipped > 0 && (
-                                                <Alert severity="warning" sx={{ mt: 2 }}>
-                                                    <strong>{uploadProgress.skipped} lead(s) skipped</strong> because that email or phone is already in the system. Repeated rows in this file were kept.
-                                                </Alert>
-                                            )}
-
-                                            {uploadProgress.percentage === 100 && (
-                                                <Alert severity="success" sx={{ mt: 2 }}>
-                                                    Upload completed successfully! {uploadProgress.uploaded} lead(s) added{uploadProgress.skipped > 0 ? `, ${uploadProgress.skipped} skipped` : ''}. The dialog will close automatically.
-                                                </Alert>
-                                            )}
                                         </Box>
                                     )}
                                 </Box>
                             )}
                             <Box sx={{ mt: 2 }}>
+                                {completedUpload?.uploadId ? (
+                                    <Button onClick={handleClose}>
+                                        Done
+                                    </Button>
+                                ) : (
+                                <>
                                 <Button
                                     onClick={handleBack}
                                     sx={{ mr: 1 }}
@@ -1309,11 +1423,13 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                 >
                                     {creating || uploading || uploadProgress.isUploading ? <CircularProgress size={24} /> : 'Submit'}
                                 </Button>
+                                </>
+                                )}
                             </Box>
                         </StepContent>
                     </Step>
                 </Stepper>
-                {(currentUser?.user?.role === 'superadmin' || currentUser?.user?.role === 'manager') && (
+                {!uploadCompleted && (currentUser?.user?.role === 'superadmin' || currentUser?.user?.role === 'manager') && (
                     <Box sx={{ mt: 2 }}>
                         <Typography variant="subtitle2" gutterBottom>
                             {currentUser?.user?.role === 'manager' ? 'Assign to Admin' : 'Assign to Agent'}

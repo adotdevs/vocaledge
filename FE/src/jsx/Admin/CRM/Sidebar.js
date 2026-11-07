@@ -171,9 +171,9 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
 
     if (!canManageReminders) return undefined;
 
-    fetchReminderBadge();
-    const interval = setInterval(fetchReminderBadge, 60000);
-    return () => clearInterval(interval);
+      fetchReminderBadge();
+      const interval = setInterval(fetchReminderBadge, 60000);
+      return () => clearInterval(interval);
   }, [canManageReminders]);
 
   // ✅ Socket.io for real-time email queue updates
@@ -257,20 +257,20 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
     menuItems.push({ icon: <People />, label: 'Leads', link: "/admin/dashboard/crm" });
     menuItems.push({ icon: <Assessment />, label: 'Statistics', link: '/admin/crm/list-statistics' });
     if (can('canManageReminders')) {
-      menuItems.push({
-        icon: <NotificationsActive />,
-        label: 'Reminders',
-        link: '/admin/crm/reminders',
-        badge: true,
-        badgeCount: reminderBadgeCount,
-      });
+    menuItems.push({
+      icon: <NotificationsActive />,
+      label: 'Reminders',
+      link: '/admin/crm/reminders',
+      badge: true,
+      badgeCount: reminderBadgeCount,
+    });
     }
     if (can('canManageDocuments')) {
-      menuItems.push({
-        icon: <FolderOpen />,
-        label: 'Document Library',
-        link: '/admin/crm/documents',
-      });
+    menuItems.push({
+      icon: <FolderOpen />,
+      label: 'Document Library',
+      link: '/admin/crm/documents',
+    });
     }
   }
 
@@ -605,13 +605,13 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                         const active = location.pathname.includes(String(chat._id));
                         return (
                           <ListItem key={chat._id} disablePadding sx={{ mb: 0.25 }}>
-                            <ListItemButton
+                          <ListItemButton
                               data-sidebar-active={active ? "true" : undefined}
-                              component={Link}
+                            component={Link}
                               to={href}
-                              onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}
-                              sx={{
-                                borderRadius: 2,
+                            onClick={() => isMobile && setMobileMenuState && setMobileMenuState(false)}
+                            sx={{
+                              borderRadius: 2,
                                 alignItems: 'flex-start',
                                 py: 0.75,
                                 px: 1.25,
@@ -631,10 +631,10 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                                   {preview}
                                 </Typography>
                               </Box>
-                            </ListItemButton>
-                          </ListItem>
-                        );
-                      })}
+                              </ListItemButton>
+                            </ListItem>
+                          );
+                        })}
                       <Box sx={{ px: 1, pt: 1 }}>
                         <Button
                           component={Link}
@@ -649,8 +649,8 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                           Open all chats
                         </Button>
                       </Box>
-                    </List>
-                  </Collapse>
+                      </List>
+                    </Collapse>
                 )}
 
                 {/* Call Dashboard Dropdown Menu - Inserted after first item (Leads) */}
@@ -813,7 +813,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
           >
             {`${user()?.user?.firstName?.[0] || ""}${user()?.user?.lastName?.[0] || ""}`.toUpperCase() || 'A'}
           </Avatar>
-          {!isCollapsed && (
+      {!isCollapsed && (
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }} noWrap>
                 {user()?.user?.firstName}{" "}{user()?.user?.lastName}
