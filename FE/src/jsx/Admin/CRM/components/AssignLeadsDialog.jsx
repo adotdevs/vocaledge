@@ -16,6 +16,7 @@ import {
     MenuItem,
     Chip,
     Select,
+    TextField,
     Typography,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
@@ -61,6 +62,15 @@ function Dot() {
                 flexShrink: 0,
                 transform: "translateY(-2px)",
             }}
+        />
+    );
+}
+
+function StatusDot({ color }) {
+    return (
+        <Box
+            component="span"
+            sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: color, display: "inline-block", flexShrink: 0 }}
         />
     );
 }
@@ -535,12 +545,9 @@ export default function AssignLeadsDialog({
     }
     const nothingToAssign = Boolean(shown) && shown.assigned === 0;
     const canAssign = Boolean(chosen) && total > 0 && !assigning && !checkError && !(skip && checking) && !nothingToAssign;
-    const assignCountLabel = shown
-        ? `Assign ${leadsText(shown.assigned)}`
+    const assignLabel = shown
+        ? (shown.assigned > 0 ? `Assign ${leadsText(shown.assigned)}` : "Nothing to assign")
         : (!skip && chosen ? `Assign ${leadsText(total)}` : "Assign");
-    const assignLabel = finalStatus && assignCountLabel !== "Assign"
-        ? `${assignCountLabel} as ${finalStatus}`
-        : assignCountLabel;
     const statusSummary = ownersNow?.data?.statusSummary || [];
 
     const handleSendBack = async (branch) => {
@@ -762,25 +769,6 @@ export default function AssignLeadsDialog({
                                 </Alert>
                             )}
 
-                            {chosen && (
-                                <FormControl fullWidth size="small">
-                                    <InputLabel id="assign-final-status-label">Final status</InputLabel>
-                                    <Select
-                                        labelId="assign-final-status-label"
-                                        label="Final status"
-                                        value={finalStatus}
-                                        onChange={(event) => setFinalStatus(event.target.value)}
-                                        sx={{ cursor: "pointer" }}
-                                    >
-                                        <MenuItem value="">Keep current status</MenuItem>
-                                        {statusOptions.map((status) => (
-                                            <MenuItem key={status._id || status.label} value={status.label} sx={{ cursor: "pointer" }}>
-                                                {status.label}
-                                            </MenuItem>
-                                        ))}
-                                    </Select>
-                                </FormControl>
-                            )}
                             {chosen && finalStatus && (
                                 <Typography variant="body2" color="text.secondary">
                                     Leads that are assigned will be set to {finalStatus}. Leads that stay behind keep their status.
@@ -791,19 +779,62 @@ export default function AssignLeadsDialog({
                 </Box>
             </DialogContent>
 
-            <DialogActions sx={{ px: 3, pb: 2.5, pt: 1 }}>
+            <DialogActions sx={{ px: 3, pb: 2.5, pt: 1.5, gap: 1.5, flexWrap: "wrap" }}>
                 {summary ? (
                     <Button variant="contained" onClick={onClose}>
                         Done
                     </Button>
                 ) : (
                     <>
-                        <Button onClick={handleClose} disabled={assigning}>
-                            Cancel
-                        </Button>
-                        <Button variant="contained" onClick={handleAssign} disabled={!canAssign}>
-                            {assigning ? <CircularProgress size={22} color="inherit" /> : assignLabel}
-                        </Button>
+                        <Box sx={{ flex: "1 1 220px", minWidth: 200, maxWidth: 320, mr: "auto" }}>
+                            {chosen && (
+                                <TextField
+                                    select
+                                    fullWidth
+                                    size="small"
+                                    label="Set status (optional)"
+                                    value={finalStatus}
+                                    onChange={(event) => setFinalStatus(event.target.value)}
+                                    disabled={assigning}
+                                    InputLabelProps={{ shrink: true }}
+                                    SelectProps={{
+                                        displayEmpty: true,
+                                        renderValue: (value) => value ? (
+                                            <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
+                                                <StatusDot color={getStatusColor(value, statusOptions)} />
+                                                {value}
+                                            </Box>
+                                        ) : (
+                                            <Box component="span" sx={{ color: "text.secondary" }}>
+                                                Keep current status
+                                            </Box>
+                                        ),
+                                        MenuProps: { PaperProps: { sx: { maxHeight: 320 } } },
+                                    }}
+                                    sx={{ "& .MuiSelect-select": { cursor: "pointer" } }}
+                                >
+                                    <MenuItem value="" sx={{ cursor: "pointer" }}>
+                                        Keep current status
+                                    </MenuItem>
+                                    {statusOptions.map((status) => (
+                                        <MenuItem key={status._id || status.label} value={status.label} sx={{ cursor: "pointer" }}>
+                                            <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
+                                                <StatusDot color={getStatusColor(status, statusOptions)} />
+                                                {status.label}
+                                            </Box>
+                                        </MenuItem>
+                                    ))}
+                                </TextField>
+                            )}
+                        </Box>
+                        <Box sx={{ display: "flex", gap: 1, ml: "auto" }}>
+                            <Button onClick={handleClose} disabled={assigning}>
+                                Cancel
+                            </Button>
+                            <Button variant="contained" onClick={handleAssign} disabled={!canAssign}>
+                                {assigning ? <CircularProgress size={22} color="inherit" /> : assignLabel}
+                            </Button>
+                        </Box>
                     </>
                 )}
             </DialogActions>
