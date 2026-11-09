@@ -29,6 +29,7 @@ import {
   Tabs,
   TextField,
   Toolbar,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import ArrowBack from "@mui/icons-material/ArrowBack";
@@ -68,6 +69,28 @@ const text = (value) => {
 };
 
 const personName = (row) => `${row?.firstName || ""} ${row?.lastName || ""}`.trim();
+
+const rowBtnSx = {
+  px: 1.25,
+  py: 0.45,
+  fontSize: 13,
+  fontWeight: 700,
+  lineHeight: 1.4,
+  textTransform: "none",
+  whiteSpace: "nowrap",
+  borderRadius: 1.5,
+};
+
+const DETAIL_RETENTION_DAYS = 30;
+
+const isSystemCleared = (upload) => String(upload?.detailsClearedBy?.userRole || "").toLowerCase() === "system";
+
+const retentionDaysLeft = (createdAt) => {
+  if (!createdAt) return DETAIL_RETENTION_DAYS;
+  const created = new Date(createdAt).getTime();
+  if (Number.isNaN(created)) return DETAIL_RETENTION_DAYS;
+  return Math.max(0, DETAIL_RETENTION_DAYS - Math.floor((Date.now() - created) / (24 * 60 * 60 * 1000)));
+};
 
 const PageBar = ({ count, page, total = 0, pageSize = 10, shown = 0, onChange }) => {
   if (!total) return null;
@@ -491,6 +514,7 @@ const UploadHistory = () => {
   const somePageSelected = !allPendingSelected && selectedOnPage.length > 0 && !allPageSelected;
   const mergeRows = mergeTarget ? mergeFieldRows(mergeTarget) : [];
   const selectedMergeRows = mergeRows.filter((field) => mergeFields.includes(field.key));
+  const detailDaysLeft = detail ? retentionDaysLeft(detail.createdAt) : DETAIL_RETENTION_DAYS;
 
   return (
     <Box sx={{ display: "block", minHeight: "100vh", bgcolor: "background.default" }}>
@@ -526,7 +550,9 @@ const UploadHistory = () => {
               <Box>
                 <Typography variant="h5" fontWeight={800} color="text.primary">Upload history</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {uploadId ? (detail?.fileName || "Upload") : "Every CSV upload, the leads it added, and the duplicates held back"}
+                  {uploadId
+                    ? (detail?.fileName || "Upload")
+                    : "Every CSV upload, the leads it added, and the duplicates held back. Duplicate review is kept for 30 days, then cleared automatically."}
                 </Typography>
               </Box>
             </Box>
@@ -537,6 +563,9 @@ const UploadHistory = () => {
         <Box sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 2, sm: 3 }, pt: 0, flex: 1, minHeight: 0, overflowY: "auto" }}>
           {!uploadId && (
             <>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Duplicate review rows are kept for 30 days from the upload date. A weekly Sunday cleanup then removes them so only filename, date, uploader, and counts remain. Uploaded leads are not deleted.
+              </Alert>
               <Card elevation={0} sx={{ mb: 2, borderRadius: 3, border: 1, borderColor: "divider" }}>
                 <CardContent sx={{ display: "flex", gap: 1.5, alignItems: "center", flexWrap: "wrap" }}>
                   <TextField
@@ -604,52 +633,64 @@ const UploadHistory = () => {
                               {upload.deletedAt ? (
                                 <Chip size="small" color="error" label={`Removed ${when(upload.deletedAt)}`} />
                               ) : (
-                                <Chip size="small" color="success" variant="outlined" label="Active" />
+                                <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+                                  <Chip size="small" color="success" variant="outlined" label="Active" />
+                                  {upload.detailsClearedAt && (
+                                    <Chip
+                                      size="small"
+                                      label={isSystemCleared(upload) ? "Auto-cleared after 30 days" : "Details cleared"}
+                                    />
+                                  )}
+                                </Box>
                               )}
                             </TableCell>
-                            <TableCell align="right">
-                              <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, flexWrap: "wrap" }}>
-                                {!upload.deletedAt && (upload.duplicateCount ?? upload.skippedCount ?? 0) > 0 && (
+                            <TableCell align="right" sx={{ py: 0.75 }}>
+                              {!upload.deletedAt && (
+                                <Box sx={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
+                                  {!upload.detailsClearedAt && (upload.duplicateCount ?? upload.skippedCount ?? 0) > 0 && (
+                                    <Button
+                                      color="success"
+                                      variant="outlined"
+                                      size="small"
+                                      sx={rowBtnSx}
+                                      startIcon={<MergeType />}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        navigate(`/admin/crm/upload-history/${upload._id}`);
+                                      }}
+                                    >
+                                      Merge
+                                    </Button>
+                                  )}
                                   <Button
-                                    color="success"
-                                    variant="outlined"
+                                    variant="contained"
                                     size="small"
-                                    startIcon={<MergeType />}
+                                    sx={rowBtnSx}
+                                    startIcon={<History />}
                                     onClick={(event) => {
                                       event.stopPropagation();
                                       navigate(`/admin/crm/upload-history/${upload._id}`);
                                     }}
                                   >
-                                    Merge duplicates
+                                    {upload.detailsClearedAt ? "Summary" : "Open"}
                                   </Button>
-                                )}
-                                {!upload.deletedAt && (
-                                <Button
-                                  variant="contained"
-                                  size="small"
-                                  startIcon={<History />}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    navigate(`/admin/crm/upload-history/${upload._id}`);
-                                  }}
-                                >
-                                  View history
-                                </Button>
-                                )}
-                                {!upload.deletedAt && (
-                                  <Button
-                                    color="error"
-                                    size="small"
-                                    startIcon={<DeleteOutline />}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setConfirmDelete(upload);
-                                    }}
-                                  >
-                                    Delete permanently
-                                  </Button>
-                                )}
-                              </Box>
+                                  <Tooltip title="Permanently deletes leads added by this file.">
+                                    <Button
+                                      color="error"
+                                      variant="outlined"
+                                      size="small"
+                                      sx={rowBtnSx}
+                                      startIcon={<DeleteOutline />}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setConfirmDelete(upload);
+                                      }}
+                                    >
+                                      Delete leads
+                                    </Button>
+                                  </Tooltip>
+                                </Box>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -690,12 +731,36 @@ const UploadHistory = () => {
                     </Typography>
                   </Box>
                   {!detail.deletedAt && (
-                    <Button color="error" variant="outlined" startIcon={<DeleteOutline />} onClick={() => setConfirmDelete(detail)}>
-                      Delete permanently
-                    </Button>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
+                      <Tooltip title="Permanently deletes leads added by this file.">
+                        <Button color="error" variant="outlined" size="small" sx={rowBtnSx} startIcon={<DeleteOutline />} onClick={() => setConfirmDelete(detail)}>
+                          Delete leads
+                        </Button>
+                      </Tooltip>
+                    </Box>
                   )}
                 </CardContent>
               </Card>
+
+              {detail.detailsClearedAt ? (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  {isSystemCleared(detail)
+                    ? `Duplicate review was cleared automatically after 30 days on ${when(detail.detailsClearedAt)}.`
+                    : `Detailed duplicate rows were cleared on ${when(detail.detailsClearedAt)}.`}
+                  {" "}All uploaded leads were kept; filename, uploader, date, and summary counts remain.
+                  {detail.clearedPendingCount > 0
+                    ? ` ${detail.clearedPendingCount} unresolved duplicate record${detail.clearedPendingCount === 1 ? " was" : "s were"} discarded.`
+                    : ""}
+                </Alert>
+              ) : (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Duplicate review for this upload is kept for 30 days from {when(detail.createdAt)}.
+                  {detailDaysLeft > 0
+                    ? ` About ${detailDaysLeft} day${detailDaysLeft === 1 ? "" : "s"} remain before the weekly auto-clear.`
+                    : " It is due on the next weekly Sunday cleanup."}
+                  {" "}Uploaded leads stay.
+                </Alert>
+              )}
 
               <Card elevation={0} sx={{ borderRadius: 3, border: 1, borderColor: "divider", overflow: "visible" }}>
                 <Tabs
@@ -856,7 +921,9 @@ const UploadHistory = () => {
                     </Box>
                     {duplicates.rows.length === 0 && (
                       <Typography color="text.secondary" sx={{ py: 3 }}>
-                        {(detail.duplicateCount || detail.skippedCount) && !duplicates.pending && !duplicates.accepted && !duplicates.declined
+                        {detail.detailsClearedAt
+                          ? "Detailed duplicate records were cleared. Summary counts and uploaded leads are still available."
+                          : (detail.duplicateCount || detail.skippedCount) && !duplicates.pending && !duplicates.accepted && !duplicates.declined
                           ? "This upload was saved before duplicate names were kept, so these people cannot be compared."
                           : tab === "accepted"
                             ? "No duplicates have been added as new leads."
@@ -1291,15 +1358,15 @@ const UploadHistory = () => {
       </Dialog>
 
       <Dialog open={Boolean(confirmDelete)} onClose={() => setConfirmDelete(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete uploaded leads</DialogTitle>
+        <DialogTitle>Delete this file’s leads</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            Permanently delete every lead added by {confirmDelete?.fileName || "this file"}, including duplicates you added from it. They will not go to the recycle bin. Leads that were already saved before this upload are not deleted.
+            This permanently deletes every lead added by {confirmDelete?.fileName || "this file"}, including duplicates you added from it. They will not go to the recycle bin. Leads that were already saved before this upload are not deleted.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
-          <Button color="error" variant="contained" onClick={removeUpload} disabled={deleting}>Delete permanently</Button>
+          <Button color="error" variant="contained" onClick={removeUpload} disabled={deleting}>Delete leads</Button>
         </DialogActions>
       </Dialog>
     </Box>

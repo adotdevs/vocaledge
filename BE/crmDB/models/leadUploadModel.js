@@ -13,12 +13,17 @@ const leadUploadSchema = new mongoose.Schema({
   declinedCount: { type: Number, default: 0 },
   mergedCount: { type: Number, default: 0 },
   duplicates: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  detailsClearedAt: { type: Date, default: null },
+  detailsClearedBy: { type: mongoose.Schema.Types.Mixed, default: null },
+  clearedDuplicateCount: { type: Number, default: 0 },
+  clearedPendingCount: { type: Number, default: 0 },
   deletedAt: { type: Date, default: null },
   deletedCount: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
 });
 
 leadUploadSchema.index({ createdAt: -1 });
+leadUploadSchema.index({ detailsClearedAt: 1, createdAt: 1 });
 
 const getLeadUploadModel = async () => {
   const crmDB = await connectCRMDatabase();

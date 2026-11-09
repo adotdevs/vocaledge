@@ -17,6 +17,7 @@ const { addCustomerSearch, applyCustomerFilters, normalizeCustomerFields, bodyHa
 const { isNewStatus, refillOwners, refillAllEligibleAgents, listRequestCanRefill, ownerIdOf, userCanOpenCrm, refillIfEmpty } = require('../utils/leadRefill');
 const { stampLeadNumbers } = require('../utils/leadNumber');
 const { MERGE_FIELDS, buildLeadMergePlan, findMergeConflicts, selectedMergeFields, valuesMatch } = require('../utils/leadMerge');
+const { clearLeadUploadDetailsDocument } = require('../utils/leadUploadRetention');
 
 const hidePrivateLeadFields = (lead, user) => {
   if (!lead) return lead;
@@ -2622,10 +2623,17 @@ exports.getLeadUpload = async (req, res) => {
             ...row,
             key: row.key || String(index),
         }));
-        const merged = duplicates.filter((row) => row.mergedAt).length;
-        const accepted = duplicates.filter((row) => row.acceptedLeadId && !row.mergedAt).length;
-        const declined = duplicates.filter((row) => row.declinedAt && !row.acceptedLeadId && !row.mergedAt).length;
-        const pending = duplicates.length - accepted - declined - merged;
+        const detailsCleared = Boolean(upload.detailsClearedAt);
+        const merged = detailsCleared
+            ? Number(upload.mergedCount) || 0
+            : duplicates.filter((row) => row.mergedAt).length;
+        const accepted = detailsCleared
+            ? Number(upload.acceptedCount) || 0
+            : duplicates.filter((row) => row.acceptedLeadId && !row.mergedAt).length;
+        const declined = detailsCleared
+            ? Number(upload.declinedCount) || 0
+            : duplicates.filter((row) => row.declinedAt && !row.acceptedLeadId && !row.mergedAt).length;
+        const pending = detailsCleared ? 0 : duplicates.length - accepted - declined - merged;
         const sortText = (row) => {
             if (duplicateSort === "email") return String(row.email || "").toLowerCase();
             if (duplicateSort === "phone") return String(row.phone || "");
@@ -2695,6 +2703,9 @@ exports.acceptLeadUploadDuplicates = async (req, res) => {
         if (!upload) return res.status(404).json({ success: false, msg: "Upload not found" });
         if (upload.deletedAt) {
             return res.status(400).json({ success: false, msg: "This upload was removed. Its duplicates cannot be accepted." });
+        }
+        if (upload.detailsClearedAt) {
+            return res.status(400).json({ success: false, msg: "Detailed duplicate history was cleared for this upload." });
         }
 
         const acceptAll = req.body?.all === true;
@@ -2809,6 +2820,9 @@ exports.declineLeadUploadDuplicates = async (req, res) => {
         const LeadUpload = await getLeadUploadModel();
         const upload = await LeadUpload.findById(req.params.id);
         if (!upload) return res.status(404).json({ success: false, msg: "Upload not found" });
+        if (upload.detailsClearedAt) {
+            return res.status(400).json({ success: false, msg: "Detailed duplicate history was cleared for this upload." });
+        }
 
         const declineAll = req.body?.all === true;
         const requested = Array.isArray(req.body?.keys) ? req.body.keys.map(String) : [];
@@ -2898,6 +2912,7 @@ exports.mergeLeadUploadDuplicate = async (req, res) => {
                 const upload = await withSession(LeadUpload.findById(req.params.id), activeSession);
                 if (!upload) throw fail(404, "Upload not found");
                 if (upload.deletedAt) throw fail(400, "This upload was removed. Its duplicates cannot be merged.");
+                if (upload.detailsClearedAt) throw fail(400, "Detailed duplicate history was cleared for this upload.");
 
                 const rows = rowsOf(upload);
                 const rowIndex = rows.findIndex((row) => String(row.key) === duplicateKey);
@@ -3167,6 +3182,7 @@ exports.mergeLeadUploadDuplicate = async (req, res) => {
             const upload = await LeadUpload.findById(req.params.id).lean();
             if (!upload) throw fail(404, "Upload not found");
             if (upload.deletedAt) throw fail(400, "This upload was removed. Its duplicates cannot be merged.");
+            if (upload.detailsClearedAt) throw fail(400, "Detailed duplicate history was cleared for this upload.");
             const rows = rowsOf(upload);
             const rowIndex = rows.findIndex((row) => String(row.key) === duplicateKey);
             if (rowIndex < 0) throw fail(404, "Duplicate not found");
@@ -3231,6 +3247,53 @@ exports.mergeLeadUploadDuplicate = async (req, res) => {
         });
     } finally {
         if (session) await session.endSession().catch(() => {});
+    }
+};
+
+// Clear only the heavy duplicate-review data. Uploaded leads and the summary stay.
+exports.clearLeadUploadDetails = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
+        const LeadUpload = await getLeadUploadModel();
+        const upload = await LeadUpload.findById(req.params.id).lean();
+        if (!upload) return res.status(404).json({ success: false, msg: "Upload not found" });
+        if (upload.detailsClearedAt) {
+            return res.json({
+                success: true,
+                alreadyCleared: true,
+                msg: "Upload details were already cleared",
+                data: {
+                    detailsClearedAt: upload.detailsClearedAt,
+                    clearedDuplicateCount: upload.clearedDuplicateCount || upload.duplicateCount || 0,
+                    clearedPendingCount: upload.clearedPendingCount || 0,
+                },
+            });
+        }
+
+        const actorName = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim() || "Super admin";
+        const result = await clearLeadUploadDetailsDocument(LeadUpload, upload, {
+            actor: {
+                userId: req.user._id,
+                userName: actorName,
+                userRole: req.user.role,
+            },
+        });
+        if (result.reason === "merge_running") {
+            return res.status(409).json({ success: false, msg: "A duplicate merge is still running. Wait for it to finish and try again." });
+        }
+        if (!result.cleared) {
+            return res.status(409).json({ success: false, msg: "Upload history changed. Refresh and try again." });
+        }
+
+        return res.json({
+            success: true,
+            msg: "Detailed upload history cleared. All leads were kept.",
+            data: result,
+        });
+    } catch (err) {
+        console.error("Error clearing upload details:", err);
+        return res.status(500).json({ success: false, msg: "Could not clear upload details" });
     }
 };
 

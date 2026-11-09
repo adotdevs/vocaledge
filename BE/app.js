@@ -51,6 +51,7 @@ app.use(cookieParser());
 
 const cron = require("node-cron");
 const getLeadModel = require("./crmDB/models/leadsModel");
+const { clearExpiredLeadUploadDetails } = require("./utils/leadUploadRetention");
 let ALLOWED_ORIGINS = [
   "https://vocaledge.io",
   "https://www.vocaledge.io",
@@ -365,6 +366,18 @@ cron.schedule("0 1 * * *", async () => { // daily at 01:00
     console.error("❌ Error purging deleted leads:", err);
   }
 });
+
+// Clear duplicate-review rows after 30 days. Upload timeline and uploaded leads stay.
+cron.schedule("0 2 * * 0", async () => { // weekly Sunday 02:00 Pakistan time
+  try {
+    const result = await clearExpiredLeadUploadDetails();
+    console.log(
+      `🧹 Upload detail retention: cleared ${result.cleared} of ${result.scanned} upload(s) older than ${result.retentionDays} days`
+    );
+  } catch (err) {
+    console.error("❌ Error clearing expired upload details:", err);
+  }
+}, { timezone: "Asia/Karachi" });
 
 
 
