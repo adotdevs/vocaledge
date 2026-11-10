@@ -5538,6 +5538,16 @@ const LeadsPage = () => {
                                                                                 >
                                                                                     Stream
                                                                                 </Button>
+                                                                                <Button
+                                                                                    size="small"
+                                                                                    variant="outlined"
+                                                                                    color="primary"
+                                                                                    startIcon={<Description />}
+                                                                                    onClick={() => navigate(`/admin/crm/document-repository?leadId=${lead._id}`)}
+                                                                                    sx={{ flex: { xs: '1 1 48%', sm: '0 0 auto' } }}
+                                                                                >
+                                                                                    Documents
+                                                                                </Button>
                                                                                 {canSendLeadEmail && lead.email && (
                                                                                     <Button
                                                                                         size="small"

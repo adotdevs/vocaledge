@@ -36,6 +36,7 @@ import {
   ExpandMore,
   NotificationsActive,
   FolderOpen,
+  Description,
   Assessment,
   Campaign,
   Forum,
@@ -265,6 +266,11 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
       badgeCount: reminderBadgeCount,
     });
     }
+    menuItems.push({
+      icon: <Description />,
+      label: 'Documents',
+      link: '/admin/crm/document-repository',
+    });
     if (can('canManageDocuments')) {
     menuItems.push({
       icon: <FolderOpen />,

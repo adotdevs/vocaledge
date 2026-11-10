@@ -28,6 +28,7 @@ import AdminManagementCRM from "../jsx/Admin/CRM/AdminManagement.jsx";
 import AIInstructions from "../jsx/Admin/CRM/AIInstructions.jsx";
 import Reminders from "../jsx/Admin/CRM/Reminders.jsx";
 import DocumentLibrary from "../jsx/Admin/CRM/DocumentLibrary.jsx";
+import DocumentRepository from "../jsx/Admin/CRM/DocumentRepository.jsx";
 import LeadListStatistics from "../jsx/Admin/CRM/LeadListStatistics.jsx";
 import AdminReminderNotifier from "../jsx/Admin/CRM/components/AdminReminderNotifier";
 import LeadShortageAlerts from "../jsx/Admin/CRM/components/LeadShortageAlerts";
@@ -233,6 +234,14 @@ export default function Router() {
               element={
                 <RequireAuth loginPath={"/auth/login/crm"}>
                   <DocumentLibrary />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/crm/document-repository"
+              element={
+                <RequireAuth loginPath={"/auth/login/crm"}>
+                  <DocumentRepository />
                 </RequireAuth>
               }
             />

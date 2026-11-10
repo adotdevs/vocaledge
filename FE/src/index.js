@@ -13,6 +13,12 @@ import ThemeContext from "./context/ThemeContext";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
 
+window.addEventListener("error", (event) => {
+  if (/ResizeObserver loop/.test(event?.message || "")) {
+    event.stopImmediatePropagation();
+  }
+}, true);
+
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <>

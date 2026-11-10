@@ -1018,6 +1018,23 @@ export const updateAiInstructionsApi = (data) => {
   return putSimpleApi(`/crm/ai-instructions`, data);
 };
 
+const docQuery = (params = {}) => {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== "")
+  ).toString();
+  return query ? `?${query}` : "";
+};
+
+export const getDocTemplatesApi = (params) => getApi(`/crm/doc-center/templates${docQuery(params)}`);
+export const getDocTemplateApi = (key) => getApi(`/crm/doc-center/templates/${key}`);
+export const searchDocClientsApi = (params) => getApi(`/crm/doc-center/clients${docQuery(params)}`);
+export const getDocHistoryApi = (params) => getApi(`/crm/doc-center/history${docQuery(params)}`);
+export const recordDocGenerationApi = (data) => postApi("/crm/doc-center/history", data);
+export const saveDocTemplateApi = (key, data) => (
+  key ? patchApi(`/crm/doc-center/templates/${key}`, data) : postApi("/crm/doc-center/templates", data)
+);
+export const removeDocTemplateApi = (key) => deleteApi(`/crm/doc-center/templates/${key}`);
+
 export const getCrmDocumentCategoriesApi = () => getApi('/crm/documents/categories');
 
 export const getCrmDocumentsApi = (params = {}) => {

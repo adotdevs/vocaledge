@@ -558,6 +558,67 @@ router.route('/crm/documents/:id/download').get(
 );
 
 const {
+  listDocTemplates,
+  getDocTemplate,
+  searchDocClients,
+  listDocHistory,
+  recordDocGeneration,
+  saveDocTemplate,
+  removeDocTemplate,
+} = require("../controllers/crmDocCenterController");
+
+const docCenterRoles = ["superadmin", "admin", "subadmin"];
+
+router.route("/crm/doc-center/templates").get(
+  isAuthorizedUser,
+  authorizedRoles(...docCenterRoles),
+  checkCrmAccess,
+  listDocTemplates
+);
+router.route("/crm/doc-center/templates").post(
+  isAuthorizedUser,
+  requireSuperAdmin,
+  checkCrmAccess,
+  saveDocTemplate
+);
+router.route("/crm/doc-center/clients").get(
+  isAuthorizedUser,
+  authorizedRoles(...docCenterRoles),
+  checkCrmAccess,
+  searchDocClients
+);
+router.route("/crm/doc-center/history").get(
+  isAuthorizedUser,
+  authorizedRoles(...docCenterRoles),
+  checkCrmAccess,
+  listDocHistory
+);
+router.route("/crm/doc-center/history").post(
+  isAuthorizedUser,
+  authorizedRoles(...docCenterRoles),
+  checkCrmAccess,
+  recordDocGeneration
+);
+router.route("/crm/doc-center/templates/:key").get(
+  isAuthorizedUser,
+  authorizedRoles(...docCenterRoles),
+  checkCrmAccess,
+  getDocTemplate
+);
+router.route("/crm/doc-center/templates/:key").patch(
+  isAuthorizedUser,
+  requireSuperAdmin,
+  checkCrmAccess,
+  saveDocTemplate
+);
+router.route("/crm/doc-center/templates/:key").delete(
+  isAuthorizedUser,
+  requireSuperAdmin,
+  checkCrmAccess,
+  removeDocTemplate
+);
+
+const {
   chatAgents,
   chatStream,
   chatTyping,

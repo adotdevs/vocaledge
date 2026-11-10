@@ -187,6 +187,8 @@ async function applyLeadVisibilityToQuery(query, user) {
     }
 }
 
+exports.applyLeadVisibilityToQuery = applyLeadVisibilityToQuery;
+
 let unassignedAgentsCache = null;
 let unassignedAgentsCacheAt = 0;
 const UNASSIGNED_CACHE_MS = 30 * 1000;

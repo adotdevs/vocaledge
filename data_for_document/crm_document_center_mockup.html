@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRM Document Center — UI Mockup</title>
+<style>
+:root{--navy:#172b4d;--blue:#3978d6;--bg:#f4f6fa;--line:#e2e7ef;--muted:#718096;--text:#263449;--white:#fff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font:14px/1.45 Inter,Arial,sans-serif;color:var(--text)}
+.topbar{background:var(--navy);color:white;padding:17px 26px;display:flex;align-items:center;gap:14px;box-shadow:0 2px 8px #14243b22}
+.brand{font-weight:750;letter-spacing:.04em}.topbar small{color:#c6d3e5}.spacer{flex:1}.avatar{border:1px solid #ffffff55;border-radius:50%;width:34px;height:34px;display:grid;place-items:center}
+main{max-width:1440px;margin:26px auto;padding:0 24px}.heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}.heading h1{font-size:22px;margin:0}.pill{font-size:11px;border-radius:20px;padding:4px 9px;background:#e8f1ff;color:#2864b2;font-weight:700}
+.toolbar{display:flex;gap:12px;align-items:center;margin-bottom:16px}.search{border:1px solid var(--line);border-radius:8px;padding:10px 13px;background:white;width:min(360px,100%);font:inherit}.templates{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:20px}
+.template{background:white;border:1px solid var(--line);border-radius:10px;padding:14px;text-align:left;cursor:pointer;transition:.15s}.template:hover{border-color:#9bb9e9}.template.active{border:1.5px solid var(--blue);background:#f5f9ff}.template .ico{font-size:22px;margin-bottom:7px}.template strong{display:block}.template small{color:var(--muted)}.template .pill{display:inline-block;margin-top:9px}
+.editor{display:grid;grid-template-columns:minmax(310px, .88fr) minmax(420px,1.12fr);gap:18px;align-items:start}
+.panel{background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden}.panelhead{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.panelhead h2{font-size:15px;margin:0}.panelbody{padding:18px}.section-title{font-weight:750;margin:0 0 5px}.hint{font-size:12px;color:var(--muted);margin:0 0 13px}.field{margin:12px 0}.field label{display:block;font-size:12px;font-weight:700;margin-bottom:6px}.field input,.field select,.field textarea{width:100%;border:1px solid #dce2eb;border-radius:7px;padding:10px 11px;font:inherit;background:#fff;color:var(--text)}.field textarea{min-height:70px;resize:vertical}.clientbox{background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:12px;margin-top:12px}.clientbox .pill{margin-bottom:8px;display:inline-block}.clientgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.divider{border:0;border-top:1px solid var(--line);margin:20px 0}.preview-wrap{background:#eef1f6;padding:20px;min-height:650px}.paper{background:#fff;max-width:650px;min-height:740px;margin:0 auto;padding:42px 46px;box-shadow:0 3px 16px #172b4d14;color:#27364a;font-family:Arial,sans-serif}.docbrand{text-align:center;color:var(--navy);font-size:21px;font-weight:800;letter-spacing:.04em}.docsub{text-align:center;color:#748197;font-size:10px;margin-top:3px}.docline{border:0;border-top:1px solid #d7dee8;margin:22px 0}.paper h2{text-align:center;font-size:19px;letter-spacing:.06em;margin:25px 0}.paper p,.paper div{font-size:12px;line-height:1.65}.paper h3{font-size:12px;margin:23px 0 8px}.details{display:grid;grid-template-columns:1fr 1fr;gap:7px 15px}.amount{display:flex;justify-content:space-between;border-bottom:1px solid #edf0f4;padding:7px 0}.signature{margin-top:45px}.docfooter{margin-top:60px;text-align:center;color:#9aa4b3;font-size:9px}
+.actions{display:flex;gap:9px;flex-wrap:wrap;padding:15px 18px;border-top:1px solid var(--line);background:#fcfdff}.btn{border:0;border-radius:7px;padding:10px 13px;font-weight:700;cursor:pointer;font:inherit;font-size:12px}.btn.primary{background:var(--blue);color:white}.btn.secondary{background:#edf2f8;color:#263449}.btn:hover{filter:brightness(.97)}.note{color:var(--muted);font-size:11px;margin-top:12px}
+@media(max-width:850px){.editor{grid-template-columns:1fr}.templates{grid-template-columns:repeat(2,minmax(0,1fr))}.preview-wrap{min-height:0}.paper{min-height:650px}}
+@media(max-width:520px){main{padding:0 12px;margin:18px auto}.topbar{padding:14px}.templates{grid-template-columns:1fr 1fr}.clientgrid{grid-template-columns:1fr}.paper{padding:28px 22px}.toolbar{align-items:stretch}.search{width:100%}}
+@media print{body{background:white}.topbar,main>.heading, .toolbar,.templates,.panel:first-child,.panelhead,.actions,.note{display:none!important}main{margin:0;padding:0}.editor{display:block}.panel{border:0}.preview-wrap{padding:0;background:white}.paper{box-shadow:none;max-width:none;min-height:0;margin:0;padding:20mm}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="brand">▦ CRM DOCUMENT CENTER</div><small>Document Repository / Document Generator</small><div class="spacer"></div><small>Online</small><div class="avatar">JS</div></header>
+<main>
+  <div class="heading"><h1>Document Repository</h1><span class="pill">4 TEMPLATES</span></div>
+  <div class="toolbar"><input class="search" id="search" placeholder="⌕  Search documents..." aria-label="Search documents"></div>
+  <section class="templates" id="templates">
+    <button class="template active" data-name="Funds Receipt"><div class="ico">📄</div><strong>Funds Receipt</strong><small>HTML Template</small><br><span class="pill">Selected</span></button>
+    <button class="template" data-name="Confirmation"><div class="ico">🗎</div><strong>Confirmation</strong><small>HTML Template</small></button>
+    <button class="template" data-name="Agreement"><div class="ico">🔒</div><strong>Agreement</strong><small>HTML Template</small></button>
+    <button class="template" data-name="Client Letter"><div class="ico">✉</div><strong>Client Letter</strong><small>HTML Template</small></button>
+  </section>
+  <section class="editor">
+    <div class="panel">
+      <div class="panelhead"><h2>Document Details & Inputs</h2><span class="pill">EDIT</span></div>
+      <div class="panelbody">
+        <p class="section-title">1. Select CRM Client</p><p class="hint">Associate this document with an existing CRM client.</p>
+        <div class="field"><label for="client">Search / select client</label><select id="client"><option value="john">John Smith</option><option value="sarah">Sarah Johnson</option><option value="michael">Michael Brown</option></select></div>
+        <div class="clientbox"><span class="pill">✓ CLIENT SELECTED</span><p class="hint">Example client details — automatically imported from CRM.</p>
+          <div class="field"><label for="name">Full Name</label><input id="name" value="John Smith"></div>
+          <div class="field"><label for="email">Email Address</label><input id="email" value="john@example.com"></div>
+          <div class="field"><label for="address">Address</label><input id="address" value="25 Oxford Street, London"></div>
+          <div class="field"><label for="phone">Phone Number</label><input id="phone" value="+44 7700 900000"></div>
+        </div>
+        <hr class="divider">
+        <p class="section-title">2. Additional Information</p><p class="hint">Fields can be configured separately for each HTML template.</p>
+        <div class="field"><label for="reference">Reference Number</label><input id="reference" value="REF-2026-001"></div>
+        <div class="field"><label for="amount">Transaction Amount</label><input id="amount" type="number" value="25000"></div>
+        <div class="field"><label for="currency">Currency</label><select id="currency"><option>EUR</option><option>GBP</option><option>USD</option></select></div>
+        <div class="field"><label for="date">Payment Date</label><input id="date" type="date" value="2026-11-04"></div>
+        <div class="field"><label for="notes">Additional Notes</label><textarea id="notes" placeholder="Enter additional information..."></textarea></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panelhead"><h2>3. Live Document Preview</h2><span class="pill" id="live">LIVE</span></div>
+      <div class="preview-wrap"><article class="paper" id="paper">
+        <div class="docbrand">COMPANY LOGO</div><div class="docsub">COMPANY NAME LTD.</div><hr class="docline">
+        <h2 id="docTitle">FUNDS RECEIPT</h2>
+        <p>Date: <span id="pdate">04 November 2026</span><br>Reference: <span id="preference">REF-2026-001</span></p>
+        <h3>CLIENT INFORMATION</h3>
+        <div class="details"><div>Name: <span id="pname">John Smith</span></div><div>Email: <span id="pemail">john@example.com</span></div><div>Address: <span id="paddress">25 Oxford Street, London</span></div><div>Phone: <span id="pphone">+44 7700 900000</span></div></div>
+        <hr class="docline"><h3>TRANSACTION DETAILS</h3>
+        <div class="amount"><span>Amount</span><strong><span id="pcurrency">EUR</span> <span id="pamount">25,000.00</span></strong></div>
+        <div class="amount"><span>Payment Date</span><strong id="pdate2">04 November 2026</strong></div>
+        <p style="margin-top:25px">Dear <span id="pname2">John Smith</span>,</p>
+        <p>This document confirms receipt of the funds specified above, subject to verification and the applicable terms.</p>
+        <p id="pnotes"></p>
+        <div class="signature">Authorized Signature:<br><br>____________________________</div>
+        <div class="docfooter">www.company.com &nbsp; | &nbsp; Confidential Document</div>
+      </article></div>
+      <div class="actions"><button class="btn primary" id="download">↓ Download HTML</button><button class="btn secondary" id="copy">▣ Copy HTML</button><button class="btn secondary" id="pdf">▤ Print / Save PDF</button></div>
+    </div>
+  </section>
+  <p class="note">Conceptual developer mockup. Sample data only. Client search, CRM integration, template storage and permissions require backend implementation.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const fields=['name','email','address','phone','reference','amount','currency','date','notes'];
+function safe(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function dateText(v){if(!v)return '';const d=new Date(v+'T12:00:00');return isNaN(d)?v:d.toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});}
+function update(){
+  $('pname').textContent=$('name').value;$('pname2').textContent=$('name').value;
+  $('pemail').textContent=$('email').value;$('paddress').textContent=$('address').value;$('pphone').textContent=$('phone').value;
+  $('preference').textContent=$('reference').value;$('pamount').textContent=Number($('amount').value||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  $('pcurrency').textContent=$('currency').value;$('pdate').textContent=dateText($('date').value);$('pdate2').textContent=dateText($('date').value);
+  $('pnotes').textContent=$('notes').value;
+}
+fields.forEach(id=>$(id).addEventListener('input',update));
+const clients={
+ john:{name:'John Smith',email:'john@example.com',address:'25 Oxford Street, London',phone:'+44 7700 900000'},
+ sarah:{name:'Sarah Johnson',email:'sarah@example.com',address:'10 King Street, Manchester',phone:'+44 7700 900111'},
+ michael:{name:'Michael Brown',email:'michael@example.com',address:'8 Queen Road, Birmingham',phone:'+44 7700 900222'}
+};
+$('client').addEventListener('change',e=>{Object.entries(clients[e.target.value]).forEach(([k,v])=>$(k).value=v);update();});
+document.querySelectorAll('.template').forEach(btn=>btn.addEventListener('click',()=>{
+ document.querySelectorAll('.template').forEach(x=>{x.classList.remove('active');x.querySelector('.pill')?.remove();});
+ btn.classList.add('active');const pill=document.createElement('span');pill.className='pill';pill.textContent='Selected';btn.append(document.createElement('br'),pill);
+ $('docTitle').textContent=btn.dataset.name.toUpperCase();
+}));
+$('search').addEventListener('input',e=>document.querySelectorAll('.template').forEach(t=>t.hidden=!t.dataset.name.toLowerCase().includes(e.target.value.toLowerCase())));
+function getHTML(){const clone=$('paper').cloneNode(true);const styles=[...document.querySelectorAll('style')].map(s=>s.innerHTML).join('\n');return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+safe($('docTitle').textContent)+'</title><style>'+styles+'body{background:white}.paper{box-shadow:none;margin:0 auto}</style></head><body>'+clone.outerHTML+'</body></html>';}
+$('download').addEventListener('click',()=>{const blob=new Blob([getHTML()],{type:'text/html;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='crm-document.html';a.click();URL.revokeObjectURL(url);});
+$('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(getHTML());$('copy').textContent='✓ Copied';setTimeout(()=>$('copy').textContent='▣ Copy HTML',1600);}catch(e){alert('Clipboard access is unavailable. Try downloading the HTML instead.');}});
+$('pdf').addEventListener('click',()=>window.print());
+update();
+</script>
+</body></html>
