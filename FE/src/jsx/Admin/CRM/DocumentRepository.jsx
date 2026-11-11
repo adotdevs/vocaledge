@@ -137,8 +137,10 @@ const HtmlFileIcon = ({ small = false }) => (
 );
 
 const DocumentRepository = () => {
-  const { role } = useLiveCrmUser();
-  const isSuperadmin = role === "superadmin";
+  const { can, ready } = useLiveCrmUser();
+  const canUse = can("canUseDocuments");
+  const canEdit = can("canEditDocuments");
+  const canDelete = can("canDeleteDocuments");
   const [params] = useSearchParams();
   const requestedLeadId = params.get("leadId") || "";
 
@@ -549,18 +551,22 @@ const DocumentRepository = () => {
       >
         Use template
       </Button>
-      {isSuperadmin && (
+      {(canEdit || canDelete) && (
         <>
+          {canEdit && (
           <Tooltip title="Edit template">
             <IconButton aria-label="Edit template" onClick={() => editTemplate(item)} sx={{ border: 1, borderColor: "divider", borderRadius: 2, width: 36, height: 36 }}>
               <EditOutlined sx={{ fontSize: 18 }} />
             </IconButton>
           </Tooltip>
+          )}
+          {canDelete && (
           <Tooltip title="Delete template">
             <IconButton aria-label="Delete template" onClick={() => setConfirmRemove(item)} sx={{ border: 1, borderColor: "rgba(211, 47, 47, 0.35)", borderRadius: 2, width: 36, height: 36, color: "error.main" }}>
               <DeleteOutline sx={{ fontSize: 18 }} />
             </IconButton>
           </Tooltip>
+          )}
         </>
       )}
     </Box>
@@ -604,13 +610,18 @@ const DocumentRepository = () => {
         </AppBar>
 
         <Box sx={{ px: { xs: 2, sm: 3 }, py: 2.5, flex: 1, minHeight: 0, overflowY: "auto" }}>
+          {ready && !canUse && (
+            <Alert severity="warning">You do not have permission to use documents. Ask a super admin to turn on Use documents.</Alert>
+          )}
+          {(!ready || canUse) && (
+          <>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, flexWrap: "wrap", mb: 2 }}>
             <Box>
               <Typography variant="caption" color="text.secondary" fontWeight={700} letterSpacing={0.6}>WORKSPACE / DOCUMENTS</Typography>
               <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>Document templates</Typography>
               <Typography variant="body2" color="text.secondary">Find the right template, choose a client, and get started.</Typography>
             </Box>
-            {isSuperadmin && (
+            {canEdit && (
               <Button variant="contained" startIcon={<Add />} onClick={() => openEditor(null)} sx={{ borderRadius: 2, textTransform: "none", fontWeight: 700 }}>
                 Add template
               </Button>
@@ -718,7 +729,7 @@ const DocumentRepository = () => {
                       </Box>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                         <Chip size="small" label="HTML" variant="outlined" sx={{ height: 22, fontSize: 11 }} />
-                        {isSuperadmin && (
+                        {canEdit && (
                           <IconButton size="small" aria-label="More template actions" onClick={(event) => setCardMenu({ el: event.currentTarget, item })}>
                             <MoreVert fontSize="small" />
                           </IconButton>
@@ -878,6 +889,8 @@ const DocumentRepository = () => {
                 </Box>
               </Card>
             </Box>
+          )}
+          </>
           )}
         </Box>
       </Box>

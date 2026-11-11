@@ -1,6 +1,6 @@
 let express = require("express");
 
-const { authorizedRoles, isAuthorizedUser, checkCrmAccess, requireSuperAdmin } = require("../middlewares/auth");
+const { authorizedRoles, isAuthorizedUser, checkCrmAccess, requireSuperAdmin, requireCrmPermission } = require("../middlewares/auth");
 
 const singleUpload = require("../middlewares/multer");
 const { uploadCSV, loginCRM, getLeads, exportLeads, createLead, importUsersAsLeads, deleteLead, deleteAllLeads, bulkDeleteLeads, editLead, assignLeadsToAgent, bulkUpdateLeadStatus, getDeletedLeads, restoreLead, hardDeleteLead, bulkRestoreLeads, bulkHardDeleteLeads, restoreAllLeads, hardDeleteAllLeads, createPublicLead, listLeadUploads, getLeadUpload, acceptLeadUploadDuplicates, declineLeadUploadDuplicates, mergeLeadUploadDuplicate, clearLeadUploadDetails, deleteLeadUpload, leadListStatistics, getLeadViewColumns, updateLeadViewColumns, getLeadAutomation, updateLeadAutomation, updateLeadAutomationAdmin, listLeadShortageAlerts, ignoreLeadShortageAlert, removeLeadBrand } = require("../controllers/crmController");
@@ -573,48 +573,56 @@ router.route("/crm/doc-center/templates").get(
   isAuthorizedUser,
   authorizedRoles(...docCenterRoles),
   checkCrmAccess,
+  requireCrmPermission("canUseDocuments"),
   listDocTemplates
 );
 router.route("/crm/doc-center/templates").post(
   isAuthorizedUser,
-  requireSuperAdmin,
+  authorizedRoles(...docCenterRoles),
   checkCrmAccess,
+  requireCrmPermission("canEditDocuments"),
   saveDocTemplate
 );
 router.route("/crm/doc-center/clients").get(
   isAuthorizedUser,
   authorizedRoles(...docCenterRoles),
   checkCrmAccess,
+  requireCrmPermission("canUseDocuments"),
   searchDocClients
 );
 router.route("/crm/doc-center/history").get(
   isAuthorizedUser,
   authorizedRoles(...docCenterRoles),
   checkCrmAccess,
+  requireCrmPermission("canUseDocuments"),
   listDocHistory
 );
 router.route("/crm/doc-center/history").post(
   isAuthorizedUser,
   authorizedRoles(...docCenterRoles),
   checkCrmAccess,
+  requireCrmPermission("canUseDocuments"),
   recordDocGeneration
 );
 router.route("/crm/doc-center/templates/:key").get(
   isAuthorizedUser,
   authorizedRoles(...docCenterRoles),
   checkCrmAccess,
+  requireCrmPermission("canUseDocuments"),
   getDocTemplate
 );
 router.route("/crm/doc-center/templates/:key").patch(
   isAuthorizedUser,
-  requireSuperAdmin,
+  authorizedRoles(...docCenterRoles),
   checkCrmAccess,
+  requireCrmPermission("canEditDocuments"),
   saveDocTemplate
 );
 router.route("/crm/doc-center/templates/:key").delete(
   isAuthorizedUser,
-  requireSuperAdmin,
+  authorizedRoles(...docCenterRoles),
   checkCrmAccess,
+  requireCrmPermission("canDeleteDocuments"),
   removeDocTemplate
 );
 

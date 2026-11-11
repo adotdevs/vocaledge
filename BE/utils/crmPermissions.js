@@ -1,4 +1,4 @@
-const DEFAULT_ON = new Set(["canCommentOnLeads", "canChangeLeadStatus"]);
+const DEFAULT_ON = new Set(["canCommentOnLeads", "canChangeLeadStatus", "canUseDocuments"]);
 const STREAM_LOG_TYPES = ["status_change", "assignment_change", "field_update", "created", "email_sent", "call_logged"];
 
 const isOn = (value) => value === true || value === "true";
@@ -15,6 +15,9 @@ const hasCrmPermission = (user, key) => {
   if (user.role === "superadmin") return true;
   if (user.role !== "admin" && user.role !== "subadmin" && user.role !== "manager") return false;
 
+  if ((key === "canEditDocuments" || key === "canDeleteDocuments") && !hasCrmPermission(user, "canUseDocuments")) {
+    return false;
+  }
   const value = permissionBag(user)[key];
   if (isOn(value)) return true;
   if (isOff(value)) return false;

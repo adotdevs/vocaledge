@@ -5538,6 +5538,7 @@ const LeadsPage = () => {
                                                                                 >
                                                                                     Stream
                                                                                 </Button>
+                                                                                {can('canUseDocuments') && (
                                                                                 <Button
                                                                                     size="small"
                                                                                     variant="outlined"
@@ -5548,6 +5549,7 @@ const LeadsPage = () => {
                                                                                 >
                                                                                     Documents
                                                                                 </Button>
+                                                                                )}
                                                                                 {canSendLeadEmail && lead.email && (
                                                                                     <Button
                                                                                         size="small"

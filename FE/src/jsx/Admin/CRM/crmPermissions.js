@@ -8,6 +8,9 @@ export const CRM_PERMISSIONS = [
   { key: "canViewLeadFileName", label: "See file name", detail: "Show the file name field on leads. Hidden until you turn it on.", group: "Leads", roles: ["admin", "subadmin"] },
   { key: "canViewStreamLogs", label: "See stream logs", detail: "See status, agent, field, email, and call changes on a lead stream. Hidden until you turn it on. Comments stay visible.", group: "Leads", roles: ["admin", "subadmin"] },
   { key: "canAccessChat", label: "Chat access", detail: "Send and receive messages with other agents. Hidden until you turn it on.", group: "Chat", roles: ["admin", "subadmin"] },
+  { key: "canUseDocuments", label: "Use documents", detail: "Open templates, fill a client, and copy, download, or create a PDF.", group: "Documents", roles: ["admin", "subadmin"], defaultOn: true },
+  { key: "canEditDocuments", label: "Edit documents", detail: "Add, edit, and duplicate document templates.", group: "Documents", roles: ["admin", "subadmin"] },
+  { key: "canDeleteDocuments", label: "Delete documents", detail: "Remove a document template from the library.", group: "Documents", roles: ["admin", "subadmin"] },
   { key: "canCreateLeads", label: "Create leads", detail: "Add one lead by hand.", group: "Leads", roles: ["admin", "subadmin"] },
   { key: "canUploadLeads", label: "Upload CSV", detail: "Import leads from a CSV file.", group: "Leads", roles: ["admin", "subadmin"] },
   { key: "canAssignLeads", label: "Assign leads", detail: "Assign selected leads to someone else.", group: "Leads", roles: ["admin", "subadmin"] },
@@ -19,7 +22,7 @@ export const CRM_PERMISSIONS = [
   { key: "canViewCallLogs", label: "Call logs", detail: "See the call history on a lead.", group: "Calls", roles: ["admin", "subadmin"] },
   { key: "canViewCallRecordings", label: "Call recordings", detail: "Play call recordings.", group: "Calls", roles: ["admin", "subadmin"] },
   { key: "canManageReminders", label: "Reminders", detail: "Open reminders and create them.", group: "Other", roles: ["admin", "subadmin"] },
-  { key: "canManageDocuments", label: "Documents", detail: "Open the document library and change files.", group: "Other", roles: ["admin", "subadmin"] },
+  { key: "canManageDocuments", label: "File library", detail: "Open the file library and upload or change PDFs and images.", group: "Other", roles: ["admin", "subadmin"] },
   { key: "canAccessAiInstructions", label: "AI instructions", detail: "Edit the script the AI uses on calls.", group: "Other", roles: ["admin"] },
   { key: "isProfileUpdate", label: "Edit own profile", detail: "Change their own profile and call settings.", group: "Other", roles: ["admin"] },
   { key: "accessWallet", label: "Wallet", detail: "Open the wallet area.", group: "Other", roles: ["admin", "subadmin"] },
@@ -38,6 +41,9 @@ export const isPermissionOn = (user, key) => {
   if (user.role === "superadmin" || user.role === "manager") return true;
   const bag = user.role === "subadmin" ? user.permissions : user.adminPermissions;
   const value = bag?.[key];
+  if ((key === "canEditDocuments" || key === "canDeleteDocuments") && !isPermissionOn(user, "canUseDocuments")) {
+    return false;
+  }
   if (value === true || value === "true") return true;
   if (value === false || value === "false") return false;
   return DEFAULT_ON.has(key);

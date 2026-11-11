@@ -13,6 +13,12 @@ import {
 import { Close } from "@mui/icons-material";
 import { isPermissionOn, permissionsForRole } from "../crmPermissions";
 
+const storedPermissionOn = (user, key) => {
+  const bag = user?.role === "subadmin" ? user?.permissions : user?.adminPermissions;
+  const value = bag?.[key];
+  return value === true || value === "true";
+};
+
 const CrmPermissionsDialog = ({ user, open, onClose, onToggle, savingKey }) => {
   const items = useMemo(() => permissionsForRole(user?.role), [user?.role]);
   const groups = useMemo(() => {
@@ -50,6 +56,7 @@ const CrmPermissionsDialog = ({ user, open, onClose, onToggle, savingKey }) => {
             <Typography variant="subtitle2" sx={{ mb: 1 }}>{section.group}</Typography>
             {section.items.map((item) => {
               const saving = savingKey === item.key;
+              const lockedBecauseUseIsOff = (item.key === "canEditDocuments" || item.key === "canDeleteDocuments") && !isPermissionOn(user, "canUseDocuments");
               return (
                 <Box
                   key={item.key}
@@ -63,14 +70,17 @@ const CrmPermissionsDialog = ({ user, open, onClose, onToggle, savingKey }) => {
                   }}
                 >
                   <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="body2" fontWeight={600}>{item.label}</Typography>
-                    <Typography variant="caption" color="text.secondary">{item.detail}</Typography>
+                    <Typography variant="body2" fontWeight={600} color={lockedBecauseUseIsOff ? "text.disabled" : "text.primary"}>{item.label}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {lockedBecauseUseIsOff ? "Available when Use documents is on." : item.detail}
+                    </Typography>
                   </Box>
                   {saving ? (
                     <CircularProgress size={22} />
                   ) : (
                     <Switch
-                      checked={isPermissionOn(user, item.key)}
+                      checked={lockedBecauseUseIsOff ? storedPermissionOn(user, item.key) : isPermissionOn(user, item.key)}
+                      disabled={lockedBecauseUseIsOff}
                       onChange={(event) => onToggle(user._id, item.key, event.target.checked)}
                     />
                   )}

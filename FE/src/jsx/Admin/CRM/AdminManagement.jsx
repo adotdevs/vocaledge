@@ -356,7 +356,7 @@ const AdminManagementCRM = () => {
               ...user,
               adminPermissions: {
                 ...user.adminPermissions,
-                [key]: value
+                ...body
               }
             };
           }
@@ -386,7 +386,7 @@ const AdminManagementCRM = () => {
               ...user,
               permissions: {
                 ...user.permissions,
-                [key]: value
+                ...body
               }
             };
           }
@@ -398,7 +398,7 @@ const AdminManagementCRM = () => {
               ...user,
               permissions: {
                 ...user.permissions,
-                [key]: value
+                ...body
               }
             };
           }

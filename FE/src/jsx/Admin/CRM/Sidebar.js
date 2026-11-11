@@ -266,15 +266,17 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
       badgeCount: reminderBadgeCount,
     });
     }
+    if (can('canUseDocuments')) {
     menuItems.push({
       icon: <Description />,
       label: 'Documents',
       link: '/admin/crm/document-repository',
     });
+    }
     if (can('canManageDocuments')) {
     menuItems.push({
       icon: <FolderOpen />,
-      label: 'Document Library',
+      label: 'File Library',
       link: '/admin/crm/documents',
     });
     }

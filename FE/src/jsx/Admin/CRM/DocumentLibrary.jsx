@@ -315,7 +315,7 @@ const DocumentLibrary = () => {
       <Box component="main" sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {ready && !canManage && (
           <Typography sx={{ p: 3 }} color="text.secondary">
-            Documents are turned off for your account.
+            File library is turned off for your account.
           </Typography>
         )}
         <AppBar position="sticky" elevation={0} sx={{ bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
@@ -323,7 +323,7 @@ const DocumentLibrary = () => {
             <FolderOpen sx={{ color: 'primary.main' }} />
             <Box sx={{ flexGrow: 1, minWidth: 180 }}>
               <Typography variant="h6" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
-                Document Library
+                File Library
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Shared CRM resources for your team
@@ -476,7 +476,7 @@ const DocumentLibrary = () => {
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                   {canManage
-                    ? 'Upload PDFs and images to build your shared CRM document library.'
+                    ? 'Upload PDFs and images to build your shared file library.'
                     : 'Documents uploaded by admins will appear here.'}
                 </Typography>
                 {canManage && (
