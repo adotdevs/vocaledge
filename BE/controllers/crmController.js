@@ -955,8 +955,8 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                             const requiredName = fieldKey === 'firstName' || fieldKey === 'lastName';
                             if (!requiredName && selectedFields && selectedFields[fieldKey] === false) return;
                             const csvValue = rowByHeader[normalizeCsvHeader(csvColumnName)];
-                            if (csvValue !== undefined && csvValue !== null && csvValue !== '') {
-                                mappedData[fieldKey] = csvValue;
+                                if (csvValue !== undefined && csvValue !== null && csvValue !== '') {
+                                    mappedData[fieldKey] = csvValue;
                             }
                         });
 
@@ -1152,7 +1152,7 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                 } catch (error) {
                     if (error.writeErrors) {
                         error.writeErrors.forEach(writeError => {
-                            skippedLeads.push({
+                    skippedLeads.push({
                                 email: leadsToInsert[writeError.index]?.email || 'unknown',
                                 reason: writeError.errmsg || 'Insert error'
                             });
@@ -1164,10 +1164,10 @@ exports.uploadCSV = catchAsyncErrors(async (req, res, next) => {
                                 email: lead.email,
                                 reason: error.message || 'Insert error'
                             });
-                        });
-                    }
+                    });
                 }
             }
+        }
 
             const currentProgress = processedCount + skippedLeads.length;
             if (currentProgress - lastProgressUpdate >= PROGRESS_UPDATE_INTERVAL || currentProgress === results.length) {
@@ -1529,7 +1529,7 @@ exports.getLeads = async (req, res) => {
             // Leads held by superadmin accounts are unassigned pool leads
             const displayAgent = (agentObj && agentObj.role !== "superadmin") ? agentObj : null;
             return hidePrivateLeadFields({
-                ...lead,
+            ...lead,
                 agent: displayAgent,
                 callSummary: callSummaryMap[String(lead._id)] || null,
             }, req.user);
@@ -1597,12 +1597,12 @@ exports.assignLeadsToAgent = async (req, res) => {
         let agentUser = null;
         if (!unassign) {
             agentUser = await User.findById(agentId);
-            if (!agentUser) {
-                return res.status(404).json({ success: false, msg: 'Agent user not found' });
-            }
-            if (!['admin', 'subadmin', 'superadmin'].includes(agentUser.role)) {
-                return res.status(400).json({ success: false, msg: 'Agent must be an admin, subadmin, or superadmin' });
-            }
+        if (!agentUser) {
+            return res.status(404).json({ success: false, msg: 'Agent user not found' });
+        }
+        if (!['admin', 'subadmin', 'superadmin'].includes(agentUser.role)) {
+            return res.status(400).json({ success: false, msg: 'Agent must be an admin, subadmin, or superadmin' });
+        }
             if (req.user && req.user.role !== 'superadmin' && !hasCrmPermission(req.user, 'canAssignLeads')) {
                 return denyCrmPermission(res, 'You do not have permission to assign leads');
             }
@@ -1864,18 +1864,18 @@ exports.assignLeadsToAgent = async (req, res) => {
             }
         } else {
             for (const lead of toAssign) {
-                let oldAgentName = 'Unassigned';
-                if (lead.agent) {
-                    const oldAgent = await User.findById(lead.agent).select('firstName lastName');
+            let oldAgentName = 'Unassigned';
+            if (lead.agent) {
+                const oldAgent = await User.findById(lead.agent).select('firstName lastName');
                     if (oldAgent) oldAgentName = `${oldAgent.firstName} ${oldAgent.lastName}`;
                 }
-                await logActivity({
-                    leadId: lead._id,
-                    type: 'assignment_change',
-                    createdBy: req.user,
-                    changes: {
-                        field: 'agent',
-                        oldValue: oldAgentName,
+            await logActivity({
+                leadId: lead._id,
+                type: 'assignment_change',
+                createdBy: req.user,
+                changes: {
+                    field: 'agent',
+                    oldValue: oldAgentName,
                         newValue: agentName,
                     },
                     metadata: {
@@ -2058,7 +2058,7 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
                 const Activity = await getActivityModel();
                 const actorName = `${req.user.firstName || ""} ${req.user.lastName || ""}`.trim() || "User";
                 const activityDocs = leadsWithStatusChange.map((lead) => ({
-                    leadId: lead._id,
+                leadId: lead._id,
                     type: "status_change",
                     isSystemGenerated: true,
                     createdBy: {
@@ -2066,11 +2066,11 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
                         userName: actorName,
                         userRole: req.user.role || "user",
                     },
-                    changes: {
+                changes: {
                         field: "status",
-                        oldValue: lead.status,
-                        newValue: normalizedStatus,
-                    },
+                    oldValue: lead.status,
+                    newValue: normalizedStatus,
+                },
                 }));
                 const chunkSize = 1000;
                 for (let index = 0; index < activityDocs.length; index += chunkSize) {

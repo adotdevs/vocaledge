@@ -50,6 +50,8 @@ import Tune from "@mui/icons-material/Tune";
 import VisibilityOutlined from "@mui/icons-material/VisibilityOutlined";
 import { toast } from "react-toastify";
 import Sidebar from "./Sidebar.js";
+import TemplateStudio from "./components/TemplateStudio";
+import LetterCanvas from "./components/LetterCanvas";
 import CrmAppBarActions from "./components/CrmAppBarActions";
 import useLiveCrmUser from "./useLiveCrmUser";
 import {
@@ -79,49 +81,10 @@ const clientLabel = (client) => {
 
 const fileSlug = (value) => String(value || "document").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "document";
 
-const AUTO_KEYS = [
-  { key: "client_name", label: "Client name" },
-  { key: "client_email", label: "Email" },
-  { key: "client_phone", label: "Phone" },
-  { key: "client_address", label: "Address" },
-  { key: "client_id", label: "CRM ID" },
-  { key: "document_date", label: "Document date" },
-];
-
-const SUGGESTED_FIELDS = [
-  { key: "reference_number", label: "Reference number", type: "text" },
-  { key: "case_reference", label: "Case reference", type: "text" },
-  { key: "amount", label: "Amount", type: "number" },
-  { key: "currency", label: "Currency", type: "select", optionsText: "EUR, USD, GBP, CHF" },
-  { key: "transaction_reference", label: "Transaction reference", type: "text" },
-  { key: "payment_date", label: "Payment date", type: "date" },
-  { key: "wallet_address", label: "Wallet address", type: "text" },
-  { key: "notes", label: "Additional notes", type: "textarea" },
-  { key: "letter_subject", label: "Subject", type: "text", required: true },
-  { key: "letter_body", label: "Letter body", type: "textarea", required: true },
-  { key: "authorised_representative", label: "Authorised representative", type: "text" },
-  { key: "company_signatory", label: "Company signatory", type: "text" },
-];
-
 const CATEGORY_CHOICES = ["Receipt", "Correspondence", "Agreement", "Onboarding", "Company", "Blank"];
-const RESERVED_FIELD_KEYS = new Set([...AUTO_KEYS.map((item) => item.key), "currency_amount"]);
 
 let fieldRowSeq = 1;
 const nextFieldRowId = () => `field-${fieldRowSeq += 1}`;
-const keyFromLabel = (label) => String(label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-const labelFromKey = (key) => String(key || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-const tokensInHtml = (html) => [...new Set(
-  [...String(html || "").matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi)].map((match) => match[1].toLowerCase())
-)];
-const fieldFromSuggestion = (suggestion) => ({
-  rowId: nextFieldRowId(),
-  key: suggestion.key,
-  label: suggestion.label,
-  type: suggestion.type || "text",
-  required: Boolean(suggestion.required),
-  optionsText: suggestion.optionsText || "",
-  keyTouched: true,
-});
 
 const HtmlFileIcon = ({ small = false }) => (
   <Box
@@ -161,6 +124,7 @@ const DocumentRepository = () => {
   const [clientFields, setClientFields] = useState(emptyClient);
   const [documentDate, setDocumentDate] = useState(todayIso());
   const [extras, setExtras] = useState({});
+  const [choiceDraft, setChoiceDraft] = useState({});
   const [history, setHistory] = useState([]);
   const [exporting, setExporting] = useState("");
   const [editor, setEditor] = useState(null);
@@ -170,7 +134,6 @@ const DocumentRepository = () => {
   const [sortBy, setSortBy] = useState("default");
   const [viewMode, setViewMode] = useState("grid");
   const [cardMenu, setCardMenu] = useState(null);
-  const htmlRef = useRef(null);
   const workflowRef = useRef(null);
 
   const loadTemplates = useCallback(async () => {
@@ -359,56 +322,13 @@ const DocumentRepository = () => {
     openEditor(current);
   };
 
-  const insertPlaceholder = (key) => {
-    const token = `{{${key}}}`;
-    setEditor((current) => {
-      if (!current) return current;
-      const html = current.html || "";
-      const field = htmlRef.current;
-      const start = field && document.activeElement === field ? field.selectionStart : html.length;
-      const end = field && document.activeElement === field ? field.selectionEnd : html.length;
-      const nextHtml = `${html.slice(0, start)}${token}${html.slice(end)}`;
-      const cursor = start + token.length;
-      requestAnimationFrame(() => {
-        if (!htmlRef.current) return;
-        htmlRef.current.focus();
-        htmlRef.current.setSelectionRange(cursor, cursor);
-      });
-      return { ...current, html: nextHtml };
-    });
-  };
-
-  const toggleSuggestedField = (suggestion) => {
-    const token = `{{${suggestion.key}}}`;
-    setEditor((current) => {
-      if (!current) return current;
-      const exists = current.fields.some((field) => field.key === suggestion.key);
-      if (exists) {
-        return { ...current, fields: current.fields.filter((field) => field.key !== suggestion.key) };
-      }
-      const html = current.html || "";
-      let nextHtml = html;
-      if (!html.includes(token)) {
-        const field = htmlRef.current;
-        const start = field && document.activeElement === field ? field.selectionStart : html.length;
-        const end = field && document.activeElement === field ? field.selectionEnd : html.length;
-        nextHtml = `${html.slice(0, start)}${token}${html.slice(end)}`;
-      }
-      return {
-        ...current,
-        html: nextHtml,
-        fields: [...current.fields, fieldFromSuggestion(suggestion)],
-      };
-    });
-  };
-
   const openEditor = (current = null) => {
     setEditor({
       key: current?.key || "",
       title: current?.title || "",
       description: current?.description || "",
       category: current?.category || "Correspondence",
-      html: current?.html || template?.html || "",
+      html: current?.html || "",
       fields: (current?.fields || []).map((item) => ({
         ...item,
         rowId: item.rowId || nextFieldRowId(),
@@ -450,6 +370,37 @@ const DocumentRepository = () => {
     toast.success("Template saved");
     loadTemplates();
     if (response.template?.key) loadTemplate(response.template.key);
+  };
+
+  const saveDesignedTemplate = async (html, addedFields = []) => {
+    if (!template?.key) return;
+    const merged = [...(template.fields || [])];
+    addedFields.forEach((field) => {
+      if (!merged.some((item) => item.key === field.key)) merged.push(field);
+    });
+    setSavingTemplate(true);
+    const response = await saveDocTemplateApi(template.key, {
+      title: template.title,
+      description: template.description || "",
+      category: template.category || "Correspondence",
+      html,
+      fields: merged.map((item) => ({
+        key: item.key,
+        label: item.label,
+        type: item.type || "text",
+        required: Boolean(item.required),
+        options: item.options || String(item.optionsText || "").split(",").map((part) => part.trim()).filter(Boolean),
+        placeholder: item.placeholder || "",
+      })),
+    });
+    setSavingTemplate(false);
+    if (!response?.success) {
+      toast.error(response?.msg || "Could not save this template");
+      return;
+    }
+    setTemplate((current) => (current ? { ...current, html, fields: merged } : current));
+    toast.success("Template saved");
+    loadTemplates();
   };
 
   const duplicateTemplate = async (item) => {
@@ -821,10 +772,55 @@ const DocumentRepository = () => {
                     helperText="Filled automatically. Change it if the letter should use an earlier date."
                   />
                   {(template.fields || []).map((item) => (
+                    item.type === "select" ? (
+                      <Box key={item.key}>
+                        <TextField
+                          select
+                          fullWidth
+                          size="small"
+                          label={item.label}
+                          required={item.required}
+                          value={extras[item.key] ?? ""}
+                          onChange={(event) => setExtras((current) => ({ ...current, [item.key]: event.target.value }))}
+                        >
+                          {(item.options || []).map((option) => (
+                            <MenuItem key={option} value={option}>{option}</MenuItem>
+                          ))}
+                        </TextField>
+                        <Box sx={{ display: "flex", gap: 1, mt: 0.75 }}>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            placeholder="Add a choice"
+                            value={choiceDraft[item.key] || ""}
+                            onChange={(event) => setChoiceDraft((current) => ({ ...current, [item.key]: event.target.value }))}
+                          />
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => {
+                              const option = String(choiceDraft[item.key] || "").trim();
+                              if (!option) return;
+                              setTemplate((current) => current ? {
+                                ...current,
+                                fields: (current.fields || []).map((field) => (
+                                  field.key === item.key
+                                    ? { ...field, options: [...new Set([...(field.options || []), option])] }
+                                    : field
+                                )),
+                              } : current);
+                              setExtras((current) => ({ ...current, [item.key]: option }));
+                              setChoiceDraft((current) => ({ ...current, [item.key]: "" }));
+                            }}
+                          >
+                            Add
+                          </Button>
+                        </Box>
+                      </Box>
+                    ) : (
                     <TextField
                       key={item.key}
                       size="small"
-                      select={item.type === "select"}
                       multiline={item.type === "textarea"}
                       minRows={item.type === "textarea" ? 3 : undefined}
                       type={item.type === "number" || item.type === "date" ? item.type : "text"}
@@ -834,11 +830,8 @@ const DocumentRepository = () => {
                       value={extras[item.key] ?? ""}
                       onChange={(event) => setExtras((current) => ({ ...current, [item.key]: event.target.value }))}
                       InputLabelProps={item.type === "date" ? { shrink: true } : undefined}
-                    >
-                      {item.type === "select" && (item.options || []).map((option) => (
-                        <MenuItem key={option} value={option}>{option}</MenuItem>
-                      ))}
-                    </TextField>
+                    />
+                    )
                   ))}
 
                   {history.length > 0 && (
@@ -856,26 +849,19 @@ const DocumentRepository = () => {
                 </CardContent>
               </Card>
 
-              <Card variant="outlined" sx={{ minHeight: 640, display: "flex", flexDirection: "column" }}>
-                <Box sx={{ px: 2, py: 1.25, display: "flex", justifyContent: "space-between", gap: 1, alignItems: "center", borderBottom: 1, borderColor: "divider" }}>
-                  <Typography fontWeight={800} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                    <VisibilityOutlined fontSize="small" color="primary" /> 3. Live document preview
-                  </Typography>
-                  <Chip size="small" color="success" variant="outlined" label="Live" />
-                </Box>
-                <Box sx={{ flex: 1, minHeight: 480, bgcolor: "grey.100" }}>
-                  {templateLoading ? (
-                    <Box sx={{ p: 6, textAlign: "center" }}><CircularProgress /></Box>
-                  ) : (
-                    <Box
-                      component="iframe"
-                      title="Document preview"
-                      sandbox=""
-                      srcDoc={rendered}
-                      sx={{ width: "100%", height: "100%", minHeight: 640, border: 0, bgcolor: "white" }}
-                    />
-                  )}
-                </Box>
+              <Card variant="outlined" sx={{ display: "flex", flexDirection: "column", overflow: "visible" }}>
+                {templateLoading ? (
+                  <Box sx={{ p: 6, textAlign: "center" }}><CircularProgress /></Box>
+                ) : (
+                  <LetterCanvas
+                    html={template.html}
+                    fields={template.fields}
+                    filledHtml={rendered}
+                    canEdit={canEdit}
+                    saving={savingTemplate}
+                    onSave={saveDesignedTemplate}
+                  />
+                )}
                 <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", p: 1.5, borderTop: 1, borderColor: "divider" }}>
                   <Button variant="contained" startIcon={exporting === "download" ? <CircularProgress size={16} color="inherit" /> : <Download />} onClick={() => exportDocument("download")} disabled={Boolean(exporting)}>
                     Download HTML
@@ -924,230 +910,14 @@ const DocumentRepository = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(editor)} onClose={() => setEditor(null)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Add color="primary" />
-          {editor?.key ? "Edit template" : "Add template"}
-        </DialogTitle>
-        <DialogContent sx={{ display: "grid", gap: 1.5, pt: 1 }}>
-          <Alert severity="info" icon={<HtmlFileIcon small />}>
-            <Typography fontWeight={800} sx={{ mb: 0.5 }}>Click a key to drop it into the letter</Typography>
-            <Typography variant="body2">
-              Click where the value should go in the HTML, then click a key. Client keys fill themselves. Suggested keys also add the matching input for the agent.
-            </Typography>
-          </Alert>
-          <TextField label="Title" value={editor?.title || ""} onChange={(event) => setEditor((current) => ({ ...current, title: event.target.value }))} />
-          <TextField
-            label="Category"
-            placeholder="Type a category or pick one"
-            value={editor?.category || ""}
-            onChange={(event) => setEditor((current) => current ? { ...current, category: event.target.value } : current)}
-          />
-          <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap" }}>
-            {[...new Set([...CATEGORY_CHOICES, ...categories])]
-              .filter((choice) => !editor?.category || choice.toLowerCase().includes(editor.category.toLowerCase()))
-              .slice(0, 8)
-              .map((choice) => (
-                <Chip
-                  key={choice}
-                  size="small"
-                  label={choice}
-                  color={editor?.category === choice ? "primary" : "default"}
-                  variant={editor?.category === choice ? "filled" : "outlined"}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => setEditor((current) => current ? { ...current, category: choice } : current)}
-                />
-              ))}
-          </Box>
-          <TextField label="Description" value={editor?.description || ""} onChange={(event) => setEditor((current) => ({ ...current, description: event.target.value }))} />
-          <Box>
-            <Typography variant="caption" color="text.secondary" fontWeight={700}>Filled from the client</Typography>
-            <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", mt: 0.75 }}>
-              {AUTO_KEYS.map((item) => {
-                const used = (editor?.html || "").includes(`{{${item.key}}}`);
-                return (
-                  <Chip
-                    key={item.key}
-                    icon={used ? <CheckCircle sx={{ fontSize: "16px !important" }} /> : undefined}
-                    label={`${item.label}  {{${item.key}}}`}
-                    size="small"
-                    color={used ? "success" : "default"}
-                    variant={used ? "filled" : "outlined"}
-                    onClick={() => insertPlaceholder(item.key)}
-                  />
-                );
-              })}
-            </Box>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary" fontWeight={700}>Suggested fields for the agent</Typography>
-            <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", mt: 0.75 }}>
-              {SUGGESTED_FIELDS.map((item) => {
-                const used = (editor?.fields || []).some((field) => field.key === item.key);
-                return (
-                  <Chip
-                    key={item.key}
-                    icon={used ? <CheckCircle sx={{ fontSize: "16px !important" }} /> : <Add sx={{ fontSize: "16px !important" }} />}
-                    label={item.label}
-                    size="small"
-                    color={used ? "primary" : "default"}
-                    variant={used ? "filled" : "outlined"}
-                    onClick={() => toggleSuggestedField(item)}
-                  />
-                );
-              })}
-            </Box>
-          </Box>
-          <TextField
-            label="HTML"
-            multiline
-            minRows={8}
-            value={editor?.html || ""}
-            inputRef={htmlRef}
-            onChange={(event) => {
-              const html = event.target.value;
-              setEditor((current) => {
-                if (!current) return current;
-                const grew = html.length - (current.html || "").length > 15;
-                if (!grew) return { ...current, html };
-                const already = new Set(tokensInHtml(current.html));
-                let fields = current.fields;
-                tokensInHtml(html).forEach((key) => {
-                  if (already.has(key) || RESERVED_FIELD_KEYS.has(key) || fields.some((field) => field.key === key)) return;
-                  const suggestion = SUGGESTED_FIELDS.find((item) => item.key === key);
-                  fields = [...fields, suggestion ? fieldFromSuggestion(suggestion) : {
-                    rowId: nextFieldRowId(),
-                    key,
-                    label: labelFromKey(key),
-                    type: "text",
-                    required: false,
-                    optionsText: "",
-                    keyTouched: true,
-                  }];
-                });
-                return { ...current, html, fields };
-              });
-            }}
-            helperText="Click in the letter first, then click a key above. It is inserted at the cursor."
-          />
-          {(() => {
-            const found = tokensInHtml(editor?.html).filter((key) => !RESERVED_FIELD_KEYS.has(key) && !(editor?.fields || []).some((field) => field.key === key));
-            if (!found.length) return null;
-            return (
-              <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", alignItems: "center" }}>
-                <Typography variant="caption" color="text.secondary">Found in the HTML</Typography>
-                {found.slice(0, 6).map((key) => (
-                  <Chip
-                    key={key}
-                    size="small"
-                    variant="outlined"
-                    label={labelFromKey(key)}
-                    onClick={() => {
-                      const suggestion = SUGGESTED_FIELDS.find((item) => item.key === key);
-                      setEditor((current) => current ? {
-                        ...current,
-                        fields: [...current.fields, suggestion ? fieldFromSuggestion(suggestion) : {
-                          rowId: nextFieldRowId(),
-                          key,
-                          label: labelFromKey(key),
-                          type: "text",
-                          required: false,
-                          optionsText: "",
-                          keyTouched: true,
-                        }],
-                      } : current);
-                    }}
-                  />
-                ))}
-              </Box>
-            );
-          })()}
-          <Typography fontWeight={700}>Extra fields</Typography>
-          {(editor?.fields || []).map((item) => {
-            const typed = `${item.label || ""} ${item.key || ""}`.trim().toLowerCase();
-            const matches = typed.length < 2 ? [] : SUGGESTED_FIELDS.filter((suggestion) => (
-              suggestion.key !== item.key
-              && !(editor?.fields || []).some((field) => field.key === suggestion.key)
-              && (suggestion.label.toLowerCase().includes(typed) || suggestion.key.includes(typed.replace(/\s+/g, "_")))
-            )).slice(0, 3);
-            return (
-            <Box key={item.rowId} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr 120px 120px" }, gap: 1 }}>
-              <TextField size="small" label="Label" value={item.label} onChange={(event) => {
-                const label = event.target.value;
-                setEditor((current) => ({
-                  ...current,
-                  fields: current.fields.map((field) => field.rowId === item.rowId ? {
-                    ...field,
-                    label,
-                    key: field.keyTouched ? field.key : keyFromLabel(label),
-                  } : field),
-                }));
-              }} />
-              <TextField size="small" label="Key" value={item.key} onChange={(event) => setEditor((current) => ({
-                ...current,
-                fields: current.fields.map((field) => field.rowId === item.rowId ? { ...field, key: event.target.value, keyTouched: true } : field),
-              }))} />
-              {matches.length > 0 && (
-                <Box sx={{ gridColumn: "1 / -1", display: "flex", gap: 0.75, flexWrap: "wrap" }}>
-                  {matches.map((suggestion) => (
-                    <Chip
-                      key={suggestion.key}
-                      size="small"
-                      variant="outlined"
-                      label={suggestion.label}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => setEditor((current) => ({
-                        ...current,
-                        fields: current.fields.map((field) => field.rowId === item.rowId ? {
-                          ...field,
-                          ...fieldFromSuggestion(suggestion),
-                          rowId: field.rowId,
-                        } : field),
-                      }))}
-                    />
-                  ))}
-                </Box>
-              )}
-              <TextField size="small" select label="Type" value={item.type || "text"} onChange={(event) => setEditor((current) => ({
-                ...current,
-                fields: current.fields.map((field) => field.rowId === item.rowId ? { ...field, type: event.target.value } : field),
-              }))}>
-                {["text", "number", "date", "textarea", "select"].map((type) => <MenuItem key={type} value={type}>{type}</MenuItem>)}
-              </TextField>
-              <TextField size="small" select label="Required" value={item.required ? "yes" : "no"} onChange={(event) => setEditor((current) => ({
-                ...current,
-                fields: current.fields.map((field) => field.rowId === item.rowId ? { ...field, required: event.target.value === "yes" } : field),
-              }))}>
-                <MenuItem value="no">No</MenuItem>
-                <MenuItem value="yes">Yes</MenuItem>
-              </TextField>
-              <Button size="small" startIcon={<Add />} onClick={() => item.key && insertPlaceholder(item.key)} disabled={!item.key} sx={{ gridColumn: "1 / -1", justifyContent: "flex-start" }}>
-                {item.key ? `Insert {{${item.key}}} into the HTML` : "Add a key first"}
-              </Button>
-              {item.type === "select" && (
-                <TextField
-                  size="small"
-                  label="Options, separated by commas"
-                  value={item.optionsText || ""}
-                  onChange={(event) => setEditor((current) => ({
-                    ...current,
-                    fields: current.fields.map((field) => field.rowId === item.rowId ? { ...field, optionsText: event.target.value } : field),
-                  }))}
-                  sx={{ gridColumn: "1 / -1" }}
-                />
-              )}
-            </Box>
-            );
-          })}
-          <Button startIcon={<Add />} onClick={() => setEditor((current) => ({ ...current, fields: [...current.fields, { rowId: nextFieldRowId(), key: "", label: "", type: "text", required: false, optionsText: "", keyTouched: false }] }))}>
-            Add field
-          </Button>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditor(null)}>Cancel</Button>
-          <Button variant="contained" onClick={saveEditor} disabled={savingTemplate}>{savingTemplate ? "Saving..." : "Save template"}</Button>
-        </DialogActions>
-      </Dialog>
+      <TemplateStudio
+        editor={editor}
+        categories={[...new Set([...CATEGORY_CHOICES, ...categories])]}
+        onChange={setEditor}
+        onClose={() => setEditor(null)}
+        onSave={saveEditor}
+        saving={savingTemplate}
+      />
     </Box>
   );
 };

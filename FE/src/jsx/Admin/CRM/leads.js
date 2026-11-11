@@ -549,20 +549,20 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                         setUploadedLeadIds(eventData.data.leadIds || []);
                     }
 
-                    onLeadCreated();
+                        onLeadCreated();
 
-                    // If call after upload is enabled, initiate bulk calls
-                    if (callAfterUpload && eventData.data.processed > 0) {
-                        handleBulkCallAfterUpload(eventData.data.leadIds || []);
-                    }
+                        // If call after upload is enabled, initiate bulk calls
+                        if (callAfterUpload && eventData.data.processed > 0) {
+                            handleBulkCallAfterUpload(eventData.data.leadIds || []);
+                        }
 
                     // Keep the dialog open when duplicates need review, with a direct link
                     // to the safe merge timeline. Otherwise preserve the quick auto-close.
                     if (!reviewDuplicates) {
                         setTimeout(() => {
-                            onClose();
-                            resetForm();
-                        }, 1500);
+                        onClose();
+                        resetForm();
+                    }, 1500);
                     }
                 } else if (eventData.type === 'error') {
                     // Stop upload immediately on error
@@ -1118,8 +1118,8 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                         <Grid item xs={6}>{manualForm.country}</Grid>
                                         {allowViewBrand && (
                                             <>
-                                                <Grid item xs={6}><strong>Brand:</strong></Grid>
-                                                <Grid item xs={6}>{manualForm.Brand}</Grid>
+                                        <Grid item xs={6}><strong>Brand:</strong></Grid>
+                                        <Grid item xs={6}>{manualForm.Brand}</Grid>
                                             </>
                                         )}
                                         {allowViewSource && (
@@ -1176,7 +1176,7 @@ const CreateLeadDialog = memo(({ open, onClose, onLeadCreated, agents, currentUs
                                             </Typography>
 
                                             {(overrideBrand.trim() || overrideSource.trim() || overrideFileName.trim()) && (
-                                                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                                            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
                                                     <Typography variant="body2" sx={{ mb: 1 }}>
                                                         <strong>Applied to every lead</strong>
                                                     </Typography>
@@ -2754,8 +2754,8 @@ const LeadsPage = () => {
             );
             if (!crmAllowed) {
                 setCrmAccessDenied(true);
-                return;
-            }
+                    return;
+                }
             setCrmAccessDenied(false);
             if (!includeAgents) return;
 
@@ -2970,7 +2970,7 @@ const LeadsPage = () => {
                     setLeads(adding.length ? [...adding, ...nextLeads] : nextLeads);
                     setLeadCallStatuses(statusMap);
                     setLoadingCallStatuses(false);
-                    setBrandOptions(Array.isArray(res.data.brands) ? res.data.brands : []);
+                setBrandOptions(Array.isArray(res.data.brands) ? res.data.brands : []);
                     setStatusCounts((prev) => {
                         const incomingCounts = res.data.statusCounts;
                         if (!incomingCounts || typeof incomingCounts !== "object" || Array.isArray(incomingCounts)) return prev;
@@ -2985,15 +2985,15 @@ const LeadsPage = () => {
                     });
                     setAllLeadsForFiltering([]);
                     setFilteredLeads([]);
-                    setPagination(res.data.pagination || {
-                        currentPage: 1,
-                        totalPages: 1,
-                        totalLeads: 0,
-                        totalFiltered: 0,
-                        limit: limit,
-                        hasNextPage: false,
-                        hasPrevPage: false,
-                    });
+                setPagination(res.data.pagination || {
+                    currentPage: 1,
+                    totalPages: 1,
+                    totalLeads: 0,
+                    totalFiltered: 0,
+                    limit: limit,
+                    hasNextPage: false,
+                    hasPrevPage: false,
+                });
                     setLoading(false);
                     setRefreshing(false);
                 });
@@ -3001,8 +3001,8 @@ const LeadsPage = () => {
             } else {
                 toast.error(res.msg || 'Failed to fetch leads');
                 startTransition(() => {
-                    setLeads([]);
-                    setPagination(prev => ({ ...prev, currentPage: 1, totalPages: 1 }));
+                setLeads([]);
+                setPagination(prev => ({ ...prev, currentPage: 1, totalPages: 1 }));
                     setLoading(false);
                     setRefreshing(false);
                 });
@@ -3011,10 +3011,10 @@ const LeadsPage = () => {
             console.error("Error fetching leads:", err);
             toast.error('Error fetching leads');
             startTransition(() => {
-                setLeads([]);
-                setAllLeadsForFiltering([]);
-                setFilteredLeads([]);
-                setLoading(false);
+            setLeads([]);
+            setAllLeadsForFiltering([]);
+            setFilteredLeads([]);
+            setLoading(false);
                 setRefreshing(false);
             });
         } finally {
@@ -3272,20 +3272,20 @@ const LeadsPage = () => {
 
     const handleSelectAll = () => {
         startTransition(() => {
-            setAllFilteredSelected(false);
-            if (isAllPageSelected) {
-                setSelectedLeads((prev) => {
-                    const next = new Set(prev);
-                    leads.forEach((lead) => next.delete(lead._id));
-                    return next;
-                });
-            } else {
-                setSelectedLeads((prev) => {
-                    const next = new Set(prev);
-                    leads.forEach((lead) => next.add(lead._id));
-                    return next;
-                });
-            }
+        setAllFilteredSelected(false);
+        if (isAllPageSelected) {
+            setSelectedLeads((prev) => {
+                const next = new Set(prev);
+                leads.forEach((lead) => next.delete(lead._id));
+                return next;
+            });
+        } else {
+            setSelectedLeads((prev) => {
+                const next = new Set(prev);
+                leads.forEach((lead) => next.add(lead._id));
+                return next;
+            });
+        }
         });
     };
 
@@ -3310,7 +3310,7 @@ const LeadsPage = () => {
                 const nextIds = res.data.leadIds;
                 startTransition(() => {
                     setSelectedLeads(new Set(nextIds));
-                    setAllFilteredSelected(true);
+                setAllFilteredSelected(true);
                 });
                 toast.success(`Selected ${nextIds.length} lead(s)`);
             } else {
@@ -3327,7 +3327,7 @@ const LeadsPage = () => {
     const handleSelectLead = useCallback((leadId) => {
         setAllFilteredSelected(false);
         startTransition(() => {
-            setSelectedLeads(prev => {
+        setSelectedLeads(prev => {
                 const next = new Set(prev);
                 if (next.has(leadId)) next.delete(leadId);
                 else next.add(leadId);
@@ -4944,7 +4944,7 @@ const LeadsPage = () => {
                                                 </TableCell>
                                                 )}
                                                 {showLeadColumn("remarks") && (
-                                                <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 160 }}>
+                                                 <TableCell sx={{ fontWeight: "bold", color: "text.secondary", minWidth: 160 }}>
                                                     Remarks
                                                 </TableCell>
                                                 )}
@@ -5678,7 +5678,7 @@ const LeadsPage = () => {
                 <MenuItem onClick={handleEditLead}>
                     <Edit sx={{ mr: 1, fontSize: 20 }} />
                     Edit Lead
-                </MenuItem>
+                    </MenuItem>
                 )}
                 {isSuperAdmin && (
                     <MenuItem onClick={handleDeleteLead} sx={{ color: "error.main" }}>
@@ -6074,8 +6074,8 @@ const LeadsPage = () => {
                 currentUserId={currentAuthUser?.user?._id}
                 canSendBack={isSuperAdmin}
                 onAssigned={() => {
-                    setSelectedLeads(new Set());
-                    setAllFilteredSelected(false);
+                                    setSelectedLeads(new Set());
+                                    setAllFilteredSelected(false);
                     fetchLeads(pagination.currentPage);
                 }}
             />
