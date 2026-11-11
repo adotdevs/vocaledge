@@ -30,6 +30,7 @@ import {
   Typography,
 } from "@mui/material";
 import Add from "@mui/icons-material/Add";
+import ArrowBack from "@mui/icons-material/ArrowBack";
 import ArrowForward from "@mui/icons-material/ArrowForward";
 import GridView from "@mui/icons-material/GridView";
 import MoreVert from "@mui/icons-material/MoreVert";
@@ -560,13 +561,14 @@ const DocumentRepository = () => {
           </Toolbar>
         </AppBar>
 
-        <Box sx={{ px: { xs: 2, sm: 3 }, py: 2.5, flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <Box sx={{ px: template ? 0 : { xs: 2, sm: 3 }, pt: template ? 0 : 2.5, pb: template ? 0 : 2.5, flex: 1, minHeight: 0, overflowY: template ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
           {ready && !canUse && (
             <Alert severity="warning">You do not have permission to use documents. Ask a super admin to turn on Use documents.</Alert>
           )}
           {(!ready || canUse) && (
           <>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, flexWrap: "wrap", mb: 2 }}>
+          {!template && (
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, flexWrap: "wrap", mb: 2, flexShrink: 0 }}>
             <Box>
               <Typography variant="caption" color="text.secondary" fontWeight={700} letterSpacing={0.6}>WORKSPACE / DOCUMENTS</Typography>
               <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>Document templates</Typography>
@@ -578,19 +580,29 @@ const DocumentRepository = () => {
               </Button>
             )}
           </Box>
+          )}
 
-          <Card elevation={0} sx={{ mb: 2, borderRadius: 3, border: 1, borderColor: "divider" }}>
-            <CardContent sx={{ display: "grid", gap: 1.5 }}>
-              <Box sx={{ display: "flex", gap: 1.5, alignItems: "center", flexWrap: "wrap" }}>
+          {!template && (
+          <>
+          <Card elevation={0} sx={{ mb: 2, borderRadius: 3, border: 1, borderColor: "divider", flexShrink: 0, overflow: "visible" }}>
+            <CardContent sx={{ display: "grid", gap: 1.5, overflow: "visible", "&:last-child": { pb: 2 } }}>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", md: "minmax(220px, 420px) auto" },
+                  gap: 1.5,
+                  alignItems: "center",
+                }}
+              >
                 <TextField
                   size="small"
                   placeholder="Search document templates..."
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
                   InputProps={{ startAdornment: <Search sx={{ mr: 1, color: "text.secondary" }} /> }}
-                  sx={{ flex: "1 1 240px", maxWidth: 420 }}
+                  sx={{ width: "100%" }}
                 />
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, ml: { md: "auto" } }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", justifyContent: { xs: "flex-start", md: "flex-end" } }}>
                   <Typography variant="body2" color="text.secondary">Sort by</Typography>
                   <TextField
                     select
@@ -631,7 +643,7 @@ const DocumentRepository = () => {
             </CardContent>
           </Card>
 
-          <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1, flexWrap: "wrap", mb: 1.25 }}>
+          <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1, flexWrap: "wrap", mb: 1.25, flexShrink: 0 }}>
             <Typography fontWeight={800}>
               {category === "All" ? "All templates" : category}
               <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
@@ -724,11 +736,36 @@ const DocumentRepository = () => {
               </Table>
             </TableContainer>
           )}
+          </>
+          )}
 
           {template && (
-            <Box ref={workflowRef} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(320px, 420px) 1fr" }, gap: 2, alignItems: "start" }}>
-              <Card variant="outlined">
-                <CardContent sx={{ display: "grid", gap: 2 }}>
+            <Box
+              ref={workflowRef}
+              sx={{
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr", lg: "minmax(320px, 420px) 1fr" },
+                gap: 0,
+                alignItems: "stretch",
+                flex: 1,
+                minHeight: 0,
+              }}
+            >
+              <Card variant="outlined" sx={{ display: "flex", flexDirection: "column", minHeight: 0, maxHeight: { lg: "100%" }, overflow: "hidden", borderRadius: 0, borderLeft: 0, borderBottom: 0 }}>
+                <CardContent sx={{ display: "grid", gap: 2, overflowY: "auto", flex: 1, minHeight: 0, "&:last-child": { pb: 2 } }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                    <Button
+                      size="small"
+                      startIcon={<ArrowBack />}
+                      onClick={() => { setTemplate(null); setSelectedKey(""); }}
+                      sx={{ textTransform: "none", fontWeight: 700 }}
+                    >
+                      Templates
+                    </Button>
+                    <Typography fontWeight={800} noWrap sx={{ flex: 1, minWidth: 0 }}>
+                      {template.title}
+                    </Typography>
+                  </Box>
                   <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
                     <PersonOutline color="primary" />
                     <Box>
@@ -849,20 +886,22 @@ const DocumentRepository = () => {
                 </CardContent>
               </Card>
 
-              <Card variant="outlined" sx={{ display: "flex", flexDirection: "column", overflow: "visible" }}>
+              <Card variant="outlined" sx={{ display: "flex", flexDirection: "column", minHeight: 0, maxHeight: { lg: "100%" }, overflow: "hidden", borderRadius: 0, borderRight: 0, borderBottom: 0 }}>
                 {templateLoading ? (
-                  <Box sx={{ p: 6, textAlign: "center" }}><CircularProgress /></Box>
+                  <Box sx={{ p: 6, textAlign: "center", flex: 1 }}><CircularProgress /></Box>
                 ) : (
-                  <LetterCanvas
-                    html={template.html}
-                    fields={template.fields}
-                    filledHtml={rendered}
-                    canEdit={canEdit}
-                    saving={savingTemplate}
-                    onSave={saveDesignedTemplate}
-                  />
+                  <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                    <LetterCanvas
+                      html={template.html}
+                      fields={template.fields}
+                      filledHtml={rendered}
+                      canEdit={canEdit}
+                      saving={savingTemplate}
+                      onSave={saveDesignedTemplate}
+                    />
+                  </Box>
                 )}
-                <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", p: 1.5, borderTop: 1, borderColor: "divider" }}>
+                <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", p: 1.5, borderTop: 1, borderColor: "divider", flexShrink: 0, bgcolor: "background.paper" }}>
                   <Button variant="contained" startIcon={exporting === "download" ? <CircularProgress size={16} color="inherit" /> : <Download />} onClick={() => exportDocument("download")} disabled={Boolean(exporting)}>
                     Download HTML
                   </Button>
