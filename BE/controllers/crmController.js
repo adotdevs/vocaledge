@@ -11,7 +11,7 @@ const jwtToken = require('../utils/jwtToken');
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const ErrorHandler = require('../utils/errorHandler');
 const { logActivity } = require('./activityController');
-const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels } = require('../utils/leadStatusHelpers');
+const { normalizeLeadStatus, getDefaultLeadStatusLabel, getLeadStatusLabels, getHiddenStatusLabelsForUser, isStatusHiddenForUser } = require('../utils/leadStatusHelpers');
 const { hasCrmPermission, denyCrmPermission, canViewLeadSource } = require('../utils/crmPermissions');
 const { addCustomerSearch, applyCustomerFilters, normalizeCustomerFields, bodyHasCustomerFields } = require('../utils/leadCustomerFields');
 const { isNewStatus, refillOwners, refillAllEligibleAgents, listRequestCanRefill, ownerIdOf, userCanOpenCrm, refillIfEmpty } = require('../utils/leadRefill');
@@ -184,6 +184,14 @@ async function applyLeadVisibilityToQuery(query, user) {
         } else {
             query.agent = user._id;
         }
+    }
+
+    const hiddenStatuses = await getHiddenStatusLabelsForUser(user);
+    if (hiddenStatuses.length > 0) {
+        query.$and = query.$and || [];
+        query.$and.push({
+            $nor: hiddenStatuses.map((label) => ({ status: new RegExp(`^${escapeRegex(label)}$`, 'i') }))
+        });
     }
 }
 
@@ -2024,6 +2032,9 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
         }
 
         const normalizedStatus = await normalizeLeadStatus(status);
+        if (await isStatusHiddenForUser(normalizedStatus, req.user)) {
+            return denyCrmPermission(res, 'Only Super Admin can move leads to an Admin Only status');
+        }
         const requestedIds = [...new Set(leadIds.map((id) => String(id || "")).filter(Boolean))];
         const leads = await Lead.find({ _id: { $in: requestedIds }, isDeleted: false }).select('_id agent status');
 
@@ -2034,7 +2045,13 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
             });
         }
 
-        const authorizedLeads = await getAuthorizedLeadsForBulkAction(req, leads);
+        const hiddenStatuses = await getHiddenStatusLabelsForUser(req.user);
+        const hiddenSet = new Set(hiddenStatuses.map((s) => String(s).trim().toLowerCase()));
+        const visibleLeads = hiddenSet.size > 0
+            ? leads.filter((lead) => !hiddenSet.has(String(lead.status || "").trim().toLowerCase()))
+            : leads;
+
+        const authorizedLeads = await getAuthorizedLeadsForBulkAction(req, visibleLeads);
 
         if (authorizedLeads.length === 0) {
             return res.status(403).json({
@@ -2417,6 +2434,9 @@ exports.editLead = async (req, res) => {
                 msg: 'Lead not found'
             });
         }
+        if (await isStatusHiddenForUser(lead.status, req.user)) {
+            return denyCrmPermission(res, 'Unauthorized: This lead is in an Admin Only status');
+        }
 
         const sameText = (left, right) => String(left ?? '').trim() === String(right ?? '').trim();
         const allowBrand = hasCrmPermission(req.user, "canViewLeadBrand");
@@ -2508,6 +2528,9 @@ exports.editLead = async (req, res) => {
         const normalizedStatus = await normalizeLeadStatus(status);
         const statusChanged = lead.status !== normalizedStatus;
         const oldStatus = lead.status;
+        if (statusChanged && await isStatusHiddenForUser(normalizedStatus, req.user)) {
+            return denyCrmPermission(res, 'Only Super Admin can move a lead to an Admin Only status');
+        }
 
         // Update lead
         lead.firstName = firstName;
@@ -3877,7 +3900,8 @@ exports.leadListStatistics = async (req, res) => {
         const getLeadUploadModel = require("../crmDB/models/leadUploadModel");
         const LeadUpload = await getLeadUploadModel();
 
-        const statuses = await LeadStatus.find().sort({ sortOrder: 1, label: 1 }).select("label color").lean();
+        const statusQuery = req.user?.role === "superadmin" ? {} : { adminOnly: { $ne: true } };
+        const statuses = await LeadStatus.find(statusQuery).sort({ sortOrder: 1, label: 1 }).select("label color").lean();
 
         // Build filtering conditions safely using $and array
         const andConditions = [{ isDeleted: false }];

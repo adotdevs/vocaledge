@@ -18,6 +18,7 @@ import {
     InputAdornment,
     Popover,
     Slider,
+    Switch,
     TextField,
     Tooltip,
     Typography,
@@ -26,12 +27,15 @@ import {
     Add,
     Delete,
     Edit,
+    Lock,
+    LockOpen,
     Settings,
     Star,
     StarBorder,
     Check,
     Close,
 } from "@mui/icons-material";
+import { useAuthUser } from "react-auth-kit";
 import { toast } from "react-toastify";
 import {
     createLeadStatusApi,
@@ -98,12 +102,15 @@ const LeadStatusSelect = ({
     onStatusesChange,
     manageButtonOnly = false,
 }) => {
+    const authUser = useAuthUser();
+    const isSuperAdmin = authUser()?.user?.role === "superadmin";
     const [statuses, setStatuses] = useState(() => getCachedLeadStatuses() || []);
     const [initialLoading, setInitialLoading] = useState(() => !getCachedLeadStatuses());
     const [selectOpen, setSelectOpen] = useState(false);
     const [manageOpen, setManageOpen] = useState(false);
     const [newLabel, setNewLabel] = useState("");
     const [newColor, setNewColor] = useState(STATUS_COLOR_PALETTE[0]);
+    const [newAdminOnly, setNewAdminOnly] = useState(false);
     const [saving, setSaving] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [editLabel, setEditLabel] = useState("");
@@ -150,11 +157,16 @@ const LeadStatusSelect = ({
         if (!statusLabel || !color) return;
         setSaving(true);
         try {
-            const res = await createLeadStatusApi({ label: statusLabel, color });
+            const res = await createLeadStatusApi({
+                label: statusLabel,
+                color,
+                adminOnly: isSuperAdmin ? newAdminOnly : false,
+            });
             if (res.success) {
-                toast.success("Status added");
+                toast.success(newAdminOnly && isSuperAdmin ? "Super Admin Only status added" : "Status added");
                 setNewLabel("");
                 setNewColor(STATUS_COLOR_PALETTE[0]);
+                setNewAdminOnly(false);
                 await reloadAfterMutation();
                 onChange?.({ target: { value: statusLabel } });
             } else {
@@ -162,6 +174,29 @@ const LeadStatusSelect = ({
             }
         } catch (err) {
             toast.error(err?.msg || "Failed to add status");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleToggleAdminOnly = async (status) => {
+        if (!isSuperAdmin || status.isDefault) return;
+        const nextAdminOnly = !status.adminOnly;
+        setSaving(true);
+        try {
+            const res = await updateLeadStatusApi(status._id, { adminOnly: nextAdminOnly });
+            if (res.success) {
+                toast.success(
+                    nextAdminOnly
+                        ? `"${status.label}" is now Super Admin Only (hidden from agents)`
+                        : `"${status.label}" is now visible to all agents`
+                );
+                await reloadAfterMutation();
+            } else {
+                toast.error(res.msg || "Failed to update visibility");
+            }
+        } catch (err) {
+            toast.error(err?.msg || "Failed to update visibility");
         } finally {
             setSaving(false);
         }
@@ -323,6 +358,7 @@ const LeadStatusSelect = ({
                 setEditLabel("");
                 setNewLabel("");
                 setNewColor(STATUS_COLOR_PALETTE[0]);
+                setNewAdminOnly(false);
                 closeColorPicker();
             }}
             maxWidth="sm"
@@ -334,6 +370,7 @@ const LeadStatusSelect = ({
             <DialogContent dividers>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                     Press <strong>Color</strong> on a status and pick one. It saves immediately.
+                    {isSuperAdmin && " Use the lock icon to make a status Super Admin Only (hidden from all agents, along with leads in that status)."}
                 </Typography>
 
                 <List dense disablePadding>
@@ -365,17 +402,49 @@ const LeadStatusSelect = ({
                                     {status.isDefault && (
                                         <Chip label="Default" size="small" color="primary" variant="outlined" />
                                     )}
+                                    {status.adminOnly && (
+                                        <Chip
+                                            icon={<Lock sx={{ fontSize: "13px !important" }} />}
+                                            label="Admin Only"
+                                            size="small"
+                                            color="secondary"
+                                            variant="outlined"
+                                            sx={{ fontWeight: 700, fontSize: 11 }}
+                                        />
+                                    )}
                                     <ColorButton
                                         color={getStatusColor(status)}
                                         disabled={saving}
                                         onClick={(event) => openColorPicker(event, status)}
                                     />
+                                    {isSuperAdmin && (
+                                        <Tooltip
+                                            title={
+                                                status.isDefault
+                                                    ? "Default status cannot be Admin Only"
+                                                    : status.adminOnly
+                                                    ? "Super Admin Only (Click to make visible to agents)"
+                                                    : "Visible to all agents (Click to restrict to Super Admin Only)"
+                                            }
+                                        >
+                                            <span>
+                                                <IconButton
+                                                    size="small"
+                                                    color={status.adminOnly ? "secondary" : "default"}
+                                                    onClick={() => handleToggleAdminOnly(status)}
+                                                    disabled={saving || status.isDefault}
+                                                >
+                                                    {status.adminOnly ? <Lock fontSize="small" /> : <LockOpen fontSize="small" />}
+                                                </IconButton>
+                                            </span>
+                                        </Tooltip>
+                                    )}
                                     <Tooltip title={status.isDefault ? "Default status" : "Set as default"}>
                                         <span>
                                             <IconButton
                                                 size="small"
                                                 onClick={() => handleSetDefault(status)}
-                                                disabled={saving || status.isDefault}
+                                                disabled={saving || status.isDefault || status.adminOnly}
                                             >
                                                 {status.isDefault ? <Star fontSize="small" color="primary" /> : <StarBorder fontSize="small" />}
                                             </IconButton>
@@ -429,6 +498,41 @@ const LeadStatusSelect = ({
                         Add
                     </Button>
                 </Box>
+                {isSuperAdmin && (
+                    <Box
+                        sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            mt: 1.25,
+                            px: 1.25,
+                            py: 0.75,
+                            borderRadius: "10px",
+                            bgcolor: newAdminOnly ? "rgba(109, 40, 217, 0.06)" : "rgba(15, 23, 42, 0.03)",
+                            border: "1px solid",
+                            borderColor: newAdminOnly ? "rgba(109, 40, 217, 0.25)" : "divider",
+                        }}
+                    >
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Lock sx={{ fontSize: 16, color: newAdminOnly ? "#6d28d9" : "text.secondary" }} />
+                            <Box>
+                                <Typography variant="caption" fontWeight={700} display="block">
+                                    Super Admin Only (Closed Status)
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>
+                                    Only Super Admin sees this status &amp; any leads inside it.
+                                </Typography>
+                            </Box>
+                        </Box>
+                        <Switch
+                            size="small"
+                            color="secondary"
+                            checked={newAdminOnly}
+                            onChange={(e) => setNewAdminOnly(e.target.checked)}
+                            disabled={saving}
+                        />
+                    </Box>
+                )}
             </DialogContent>
             <Popover
                 open={Boolean(colorAnchor)}

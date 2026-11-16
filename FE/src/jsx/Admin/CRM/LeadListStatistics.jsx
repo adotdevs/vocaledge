@@ -66,6 +66,8 @@ import TimerOutlined from "@mui/icons-material/TimerOutlined";
 import TrendingUp from "@mui/icons-material/TrendingUp";
 import Sidebar from "./Sidebar";
 import CrmAppBarActions from "./components/CrmAppBarActions";
+import CrmAccessDenied from "./components/CrmAccessDenied";
+import useLiveCrmUser from "./useLiveCrmUser";
 import { adminCrmLeadsApi, getLeadListStatsApi } from "../../../Api/Service";
 
 const formatCount = (value) => Number(value || 0).toLocaleString();
@@ -356,6 +358,8 @@ const EMPTY_FILTERS = {
 
 const LeadListStatistics = () => {
   const navigate = useNavigate();
+  const { can, ready } = useLiveCrmUser();
+  const canViewCommandCenter = can("canViewCommandCenter");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenu, setIsMobileMenu] = useState(false);
 
@@ -447,16 +451,18 @@ const LeadListStatistics = () => {
   }, []);
 
   useEffect(() => {
+    if (!ready || !canViewCommandCenter) return;
     loadStats(undefined, true);
-  }, [loadStats]);
+  }, [loadStats, ready, canViewCommandCenter]);
 
   // Auto-refresh every 35s
   useEffect(() => {
+    if (!ready || !canViewCommandCenter) return undefined;
     const timer = window.setInterval(() => {
       loadStats(filtersRef.current, false);
     }, 35000);
     return () => window.clearInterval(timer);
-  }, [loadStats]);
+  }, [loadStats, ready, canViewCommandCenter]);
 
   // Load real recent leads when an agent is opened in Agent Performance Deep-Dive
   const loadAgentRecentLeads = useCallback(async (agentId) => {
@@ -762,6 +768,25 @@ const LeadListStatistics = () => {
         log.toAgent?.userName === selectedAgent.name
     );
   }, [commandCenter, selectedAgent]);
+
+  if (ready && !canViewCommandCenter) {
+    return (
+      <Box sx={{ display: "flex", minHeight: "100vh", width: "100%", bgcolor: "#f3f5fa" }}>
+        <Sidebar
+          isCollapsed={isSidebarCollapsed}
+          setIsSidebarCollapsed={setIsSidebarCollapsed}
+          isMobileMenu={isMobileMenu}
+          setisMobileMenu={setIsMobileMenu}
+        />
+        <Box component="main" sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <CrmAccessDenied
+            title="Command Center Access Restricted"
+            message="You do not have permission to view the Lead Operations Command Center. Ask a Super Admin to enable the Command Center permission for your account."
+          />
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box

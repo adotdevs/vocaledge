@@ -241,7 +241,7 @@ router.route('/crm/lead-statuses/:id').delete(isAuthorizedUser, authorizedRoles(
 router.route('/crm/getLeads').get(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, getLeads);
 router.route('/crm/lead-columns').get(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, getLeadViewColumns);
 router.route('/crm/lead-columns').put(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, updateLeadViewColumns);
-router.route('/crm/lead-list-stats').get(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, leadListStatistics);
+router.route('/crm/lead-list-stats').get(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, requireCrmPermission("canViewCommandCenter"), leadListStatistics);
 // router.route('/crm/getLeads').get(isAuthorizedUser, authorizedRoles("superadmin", "admin", "subadmin"), checkCrmAccess, getLeads);
 router.route('/crm/deleteLead/:id').delete(isAuthorizedUser,
     requireSuperAdmin, checkCrmAccess, deleteLead);

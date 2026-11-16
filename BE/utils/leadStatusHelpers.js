@@ -48,10 +48,33 @@ const normalizeLeadStatus = async (value) => {
   return getDefaultLeadStatusLabel();
 };
 
+const getAdminOnlyStatusLabels = async () => {
+  await ensureDefaultLeadStatuses();
+  const LeadStatus = await getLeadStatusModel();
+  const statuses = await LeadStatus.find({ adminOnly: true }).select("label").lean();
+  return statuses.map((s) => s.label).filter(Boolean);
+};
+
+const getHiddenStatusLabelsForUser = async (user) => {
+  if (user?.role === "superadmin") return [];
+  return getAdminOnlyStatusLabels();
+};
+
+const isStatusHiddenForUser = async (statusLabel, user) => {
+  if (user?.role === "superadmin") return false;
+  const hidden = await getAdminOnlyStatusLabels();
+  const target = String(statusLabel || "").trim().toLowerCase();
+  if (!target) return false;
+  return hidden.some((label) => String(label).trim().toLowerCase() === target);
+};
+
 module.exports = {
   DEFAULT_LEAD_STATUSES,
   ensureDefaultLeadStatuses,
   getLeadStatusLabels,
   getDefaultLeadStatusLabel,
   normalizeLeadStatus,
+  getAdminOnlyStatusLabels,
+  getHiddenStatusLabelsForUser,
+  isStatusHiddenForUser,
 };

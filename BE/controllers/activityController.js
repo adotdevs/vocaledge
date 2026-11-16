@@ -4,6 +4,7 @@ const User = require('../models/userModel'); // Main database User model
 const catchAsyncErrors = require('../middlewares/catchAsyncErrors');
 const { createNotificationsForActivity } = require('../utils/crmNotificationService');
 const { hasCrmPermission, redactSourceMention, STREAM_LOG_TYPES } = require('../utils/crmPermissions');
+const { isStatusHiddenForUser } = require('../utils/leadStatusHelpers');
 
 const visibleActivityQuery = (query, user) => (
   hasCrmPermission(user, "canViewStreamLogs")
@@ -79,12 +80,24 @@ exports.getLeadActivities = catchAsyncErrors(async (req, res) => {
 
     // ✅ SECURITY: Check if user can view this lead's activities
     const Lead = await getLeadModel();
-    const lead = await Lead.findById(leadId).select('agent').lean();
+    const lead = await Lead.findById(leadId).select('agent status').lean();
     
     if (!lead) {
         return res.status(404).json({
             success: false,
             message: 'Lead not found'
+        });
+    }
+    if (await isStatusHiddenForUser(lead.status, currentUser)) {
+        return res.status(403).json({
+            success: false,
+            message: 'Access denied: This lead is in an Admin Only status'
+        });
+    }
+    if (await isStatusHiddenForUser(lead.status, currentUser)) {
+        return res.status(403).json({
+            success: false,
+            message: 'Access denied: This lead is in an Admin Only status'
         });
     }
 
@@ -206,6 +219,12 @@ exports.addLeadComment = catchAsyncErrors(async (req, res) => {
             message: 'Lead not found'
         });
     }
+    if (await isStatusHiddenForUser(lead.status, currentUser)) {
+        return res.status(403).json({
+            success: false,
+            message: 'Access denied: This lead is in an Admin Only status'
+        });
+    }
 
     // ✅ SECURITY: Check if user can comment on this lead
     const userRole = user.role;
@@ -302,6 +321,12 @@ exports.getLeadWithActivity = catchAsyncErrors(async (req, res) => {
         return res.status(404).json({
             success: false,
             message: 'Lead not found'
+        });
+    }
+    if (await isStatusHiddenForUser(lead.status, currentUser)) {
+        return res.status(403).json({
+            success: false,
+            message: 'Access denied: This lead is in an Admin Only status'
         });
     }
 

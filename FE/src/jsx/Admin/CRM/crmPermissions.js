@@ -21,6 +21,7 @@ export const CRM_PERMISSIONS = [
   { key: "canAccessCallDashboard", label: "Call pages", detail: "Open the active, pending, failed, and cancelled call pages.", group: "Calls", roles: ["admin", "subadmin"] },
   { key: "canViewCallLogs", label: "Call logs", detail: "See the call history on a lead.", group: "Calls", roles: ["admin", "subadmin"] },
   { key: "canViewCallRecordings", label: "Call recordings", detail: "Play call recordings.", group: "Calls", roles: ["admin", "subadmin"] },
+  { key: "canViewCommandCenter", label: "Command Center", detail: "View the Lead Operations Command Center, Agent Leaderboard, and performance statistics. Hidden until you turn it on.", group: "Other", roles: ["admin", "subadmin"] },
   { key: "canManageReminders", label: "Reminders", detail: "Open reminders and create them.", group: "Other", roles: ["admin", "subadmin"] },
   { key: "canManageDocuments", label: "File library", detail: "Open the file library and upload or change PDFs and images.", group: "Other", roles: ["admin", "subadmin"] },
   { key: "canAccessAiInstructions", label: "AI instructions", detail: "Edit the script the AI uses on calls.", group: "Other", roles: ["admin"] },

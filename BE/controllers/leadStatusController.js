@@ -22,7 +22,9 @@ const normalizeHexColor = (value) => {
 exports.getLeadStatuses = catchAsyncErrors(async (req, res) => {
   await ensureDefaultLeadStatuses();
   const LeadStatus = await getLeadStatusModel();
-  const statuses = await LeadStatus.find().sort({ sortOrder: 1, label: 1 }).lean();
+  const isSuperAdmin = req.user?.role === "superadmin";
+  const filter = isSuperAdmin ? {} : { adminOnly: { $ne: true } };
+  const statuses = await LeadStatus.find(filter).sort({ sortOrder: 1, label: 1 }).lean();
 
   res.status(200).json({
     success: true,
@@ -51,17 +53,21 @@ exports.createLeadStatus = catchAsyncErrors(async (req, res, next) => {
     return next(new ErrorHandler("Enter a valid color code like #1976d2.", 400));
   }
 
+  const isSuperAdmin = req.user?.role === "superadmin";
+  const adminOnly = isSuperAdmin && req.body?.adminOnly === true;
+
   const maxOrder = await LeadStatus.findOne().sort({ sortOrder: -1 }).lean();
   const status = await LeadStatus.create({
     label,
     color: color || "#1976d2",
     sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
     isDefault: false,
+    adminOnly,
   });
 
   res.status(201).json({
     success: true,
-    msg: "Status created",
+    msg: adminOnly ? "Super Admin Only status created" : "Status created",
     status,
   });
 });
@@ -76,6 +82,11 @@ exports.updateLeadStatus = catchAsyncErrors(async (req, res, next) => {
   const current = await LeadStatus.findById(id);
   if (!current) {
     return next(new ErrorHandler("Status not found.", 404));
+  }
+
+  const isSuperAdmin = req.user?.role === "superadmin";
+  if (current.adminOnly && !isSuperAdmin) {
+    return denyCrmPermission(res, "Only Super Admin can modify an Admin Only status");
   }
 
   const labelProvided = req.body?.label !== undefined && req.body?.label !== null;
@@ -97,6 +108,16 @@ exports.updateLeadStatus = catchAsyncErrors(async (req, res, next) => {
     }
   }
 
+  if (typeof req.body?.adminOnly === "boolean") {
+    if (!isSuperAdmin) {
+      return denyCrmPermission(res, "Only Super Admin can change Admin Only visibility");
+    }
+    if (req.body.adminOnly && current.isDefault) {
+      return next(new ErrorHandler("The default status cannot be Super Admin Only.", 400));
+    }
+    current.adminOnly = req.body.adminOnly;
+  }
+
   const oldLabel = current.label;
   if (oldLabel !== label) {
     await Lead.updateMany({ status: oldLabel }, { $set: { status: label } });
@@ -104,6 +125,9 @@ exports.updateLeadStatus = catchAsyncErrors(async (req, res, next) => {
   }
 
   if (req.body?.isDefault === true) {
+    if (current.adminOnly) {
+      return next(new ErrorHandler("An Admin Only status cannot be set as the default status.", 400));
+    }
     await LeadStatus.updateMany({}, { $set: { isDefault: false } });
     current.isDefault = true;
   }
@@ -136,6 +160,9 @@ exports.deleteLeadStatus = catchAsyncErrors(async (req, res, next) => {
   const status = await LeadStatus.findById(id);
   if (!status) {
     return next(new ErrorHandler("Status not found.", 404));
+  }
+  if (status.adminOnly && req.user?.role !== "superadmin") {
+    return denyCrmPermission(res, "Only Super Admin can delete an Admin Only status");
   }
 
   const total = await LeadStatus.countDocuments();

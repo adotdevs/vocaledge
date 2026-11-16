@@ -7,6 +7,7 @@ const leadStatusSchema = new mongoose.Schema(
     color: { type: String, default: "", trim: true },
     sortOrder: { type: Number, default: 0 },
     isDefault: { type: Boolean, default: false },
+    adminOnly: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
