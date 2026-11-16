@@ -3,7 +3,7 @@ let express = require("express");
 const { authorizedRoles, isAuthorizedUser, checkCrmAccess, requireSuperAdmin, requireCrmPermission } = require("../middlewares/auth");
 
 const singleUpload = require("../middlewares/multer");
-const { uploadCSV, loginCRM, getLeads, exportLeads, createLead, importUsersAsLeads, deleteLead, deleteAllLeads, bulkDeleteLeads, editLead, assignLeadsToAgent, bulkUpdateLeadStatus, getDeletedLeads, restoreLead, hardDeleteLead, bulkRestoreLeads, bulkHardDeleteLeads, restoreAllLeads, hardDeleteAllLeads, createPublicLead, listLeadUploads, getLeadUpload, acceptLeadUploadDuplicates, declineLeadUploadDuplicates, mergeLeadUploadDuplicate, clearLeadUploadDetails, deleteLeadUpload, leadListStatistics, getLeadViewColumns, updateLeadViewColumns, getLeadAutomation, updateLeadAutomation, updateLeadAutomationAdmin, listLeadShortageAlerts, ignoreLeadShortageAlert, removeLeadBrand } = require("../controllers/crmController");
+const { uploadCSV, loginCRM, getLeads, exportLeads, createLead, importUsersAsLeads, deleteLead, deleteAllLeads, bulkDeleteLeads, editLead, assignLeadsToAgent, bulkUpdateLeadStatus, getDeletedLeads, restoreLead, hardDeleteLead, bulkRestoreLeads, bulkHardDeleteLeads, restoreAllLeads, hardDeleteAllLeads, createPublicLead, listLeadUploads, getLeadUpload, acceptLeadUploadDuplicates, declineLeadUploadDuplicates, mergeLeadUploadDuplicate, clearLeadUploadDetails, deleteLeadUpload, leadListStatistics, getLeadViewColumns, updateLeadViewColumns, getLeadAutomation, updateLeadAutomation, updateLeadAutomationAdmin, createLeadAutomationRule, updateLeadAutomationRule, toggleLeadAutomationRule, duplicateLeadAutomationRule, deleteLeadAutomationRule, runLeadAutomationRuleNow, getLeadAutomationLogs, clearLeadAutomationLogs, listLeadShortageAlerts, ignoreLeadShortageAlert, removeLeadBrand } = require("../controllers/crmController");
 const { getReversalStatuses, previewReversal, applyReversal, listReversals, sendBackSelected } = require("../controllers/assignmentReversalController");
 const { activateLead, bulkActivateLeads: bulkActivateLeadsOld, getActivationProgress, getFailedEmails, resendFailedEmails, deleteFailedEmails } = require("../controllers/activateLeads");
 const { bulkActivateLeads, getEmailQueueStatus, processEmailQueueNow, clearEmailQueue } = require("../controllers/activateLeadsNew");
@@ -209,6 +209,14 @@ router.route("/crm/lead-shortage-alerts").get(isAuthorizedUser, requireSuperAdmi
 router.route("/crm/lead-shortage-alerts/:id/ignore").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, ignoreLeadShortageAlert);
 router.route("/crm/lead-automation").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, getLeadAutomation);
 router.route("/crm/lead-automation").put(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, updateLeadAutomation);
+router.route("/crm/lead-automation/rules").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, createLeadAutomationRule);
+router.route("/crm/lead-automation/rules/:id").put(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, updateLeadAutomationRule);
+router.route("/crm/lead-automation/rules/:id/toggle").patch(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, toggleLeadAutomationRule);
+router.route("/crm/lead-automation/rules/:id/duplicate").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, duplicateLeadAutomationRule);
+router.route("/crm/lead-automation/rules/:id").delete(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, deleteLeadAutomationRule);
+router.route("/crm/lead-automation/rules/:id/run").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, runLeadAutomationRuleNow);
+router.route("/crm/lead-automation/logs").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, getLeadAutomationLogs);
+router.route("/crm/lead-automation/logs").delete(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, clearLeadAutomationLogs);
 router.route("/crm/lead-automation/:id").put(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, updateLeadAutomationAdmin);
 router.route("/crm/lead-brands/remove").post(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, removeLeadBrand);
 router.route("/crm/assignment-reversal/statuses").get(isAuthorizedUser, requireSuperAdmin, checkCrmAccess, getReversalStatuses);

@@ -417,6 +417,14 @@ export const getReversalHistoryApi = () => getApi(`/crm/assignment-reversal/hist
 export const getLeadAutomationApi = () => getApi(`/crm/lead-automation`);
 export const saveLeadAutomationApi = (body) => putSimpleApi(`/crm/lead-automation`, body);
 export const saveLeadAutomationAdminApi = (id, body) => putSimpleApi(`/crm/lead-automation/${id}`, body);
+export const createLeadAutomationRuleApi = (body) => postApi(`/crm/lead-automation/rules`, body);
+export const updateLeadAutomationRuleApi = (id, body) => putSimpleApi(`/crm/lead-automation/rules/${id}`, body);
+export const toggleLeadAutomationRuleApi = (id, active) => patchApi(`/crm/lead-automation/rules/${id}/toggle`, { active });
+export const duplicateLeadAutomationRuleApi = (id) => postApi(`/crm/lead-automation/rules/${id}/duplicate`, {});
+export const deleteLeadAutomationRuleApi = (id) => deleteApi(`/crm/lead-automation/rules/${id}`);
+export const runLeadAutomationRuleNowApi = (id, limit = 500) => postApi(`/crm/lead-automation/rules/${id}/run`, { limit });
+export const getLeadAutomationLogsApi = (params = {}) => getApi(`/crm/lead-automation/logs${toQuery(params)}`);
+export const clearLeadAutomationLogsApi = (ruleId = "") => deleteApi(`/crm/lead-automation/logs${ruleId ? `?ruleId=${encodeURIComponent(ruleId)}` : ""}`);
 export const getLeadShortageAlertsApi = () => getApi(`/crm/lead-shortage-alerts`);
 export const ignoreLeadShortageAlertApi = (id) => postApi(`/crm/lead-shortage-alerts/${id}/ignore`, {});
 export const deleteLeadApi = (leadId) => {

@@ -2083,6 +2083,17 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
             }
         }
 
+        let rotationSummary = { rotatedCount: 0, exhaustedCount: 0, resultsByLeadId: new Map() };
+        if (leadsWithStatusChange.length > 0) {
+            const { processLeadsForRotation } = require("../utils/leadRotationEngine");
+            rotationSummary = await processLeadsForRotation(
+                leadsWithStatusChange,
+                normalizedStatus,
+                req.user,
+                "bulk_status"
+            );
+        }
+
         const changedByStatus = {};
         leadsWithStatusChange.forEach((lead) => {
             const label = lead.status || "New";
@@ -2097,6 +2108,12 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
         }
         const refilled = await refillOwners(lostNewOwners, req.user);
         const parts = [`${result.modifiedCount} lead(s) updated to "${normalizedStatus}"`];
+        if (rotationSummary.rotatedCount > 0) {
+            parts.push(`${rotationSummary.rotatedCount} rotated to next agent by automation`);
+        }
+        if (rotationSummary.exhaustedCount > 0) {
+            parts.push(`${rotationSummary.exhaustedCount} marked exhausted by automation`);
+        }
         if (deniedCount > 0) parts.push(`${deniedCount} skipped because they are not assigned to you`);
         if (missingCount > 0) parts.push(`${missingCount} were not found`);
         const message = parts.join(". ");
@@ -2112,6 +2129,11 @@ exports.bulkUpdateLeadStatus = async (req, res) => {
                 changedByStatus,
                 refilledLeads: refilled.leads,
                 refillBatchId: refilled.batchId,
+                rotation: {
+                    rotatedCount: rotationSummary.rotatedCount,
+                    exhaustedCount: rotationSummary.exhaustedCount,
+                    resultsByLeadId: Object.fromEntries(rotationSummary.resultsByLeadId),
+                },
             },
         });
     } catch (err) {
@@ -2528,6 +2550,23 @@ exports.editLead = async (req, res) => {
         }
 
         const ownerId = ownerIdOf(lead.agent);
+        let rotationResult = null;
+        if (statusChanged) {
+            const { processLeadsForRotation } = require("../utils/leadRotationEngine");
+            const rotationSummary = await processLeadsForRotation(
+                [lead],
+                normalizedStatus,
+                req.user,
+                "status_change"
+            );
+            rotationResult = rotationSummary.resultsByLeadId.get(String(lead._id)) || null;
+            if (rotationResult) {
+                lead.status = rotationResult.status || lead.status;
+                lead.agent = rotationResult.agent ? rotationResult.agent._id : null;
+                lead.rotationCount = rotationResult.rotationCount ?? lead.rotationCount;
+            }
+        }
+
         let refilledLeads = [];
         let refillBatchId = "";
         const potentialOwners = new Set();
@@ -2543,13 +2582,28 @@ exports.editLead = async (req, res) => {
             refillBatchId = refilled.batchId;
         }
 
+        const leadPayload = typeof lead.toObject === 'function' ? lead.toObject() : { ...lead };
+        if (rotationResult) {
+            leadPayload.status = rotationResult.status || leadPayload.status;
+            leadPayload.agent = rotationResult.agent || null;
+            leadPayload.rotationCount = rotationResult.rotationCount ?? leadPayload.rotationCount;
+        }
+
+        const responseMsg =
+            rotationResult?.outcome === "rotated"
+                ? `Status updated & rotated to ${rotationResult.toAgentName} as "${rotationResult.status}" (${rotationResult.ruleName})`
+                : rotationResult?.outcome === "exhausted"
+                ? `Status updated & marked "${rotationResult.status}" (${rotationResult.ruleName})`
+                : "Lead updated successfully";
+
         res.status(200).json({
             success: true,
-            msg: 'Lead updated successfully',
+            msg: responseMsg,
             data: {
-                lead: hidePrivateLeadFields(typeof lead.toObject === 'function' ? lead.toObject() : lead, req.user),
+                lead: hidePrivateLeadFields(leadPayload, req.user),
                 refilledLeads,
                 refillBatchId,
+                rotation: rotationResult,
             }
         });
 
@@ -4210,6 +4264,10 @@ exports.updateLeadViewColumns = async (req, res) => {
 
 const UserRestriction = require("../models/usersRestrictions");
 const getLeadShortageAlertModel = require("../crmDB/models/leadShortageAlertModel");
+const getLeadAutomationRuleModel = require("../crmDB/models/leadAutomationRuleModel");
+const getLeadAutomationLogModel = require("../crmDB/models/leadAutomationLogModel");
+const getLeadStatusModel = require("../crmDB/models/leadStatusModel");
+const { ensureStatusExists, ensureRotationStatuses, runRuleOnExistingLeads } = require("../utils/leadRotationEngine");
 
 const automationName = (user) => `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || user?.email || "Agent";
 
@@ -4219,12 +4277,32 @@ const cleanAutomationList = (values, limit = 100) => (
         : []
 );
 
+const cleanObjectIdList = (values, limit = 200) => {
+    if (!Array.isArray(values)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const val of values) {
+        const str = String(val || "").trim();
+        if (!str || seen.has(str) || !mongoose.Types.ObjectId.isValid(str)) continue;
+        seen.add(str);
+        out.push(new mongoose.Types.ObjectId(str));
+        if (out.length >= limit) break;
+    }
+    return out;
+};
+
 exports.getLeadAutomation = async (req, res) => {
     try {
         if (!superAdminOnly(req, res)) return;
-        const Lead = await getLeadModel();
+        await ensureRotationStatuses();
+        const [Lead, LeadStatus, Rule, Log] = await Promise.all([
+            getLeadModel(),
+            getLeadStatusModel(),
+            getLeadAutomationRuleModel(),
+            getLeadAutomationLogModel(),
+        ]);
         const settings = await UserRestriction.findOne().select("autoAssignNewLeads automationAllow").lean();
-        const [listNames, countries, brands, sources, users, counts] = await Promise.all([
+        const [listNames, countries, brands, sources, users, counts, statuses, rules, totalLogsCount] = await Promise.all([
             Lead.distinct("fileName", { isDeleted: false, fileName: { $nin: [null, ""] } }),
             Lead.distinct("country", { isDeleted: false, country: { $nin: [null, ""] } }),
             Lead.distinct("Brand", { isDeleted: false, Brand: { $nin: [null, ""] } }),
@@ -4249,6 +4327,9 @@ exports.getLeadAutomation = async (req, res) => {
                     },
                 } },
             ]),
+            LeadStatus.find().sort({ sortOrder: 1, label: 1 }).lean(),
+            Rule.find().sort({ priority: 1, createdAt: -1 }).lean(),
+            Log.countDocuments(),
         ]);
         const countByAgent = new Map(counts.map((row) => [String(row._id), row]));
         const sortText = (values) => values.filter(Boolean).sort((a, b) => String(a).localeCompare(String(b)));
@@ -4274,6 +4355,7 @@ exports.getLeadAutomation = async (req, res) => {
                 totalLeads: held.total || 0,
             };
         };
+        const allAdminsAndStaff = users.map(shape);
         res.json({
             success: true,
             enabled: !settings || settings.autoAssignNewLeads !== false,
@@ -4287,11 +4369,23 @@ exports.getLeadAutomation = async (req, res) => {
             countries: sortText(countries),
             brands: sortText(brands),
             sources: sortText(sources),
+            statuses: statuses.map((s) => ({
+                _id: s._id,
+                label: s.label,
+                color: s.color || "#1976d2",
+                isDefault: Boolean(s.isDefault),
+            })),
+            rules: rules.map((r) => ({
+                ...r,
+                agentIds: (r.agentIds || []).map((id) => String(id)),
+            })),
+            totalLogsCount,
             agents: [
                 { id: "unassigned", name: "Unassigned", role: "" },
                 ...users.map((user) => ({ id: String(user._id), name: automationName(user), role: user.role })),
             ],
-            admins: users.filter((user) => user.role !== "superadmin").map(shape),
+            rotationAgents: allAdminsAndStaff,
+            admins: allAdminsAndStaff.filter((user) => user.role !== "superadmin"),
         });
     } catch (err) {
         console.error("Error loading lead automation:", err);
@@ -4403,5 +4497,345 @@ exports.updateLeadAutomationAdmin = async (req, res) => {
     } catch (err) {
         console.error("Error saving admin automation:", err);
         res.status(500).json({ success: false, msg: "Could not save this admin" });
+    }
+};
+
+const sanitizeRulePayload = async (body, actor) => {
+    const name = String(body?.name || "").trim().slice(0, 140);
+    if (!name) {
+        return { error: "Automation name is required" };
+    }
+    const rawFrom = String(body?.fromStatus || "").trim();
+    const rawTo = String(body?.toStatus || "New").trim();
+    if (!rawFrom || !rawTo) {
+        return { error: "Both Trigger Status (From) and Target Status (To) are required" };
+    }
+    if (rawFrom.toLowerCase() === rawTo.toLowerCase()) {
+        return { error: "Trigger status (From) and target status (To) must be different" };
+    }
+
+    const fromStatus = await ensureStatusExists(rawFrom);
+    const toStatus = await ensureStatusExists(rawTo);
+    const rawFinal = String(body?.finalStatus ?? "Exhausted").trim();
+    const finalStatus =
+        rawFinal && rawFinal.toLowerCase() !== "keep"
+            ? await ensureStatusExists(rawFinal)
+            : "keep";
+
+    const agentIds = cleanObjectIdList(body?.agentIds, 200);
+    if (agentIds.length === 0) {
+        return { error: "Select at least one agent for rotation" };
+    }
+
+    const fileNames = cleanAutomationList(body?.fileNames, 200);
+    const listMode = body?.listMode === "selected" && fileNames.length > 0 ? "selected" : "all";
+    const rotationMode = body?.rotationMode === "least_assigned" ? "least_assigned" : "sequential";
+    const maxRaw = Number(body?.maxAgentsPerLead);
+    const maxAgentsPerLead = Number.isFinite(maxRaw) && maxRaw >= 0 ? Math.min(500, Math.floor(maxRaw)) : 10;
+
+    return {
+        data: {
+            name,
+            description: String(body?.description || "").trim().slice(0, 500),
+            active: body?.active !== false,
+            priority: Number.isFinite(Number(body?.priority)) ? Number(body.priority) : 0,
+            listMode,
+            fileNames: listMode === "selected" ? fileNames : [],
+            countries: cleanAutomationList(body?.countries, 100),
+            brands: cleanAutomationList(body?.brands, 100),
+            sources: cleanAutomationList(body?.sources, 100),
+            fromStatus,
+            toStatus,
+            agentIds,
+            rotationMode,
+            skipPreviousAgents: body?.skipPreviousAgents !== false,
+            maxAgentsPerLead,
+            finalStatus,
+            unassignOnExhausted: body?.unassignOnExhausted === true,
+            updatedBy: {
+                userId: actor?._id || null,
+                userName: automationName(actor),
+            },
+        },
+    };
+};
+
+exports.createLeadAutomationRule = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const parsed = await sanitizeRulePayload(req.body, req.user);
+        if (parsed.error) {
+            return res.status(400).json({ success: false, msg: parsed.error });
+        }
+        const Rule = await getLeadAutomationRuleModel();
+        const created = await Rule.create({
+            ...parsed.data,
+            createdBy: {
+                userId: req.user?._id || null,
+                userName: automationName(req.user),
+            },
+        });
+        const obj = created.toObject();
+        obj.agentIds = (obj.agentIds || []).map((id) => String(id));
+        res.status(201).json({
+            success: true,
+            msg: "Automation rule created",
+            rule: obj,
+        });
+    } catch (err) {
+        console.error("Error creating lead automation rule:", err);
+        res.status(500).json({ success: false, msg: "Could not create automation rule" });
+    }
+};
+
+exports.updateLeadAutomationRule = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, msg: "Invalid rule ID" });
+        }
+        const parsed = await sanitizeRulePayload(req.body, req.user);
+        if (parsed.error) {
+            return res.status(400).json({ success: false, msg: parsed.error });
+        }
+        const Rule = await getLeadAutomationRuleModel();
+        const updated = await Rule.findByIdAndUpdate(
+            id,
+            { $set: parsed.data },
+            { new: true }
+        ).lean();
+        if (!updated) {
+            return res.status(404).json({ success: false, msg: "Automation rule not found" });
+        }
+        updated.agentIds = (updated.agentIds || []).map((aid) => String(aid));
+        res.json({
+            success: true,
+            msg: "Automation rule saved",
+            rule: updated,
+        });
+    } catch (err) {
+        console.error("Error updating lead automation rule:", err);
+        res.status(500).json({ success: false, msg: "Could not save automation rule" });
+    }
+};
+
+exports.toggleLeadAutomationRule = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, msg: "Invalid rule ID" });
+        }
+        const Rule = await getLeadAutomationRuleModel();
+        const existing = await Rule.findById(id).select("active").lean();
+        if (!existing) {
+            return res.status(404).json({ success: false, msg: "Automation rule not found" });
+        }
+        const nextActive = typeof req.body?.active === "boolean" ? req.body.active : !existing.active;
+        const updated = await Rule.findByIdAndUpdate(
+            id,
+            {
+                $set: {
+                    active: nextActive,
+                    updatedBy: {
+                        userId: req.user?._id || null,
+                        userName: automationName(req.user),
+                    },
+                },
+            },
+            { new: true }
+        ).lean();
+        updated.agentIds = (updated.agentIds || []).map((aid) => String(aid));
+        res.json({
+            success: true,
+            msg: nextActive ? `"${updated.name}" activated` : `"${updated.name}" paused`,
+            rule: updated,
+        });
+    } catch (err) {
+        console.error("Error toggling lead automation rule:", err);
+        res.status(500).json({ success: false, msg: "Could not toggle automation rule" });
+    }
+};
+
+exports.duplicateLeadAutomationRule = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, msg: "Invalid rule ID" });
+        }
+        const Rule = await getLeadAutomationRuleModel();
+        const source = await Rule.findById(id).lean();
+        if (!source) {
+            return res.status(404).json({ success: false, msg: "Automation rule not found" });
+        }
+        const actorObj = {
+            userId: req.user?._id || null,
+            userName: automationName(req.user),
+        };
+        const created = await Rule.create({
+            name: `${source.name} (Copy)`.slice(0, 140),
+            description: source.description || "",
+            active: false,
+            priority: source.priority || 0,
+            listMode: source.listMode || "all",
+            fileNames: source.fileNames || [],
+            countries: source.countries || [],
+            brands: source.brands || [],
+            sources: source.sources || [],
+            fromStatus: source.fromStatus,
+            toStatus: source.toStatus,
+            agentIds: source.agentIds || [],
+            rotationMode: source.rotationMode || "sequential",
+            skipPreviousAgents: source.skipPreviousAgents !== false,
+            maxAgentsPerLead: source.maxAgentsPerLead ?? 10,
+            finalStatus: source.finalStatus || "Exhausted",
+            unassignOnExhausted: Boolean(source.unassignOnExhausted),
+            createdBy: actorObj,
+            updatedBy: actorObj,
+        });
+        const obj = created.toObject();
+        obj.agentIds = (obj.agentIds || []).map((aid) => String(aid));
+        res.status(201).json({
+            success: true,
+            msg: "Automation rule duplicated",
+            rule: obj,
+        });
+    } catch (err) {
+        console.error("Error duplicating lead automation rule:", err);
+        res.status(500).json({ success: false, msg: "Could not duplicate automation rule" });
+    }
+};
+
+exports.deleteLeadAutomationRule = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, msg: "Invalid rule ID" });
+        }
+        const Rule = await getLeadAutomationRuleModel();
+        const deleted = await Rule.findByIdAndDelete(id).lean();
+        if (!deleted) {
+            return res.status(404).json({ success: false, msg: "Automation rule not found" });
+        }
+        res.json({
+            success: true,
+            msg: `"${deleted.name}" deleted`,
+            deletedId: String(deleted._id),
+        });
+    } catch (err) {
+        console.error("Error deleting lead automation rule:", err);
+        res.status(500).json({ success: false, msg: "Could not delete automation rule" });
+    }
+};
+
+exports.runLeadAutomationRuleNow = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, msg: "Invalid rule ID" });
+        }
+        const maxBatch = Math.min(1000, Math.max(1, Number(req.body?.limit) || 500));
+        const result = await runRuleOnExistingLeads(id, req.user, maxBatch);
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+        const Rule = await getLeadAutomationRuleModel();
+        const updatedRule = await Rule.findById(id).lean();
+        if (updatedRule) {
+            updatedRule.agentIds = (updatedRule.agentIds || []).map((aid) => String(aid));
+        }
+        res.json({
+            ...result,
+            rule: updatedRule,
+        });
+    } catch (err) {
+        console.error("Error running lead automation rule manually:", err);
+        res.status(500).json({ success: false, msg: "Could not run automation rule" });
+    }
+};
+
+exports.getLeadAutomationLogs = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const Log = await getLeadAutomationLogModel();
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(10, parseInt(req.query.limit, 10) || 30));
+        const query = {};
+
+        if (req.query.ruleId && mongoose.Types.ObjectId.isValid(req.query.ruleId)) {
+            query.ruleId = new mongoose.Types.ObjectId(req.query.ruleId);
+        }
+        if (req.query.outcome && ["rotated", "exhausted"].includes(req.query.outcome)) {
+            query.outcome = req.query.outcome;
+        }
+        const search = String(req.query.search || "").trim();
+        if (search) {
+            const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const rx = new RegExp(escaped, "i");
+            const num = Number(search.replace(/^#/, ""));
+            query.$or = [
+                { leadName: rx },
+                { leadEmail: rx },
+                { ruleName: rx },
+                { fileName: rx },
+                { "fromAgent.userName": rx },
+                { "toAgent.userName": rx },
+                ...(Number.isInteger(num) && num > 0 ? [{ leadNumber: num }] : []),
+            ];
+        }
+
+        const [logs, total, rotatedTotal, exhaustedTotal] = await Promise.all([
+            Log.find(query)
+                .sort({ createdAt: -1 })
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .lean(),
+            Log.countDocuments(query),
+            Log.countDocuments({ ...query, outcome: "rotated" }),
+            Log.countDocuments({ ...query, outcome: "exhausted" }),
+        ]);
+
+        res.json({
+            success: true,
+            logs,
+            pagination: {
+                page,
+                limit,
+                total,
+                pages: Math.max(1, Math.ceil(total / limit)),
+            },
+            summary: {
+                total,
+                rotatedTotal,
+                exhaustedTotal,
+            },
+        });
+    } catch (err) {
+        console.error("Error loading lead automation logs:", err);
+        res.status(500).json({ success: false, msg: "Could not load automation logs" });
+    }
+};
+
+exports.clearLeadAutomationLogs = async (req, res) => {
+    try {
+        if (!superAdminOnly(req, res)) return;
+        const Log = await getLeadAutomationLogModel();
+        const filter = {};
+        if (req.query.ruleId && mongoose.Types.ObjectId.isValid(req.query.ruleId)) {
+            filter.ruleId = new mongoose.Types.ObjectId(req.query.ruleId);
+        }
+        const result = await Log.deleteMany(filter);
+        res.json({
+            success: true,
+            msg: `Cleared ${result.deletedCount || 0} automation log(s)`,
+            deletedCount: result.deletedCount || 0,
+        });
+    } catch (err) {
+        console.error("Error clearing lead automation logs:", err);
+        res.status(500).json({ success: false, msg: "Could not clear automation logs" });
     }
 };

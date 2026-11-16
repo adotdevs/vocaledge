@@ -44,6 +44,9 @@ const leadSchema = new mongoose.Schema({
   screenSharingId: { type: String, default: "" },
   customerPotential: { type: Number, default: null },
   refillBatch: { type: mongoose.Schema.Types.ObjectId, default: null },
+  rotationCount: { type: Number, default: 0 },
+  lastRotatedAt: { type: Date, default: null },
+  lastRotationRuleId: { type: mongoose.Schema.Types.ObjectId, default: null },
   // Permanent public number. Never reused, even after the lead is deleted.
   leadNumber: { type: Number, min: 1 },
   createdAt: { type: Date, default: Date.now },

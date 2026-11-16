@@ -775,9 +775,19 @@ const LeadStream = () => {
             });
 
             if (response.success) {
-                setLead((prev) => (prev ? { ...prev, status: newStatus } : prev));
-                setEditValues((prev) => ({ ...prev, status: newStatus }));
-                toast.success('Status updated');
+                const rotation = response.data?.rotation || null;
+                const effectiveStatus = rotation?.status || newStatus;
+                setLead((prev) =>
+                    prev
+                        ? {
+                              ...prev,
+                              status: effectiveStatus,
+                              ...(rotation ? { agent: rotation.agent } : {}),
+                          }
+                        : prev
+                );
+                setEditValues((prev) => ({ ...prev, status: effectiveStatus }));
+                toast.success(rotation ? response.msg || 'Status updated & rotated' : 'Status updated');
                 fetchLeadData(true);
             } else {
                 toast.error(response.msg || 'Failed to update status');

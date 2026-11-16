@@ -3699,8 +3699,15 @@ const LeadsPage = () => {
             });
 
             if (response.success) {
-                moveStatusCount(lead.status, newStatus);
-                const shouldRemoveFromFilteredView = filters.status && newStatus !== filters.status;
+                const rotation = response.data?.rotation || null;
+                const effectiveStatus = rotation?.status || newStatus;
+                moveStatusCount(lead.status, effectiveStatus);
+                const rotatedToAnotherAgent =
+                    rotation?.outcome === "rotated" &&
+                    !isSuperAdmin &&
+                    String(rotation.agent?._id || "") !== String(currentAuthUser?.user?._id || "");
+                const shouldRemoveFromFilteredView =
+                    rotatedToAnotherAgent || (filters.status && effectiveStatus !== filters.status);
 
                 if (shouldRemoveFromFilteredView) {
                     setRemovingLeadIds((prev) => ({ ...prev, [lead._id]: true }));
@@ -3731,11 +3738,17 @@ const LeadsPage = () => {
                 } else {
                     setLeads((prev) =>
                         prev.map((item) =>
-                            item._id === lead._id ? { ...item, status: newStatus } : item
+                            item._id === lead._id
+                                ? {
+                                      ...item,
+                                      status: effectiveStatus,
+                                      ...(rotation ? { agent: rotation.agent } : {}),
+                                  }
+                                : item
                         )
                     );
                 }
-                toast.success("Status updated");
+                toast.success(rotation ? response.msg || "Status updated & rotated" : "Status updated");
                 if (response.data?.refilledLeads?.length) applyRefilledLeads(response.data.refilledLeads);
             } else {
                 toast.error(response.msg || "Failed to update status");
