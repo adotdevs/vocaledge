@@ -407,6 +407,8 @@ exports.loginUser = catchAsyncErrors(async (req, res, next) => {
   let UserAuth = await UserModel.findOne({ email }).select('+adminPermissions');
 
   if (!UserAuth) {
+    const { noteLogin } = require("../utils/loginAudit");
+    noteLogin(req, null, false, "Unknown email");
     return next(
       new errorHandler(
         "User not found with this email address, please register first!"
@@ -415,6 +417,8 @@ exports.loginUser = catchAsyncErrors(async (req, res, next) => {
   }
 
   if (UserAuth.password != password) {
+    const { noteLogin } = require("../utils/loginAudit");
+    noteLogin(req, UserAuth, false, "Invalid password");
     return next(new errorHandler("Invalid email or password", 400));
   }
   if (!UserAuth.verified) {

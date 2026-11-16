@@ -7,12 +7,19 @@ const ACTIVITY_TOUCH_MS = 60000;
 const authUserCache = new Map();
 const activityTouch = new Map();
 
-const touchUserActivity = (userId) => {
+const touchUserActivity = (userId, req, user) => {
   const key = String(userId);
   const now = Date.now();
   if (now - (activityTouch.get(key) || 0) < ACTIVITY_TOUCH_MS) return;
   activityTouch.set(key, now);
   User.updateOne({ _id: userId }, { $set: { lastActivity: new Date(), online: true } }).catch(() => {});
+  if (user && ["superadmin", "admin", "subadmin", "manager"].includes(user.role)) {
+    try {
+      require("../utils/loginAudit").notePresence(req, user);
+    } catch (error) {
+      // Presence history must not block the request.
+    }
+  }
 };
 
 const CRM_REFILL_THROTTLE_MS = 30000;
@@ -123,7 +130,7 @@ exports.isAuthorizedUser = async (req, res, next) => {
     }
 
     req.user = user;
-    touchUserActivity(decoded._id);
+    touchUserActivity(decoded._id, req, user);
     next();
   } catch (err) {
     console.error("Auth Error:", err);

@@ -1,6 +1,9 @@
+const { noteLogin } = require("./loginAudit");
+
 // create cookie with token in a function, taking arguments from controller
 const jwtToken = (user, statusCode, res, req) => {
   const token = user.generateToken();
+  if (req) noteLogin(req, user, true);
 
   const origin = req.headers.origin || req.headers.referer || '';
   const host = req.hostname || '';

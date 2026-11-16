@@ -99,6 +99,10 @@ const documentUpload = multer({
 let router = express.Router();
 
 router.route('/crm/login').post(loginCRM);
+const { fieldNotes, removeFieldNote, clearFieldNotes } = require("../controllers/fieldNotesController");
+router.route("/crm/field-notes").get(isAuthorizedUser, fieldNotes);
+router.route("/crm/field-notes").delete(isAuthorizedUser, clearFieldNotes);
+router.route("/crm/field-notes/:id").delete(isAuthorizedUser, removeFieldNote);
 // Error handler for multer file size errors
 // Public lead form (e.g. takebackanalytics.com) - no auth; protected by API key + rate limit + honeypot
 router.route('/crm/public/lead').post(

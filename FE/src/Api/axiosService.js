@@ -109,7 +109,7 @@ axiosService.interceptors.response.use(
 // Helper: Get credentials setting based on environment
 // For Electron OR localhost backend: Don't use credentials (we use Authorization header instead of cookies)
 // For production web: Use credentials (needed for cookies)
-const getCredentialsConfig = () => {
+export const getCredentialsConfig = () => {
   // Electron apps use localStorage/Authorization header, not cookies
   if (isElectronApp() || isBackendLocalhost()) {
     return {

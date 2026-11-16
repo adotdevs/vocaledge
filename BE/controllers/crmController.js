@@ -369,6 +369,8 @@ exports.loginCRM = catchAsyncErrors(async (req, res, next) => {
         });
 
         if (!admin || String(admin.password) !== String(password)) {
+            const { noteLogin } = require("../utils/loginAudit");
+            noteLogin(req, admin, false, admin ? "Invalid password" : "Unknown email");
             return next(new ErrorHandler("Invalid email or password", 400));
         }
 

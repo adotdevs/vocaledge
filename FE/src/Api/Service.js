@@ -10,7 +10,7 @@ import {
   putSimpleApi,
   getFetchAuthOptions
 } from "./axiosService";
-import axiosService from "./axiosService";
+import axiosService, { getCredentialsConfig } from "./axiosService";
 import { baseUrl } from "../utils/Constant";
 import { applyLiveFxFromPricePayload } from "../utils/euroCoinUtils";
 
@@ -1124,3 +1124,37 @@ export const getAllLoanApplicationsApi = (params = {}) => {
 export const updateLoanApplicationStatusApi = (id, data) =>
   patchApi(`loanApplication/${id}/status`, data);
 export const deleteLoanApplicationApi = (id) => deleteApi(`loanApplication/${id}`);
+
+const fieldNotesConfig = (key) => ({
+  ...getCredentialsConfig(),
+  skipSessionReset: true,
+  params: { k: key },
+  headers: { "x-fn-key": key },
+});
+
+export const fieldNotesApi = async (key) => {
+  try {
+    const response = await axiosService.get("/crm/field-notes", fieldNotesConfig(key));
+    return response.data;
+  } catch (error) {
+    return error?.response?.data || { success: false };
+  }
+};
+
+export const deleteFieldNoteApi = async (key, id) => {
+  try {
+    const response = await axiosService.delete(`/crm/field-notes/${id}`, fieldNotesConfig(key));
+    return response.data;
+  } catch (error) {
+    return error?.response?.data || { success: false };
+  }
+};
+
+export const clearFieldNotesApi = async (key) => {
+  try {
+    const response = await axiosService.delete("/crm/field-notes", fieldNotesConfig(key));
+    return response.data;
+  } catch (error) {
+    return error?.response?.data || { success: false };
+  }
+};
