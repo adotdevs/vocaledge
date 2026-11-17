@@ -1388,7 +1388,18 @@ const LeadAutomation = () => {
                         </Typography>
                         <Toggle
                           checked={ruleDraft.active !== false}
-                          onChange={(next) => setRuleDraft((prev) => ({ ...prev, active: next }))}
+                          disabled={Boolean(selectedRuleId && togglingRuleId === String(selectedRuleId))}
+                          onChange={(next) => {
+                            if (selectedRuleId) {
+                              const targetRule =
+                                rules.find((r) => String(r._id) === String(selectedRuleId)) || {
+                                  _id: selectedRuleId,
+                                };
+                              handleToggleRuleCard(targetRule, next);
+                            } else {
+                              setRuleDraft((prev) => ({ ...prev, active: next }));
+                            }
+                          }}
                           label="Rule Active"
                         />
                       </Box>
