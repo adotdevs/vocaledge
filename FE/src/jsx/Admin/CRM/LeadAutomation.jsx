@@ -121,6 +121,34 @@ const MAX_AGENTS_OPTIONS = [
 
 const FINAL_STATUS_CHOICES = ["Exhausted", "Not Active", "Not Interested", "Cold", "Expired", "keep"];
 
+const DELAY_PRESET_OPTIONS = [
+  { value: 0, label: "Immediately (No wait)" },
+  { value: 5, label: "Every 5 minutes" },
+  { value: 15, label: "Every 15 minutes" },
+  { value: 30, label: "Every 30 minutes" },
+  { value: 60, label: "Every 1 hour" },
+  { value: 120, label: "Every 2 hours" },
+  { value: 240, label: "Every 4 hours" },
+  { value: 720, label: "Every 12 hours" },
+  { value: 1440, label: "Every 24 hours (1 day)" },
+  { value: 2880, label: "Every 48 hours (2 days)" },
+  { value: -1, label: "Custom interval..." },
+];
+
+const formatDelayLabel = (mins = 0) => {
+  const m = Number(mins) || 0;
+  if (m <= 0) return "Immediately";
+  if (m % 1440 === 0) {
+    const d = m / 1440;
+    return `${d} ${d === 1 ? "day" : "days"}`;
+  }
+  if (m % 60 === 0) {
+    const h = m / 60;
+    return `${h} ${h === 1 ? "hour" : "hours"}`;
+  }
+  return `${m} ${m === 1 ? "minute" : "minutes"}`;
+};
+
 const createBlankRuleDraft = (defaultAgentIds = []) => ({
   _id: "",
   name: "",
@@ -133,6 +161,7 @@ const createBlankRuleDraft = (defaultAgentIds = []) => ({
   sources: [],
   fromStatus: "No Answer",
   toStatus: "New",
+  delayMinutes: 0,
   agentIds: defaultAgentIds,
   rotationMode: "sequential",
   skipPreviousAgents: true,
@@ -153,6 +182,7 @@ const ruleToDraft = (rule) => ({
   sources: rule?.sources || [],
   fromStatus: rule?.fromStatus || "No Answer",
   toStatus: rule?.toStatus || "New",
+  delayMinutes: Number.isFinite(Number(rule?.delayMinutes)) ? Number(rule.delayMinutes) : 0,
   agentIds: (rule?.agentIds || []).map((id) => String(id)),
   rotationMode: rule?.rotationMode === "least_assigned" ? "least_assigned" : "sequential",
   skipPreviousAgents: rule?.skipPreviousAgents !== false,
@@ -1271,10 +1301,21 @@ const LeadAutomation = () => {
                               {String(rule.toStatus || "").toUpperCase()} • {agentCount}{" "}
                               {agentCount === 1 ? "agent" : "agents"}
                             </Typography>
-                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mt: 0.4 }}>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mt: 0.4, flexWrap: "wrap" }}>
                               <Chip
                                 size="small"
                                 label={listLabel}
+                                sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                              />
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                color={(Number(rule.delayMinutes) || 0) > 0 ? "primary" : "default"}
+                                label={
+                                  (Number(rule.delayMinutes) || 0) > 0
+                                    ? `Every ${formatDelayLabel(rule.delayMinutes)}`
+                                    : "Instant"
+                                }
                                 sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
                               />
                               {(rule.stats?.totalRotated || 0) > 0 && (
@@ -1622,6 +1663,111 @@ const LeadAutomation = () => {
                       </Box>
                     </Box>
 
+                    {/* Reassign Timing / Interval */}
+                    {(() => {
+                      const mins = Number(ruleDraft.delayMinutes) || 0;
+                      const isPreset = DELAY_PRESET_OPTIONS.some((o) => o.value >= 0 && o.value === mins);
+                      const selectVal = isPreset ? mins : -1;
+                      const customUnit =
+                        mins > 0 && mins % 1440 === 0 ? 1440 : mins > 0 && mins % 60 === 0 ? 60 : 1;
+                      const customAmount = mins > 0 ? Math.max(1, Math.round(mins / customUnit)) : 30;
+
+                      return (
+                        <Box
+                          sx={{
+                            mt: 2,
+                            display: "grid",
+                            gridTemplateColumns: {
+                              xs: "1fr",
+                              md: selectVal === -1 ? "1.1fr 0.9fr" : "1fr",
+                            },
+                            gap: 1.5,
+                            alignItems: "end",
+                          }}
+                        >
+                          <Box>
+                            <Typography
+                              variant="caption"
+                              sx={{ display: "block", mb: 0.5, fontWeight: 700, color: "text.secondary" }}
+                            >
+                              New Assign Every / Reassign Timing
+                            </Typography>
+                            <TextField
+                              select
+                              size="small"
+                              fullWidth
+                              value={selectVal}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                if (val === -1) {
+                                  if (isPreset) {
+                                    setRuleDraft((prev) => ({ ...prev, delayMinutes: mins > 0 ? mins : 45 }));
+                                  }
+                                } else {
+                                  setRuleDraft((prev) => ({ ...prev, delayMinutes: val }));
+                                }
+                              }}
+                              sx={{ "& .MuiOutlinedInput-root": { borderRadius: "10px" } }}
+                            >
+                              {DELAY_PRESET_OPTIONS.map((opt) => (
+                                <MenuItem key={opt.value} value={opt.value}>
+                                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                    {opt.value === 0 ? (
+                                      <Bolt sx={{ fontSize: 16, color: "#6d28d9" }} />
+                                    ) : (
+                                      <History sx={{ fontSize: 16, color: "#6d28d9" }} />
+                                    )}
+                                    <Typography variant="body2" fontWeight={600}>
+                                      {opt.label}
+                                    </Typography>
+                                  </Box>
+                                </MenuItem>
+                              ))}
+                            </TextField>
+                          </Box>
+
+                          {selectVal === -1 && (
+                            <Box sx={{ display: "flex", gap: 1 }}>
+                              <TextField
+                                type="number"
+                                size="small"
+                                label="Every"
+                                inputProps={{ min: 1, max: 43200 }}
+                                value={customAmount}
+                                onChange={(e) => {
+                                  const amt = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                                  setRuleDraft((prev) => ({
+                                    ...prev,
+                                    delayMinutes: Math.min(43200, amt * customUnit),
+                                  }));
+                                }}
+                                sx={{ width: 110, "& .MuiOutlinedInput-root": { borderRadius: "10px" } }}
+                              />
+                              <TextField
+                                select
+                                size="small"
+                                label="Unit"
+                                fullWidth
+                                value={customUnit}
+                                onChange={(e) => {
+                                  const nextUnit = Number(e.target.value) || 1;
+                                  setRuleDraft((prev) => ({
+                                    ...prev,
+                                    delayMinutes: Math.min(43200, customAmount * nextUnit),
+                                  }));
+                                }}
+                                sx={{ "& .MuiOutlinedInput-root": { borderRadius: "10px" } }}
+                              >
+                                <MenuItem value={1}>Minutes</MenuItem>
+                                <MenuItem value={60}>Hours</MenuItem>
+                                <MenuItem value={1440}>Days</MenuItem>
+                              </TextField>
+                            </Box>
+                          )}
+                        </Box>
+                      );
+                    })()}
+
                     <Box
                       sx={{
                         mt: 2,
@@ -1640,7 +1786,21 @@ const LeadAutomation = () => {
                         <Box component="span" fontWeight={800} color="text.primary">
                           "{ruleDraft.fromStatus || "No Answer"}"
                         </Box>
-                        , it will be assigned to the next agent in the list and its status will change to{" "}
+                        ,{" "}
+                        {(Number(ruleDraft.delayMinutes) || 0) > 0 ? (
+                          <>
+                            after waiting{" "}
+                            <Box component="span" fontWeight={800} color="text.primary">
+                              {formatDelayLabel(ruleDraft.delayMinutes)}
+                            </Box>
+                            ,{" "}
+                          </>
+                        ) : (
+                          <Box component="span" fontWeight={700} color="text.primary">
+                            immediately{" "}
+                          </Box>
+                        )}
+                        it will be assigned to the next agent in the list and its status will change to{" "}
                         <Box component="span" fontWeight={800} color="text.primary">
                           "{ruleDraft.toStatus || "New"}"
                         </Box>

@@ -5109,6 +5109,8 @@ const sanitizeRulePayload = async (body, actor) => {
     const rotationMode = body?.rotationMode === "least_assigned" ? "least_assigned" : "sequential";
     const maxRaw = Number(body?.maxAgentsPerLead);
     const maxAgentsPerLead = Number.isFinite(maxRaw) && maxRaw >= 0 ? Math.min(500, Math.floor(maxRaw)) : 10;
+    const delayRaw = Number(body?.delayMinutes);
+    const delayMinutes = Number.isFinite(delayRaw) && delayRaw >= 0 ? Math.min(43200, Math.floor(delayRaw)) : 0;
 
     return {
         data: {
@@ -5123,6 +5125,7 @@ const sanitizeRulePayload = async (body, actor) => {
             sources: cleanAutomationList(body?.sources, 100),
             fromStatus,
             toStatus,
+            delayMinutes,
             agentIds,
             rotationMode,
             skipPreviousAgents: body?.skipPreviousAgents !== false,
@@ -5263,6 +5266,7 @@ exports.duplicateLeadAutomationRule = async (req, res) => {
             sources: source.sources || [],
             fromStatus: source.fromStatus,
             toStatus: source.toStatus,
+            delayMinutes: source.delayMinutes || 0,
             agentIds: source.agentIds || [],
             rotationMode: source.rotationMode || "sequential",
             skipPreviousAgents: source.skipPreviousAgents !== false,

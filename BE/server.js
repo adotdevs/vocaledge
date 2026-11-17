@@ -613,7 +613,9 @@ cron.schedule('0 0 * * *', async () => {
 console.log('✅ Cron job scheduled: Old sent emails cleanup (daily at midnight)\n');
 
 const { processDueReminders } = require('./controllers/reminderController');
+const { runDueScheduledRotations } = require('./utils/leadRotationEngine');
 cron.schedule('* * * * *', async () => {
   await processDueReminders();
+  await runDueScheduledRotations();
 });
-console.log('✅ Cron job scheduled: CRM reminder notifications (every minute)\n');
+console.log('✅ Cron job scheduled: CRM reminder notifications & timed lead rotations (every minute)\n');

@@ -132,12 +132,14 @@ const processLeadsForRotation = async (
     const activeRules = await Rule.find(ruleQuery).sort({ priority: 1, createdAt: 1 }).lean();
     if (!activeRules.length) return summary;
 
-    // Filter rules that match enteredStatus
+    // Filter rules that match enteredStatus (and timing: immediate rules run live, delayed rules run via scheduler/manual)
+    const isImmediateTrigger = triggerType !== "manual_run" && triggerType !== "scheduled";
     const statusRules = activeRules.filter(
       (r) =>
         normText(r.fromStatus) === normText(enteredStatus) &&
         Array.isArray(r.agentIds) &&
-        r.agentIds.length > 0
+        r.agentIds.length > 0 &&
+        (!isImmediateTrigger || (Number(r.delayMinutes) || 0) === 0)
     );
     if (!statusRules.length) return summary;
 
@@ -678,10 +680,83 @@ const runRuleOnExistingLeads = async (ruleId, actor = null, maxBatch = 500) => {
   }
 };
 
+let scheduledRotationRunning = false;
+
+/**
+ * Background scheduler: Finds active rules with delayMinutes > 0 and rotates
+ * leads that have been waiting in `fromStatus` for at least `delayMinutes`.
+ */
+const runDueScheduledRotations = async () => {
+  if (scheduledRotationRunning) return;
+  scheduledRotationRunning = true;
+  try {
+    const Rule = await getLeadAutomationRuleModel();
+    const dueRules = await Rule.find({
+      active: true,
+      delayMinutes: { $gt: 0 },
+      "agentIds.0": { $exists: true },
+    })
+      .sort({ priority: 1, createdAt: 1 })
+      .lean();
+
+    if (!dueRules.length) return;
+
+    const Lead = await getLeadModel();
+    const nowMs = Date.now();
+
+    for (const rule of dueRules) {
+      const delayMs = Math.max(1, Number(rule.delayMinutes) || 0) * 60 * 1000;
+      const cutoffDate = new Date(nowMs - delayMs);
+      const escapedFrom = String(rule.fromStatus || "").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (!escapedFrom) continue;
+
+      const query = {
+        isDeleted: false,
+        status: { $regex: new RegExp(`^${escapedFrom}$`, "i") },
+        updatedAt: { $lte: cutoffDate },
+      };
+
+      if (rule.listMode === "selected" && Array.isArray(rule.fileNames) && rule.fileNames.length > 0) {
+        query.fileName = { $in: rule.fileNames };
+      }
+      if (Array.isArray(rule.countries) && rule.countries.length > 0) {
+        query.country = { $in: rule.countries };
+      }
+      if (Array.isArray(rule.brands) && rule.brands.length > 0) {
+        query.Brand = { $in: rule.brands };
+      }
+      if (Array.isArray(rule.sources) && rule.sources.length > 0) {
+        query.source = { $in: rule.sources };
+      }
+
+      const dueLeads = await Lead.find(query)
+        .sort({ updatedAt: 1 })
+        .limit(300)
+        .select("_id")
+        .lean();
+
+      if (dueLeads.length > 0) {
+        await processLeadsForRotation(
+          dueLeads,
+          rule.fromStatus,
+          null,
+          "scheduled",
+          String(rule._id)
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Error in runDueScheduledRotations:", err);
+  } finally {
+    scheduledRotationRunning = false;
+  }
+};
+
 module.exports = {
   ensureStatusExists,
   ensureRotationStatuses,
   processLeadsForRotation,
   runRuleOnExistingLeads,
+  runDueScheduledRotations,
 };
 

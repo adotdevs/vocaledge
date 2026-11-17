@@ -65,6 +65,7 @@ import useLiveCrmUser from './useLiveCrmUser';
 
 const LEADS_LINK = '/admin/dashboard/crm';
 let savedSidebarScroll = 0;
+let savedChatMenuOpen = true;
 
 const chatClock = (value) => {
   if (!value) return '';
@@ -107,7 +108,7 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
   const [cancelledCallsCount, setCancelledCallsCount] = useState(0);
   const [reminderBadgeCount, setReminderBadgeCount] = useState(0);
   const [callMenuOpen, setCallMenuOpen] = useState(false);
-  const [chatMenuOpen, setChatMenuOpen] = useState(true);
+  const [chatMenuOpen, setChatMenuOpen] = useState(() => savedChatMenuOpen);
   const [sidebarChats, setSidebarChats] = useState([]);
   const [internalMobileMenu, setInternalMobileMenu] = useState(false);
   const previousPathRef = useRef(location.pathname);
@@ -531,7 +532,11 @@ const Sidebar = ({ isCollapsed, setIsSidebarCollapsed, isMobileMenu, setisMobile
                     to={item.chats && !isCollapsed ? undefined : item.link}
                     onClick={() => {
                       if (item.chats && !isCollapsed) {
-                        setChatMenuOpen((prev) => !prev);
+                        setChatMenuOpen((prev) => {
+                          const next = !prev;
+                          savedChatMenuOpen = next;
+                          return next;
+                        });
                         return;
                       }
                       if (isMobile && setMobileMenuState) setMobileMenuState(false);

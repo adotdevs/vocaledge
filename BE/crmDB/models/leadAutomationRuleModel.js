@@ -59,6 +59,13 @@ const leadAutomationRuleSchema = new mongoose.Schema(
       trim: true,
       default: "New",
     },
+    // Reassign timing: 0 = immediately on status change, > 0 = wait X minutes before reassigning
+    delayMinutes: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 43200,
+    },
     // Ordered list of agents participating in rotation
     agentIds: {
       type: [mongoose.Schema.Types.ObjectId],
