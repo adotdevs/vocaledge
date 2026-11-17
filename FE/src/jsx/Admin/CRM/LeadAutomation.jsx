@@ -419,12 +419,25 @@ const LeadAutomation = () => {
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenu, setisMobileMenu] = useState(false);
-  const [activeTab, setActiveTab] = useState("pool"); // "pool" | "automations" | "logs"
+  const savedAutomationUiRef = useRef(null);
+  if (savedAutomationUiRef.current === null) {
+    try {
+      const raw = window.localStorage.getItem("crm_lead_automation_ui_v1");
+      savedAutomationUiRef.current = raw ? JSON.parse(raw) : {};
+    } catch {
+      savedAutomationUiRef.current = {};
+    }
+  }
+  const savedAutoUi = savedAutomationUiRef.current;
+
+  const [activeTab, setActiveTab] = useState(() =>
+    ["pool", "automations", "logs"].includes(savedAutoUi.activeTab) ? savedAutoUi.activeTab : "pool"
+  ); // "pool" | "automations" | "logs"
   const [loading, setLoading] = useState(true);
 
   // Rule-Based Lead Rotation state
   const [rules, setRules] = useState([]);
-  const [selectedRuleId, setSelectedRuleId] = useState(""); // "" = creating new rule
+  const [selectedRuleId, setSelectedRuleId] = useState(() => savedAutoUi.selectedRuleId || ""); // "" = creating new rule
   const [ruleDraft, setRuleDraft] = useState(() => createBlankRuleDraft());
   const [ruleSearch, setRuleSearch] = useState("");
   const [agentSearch, setAgentSearch] = useState("");
@@ -448,13 +461,31 @@ const LeadAutomation = () => {
   // Automation Logs state
   const [logs, setLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
-  const [logsPage, setLogsPage] = useState(1);
+  const [logsPage, setLogsPage] = useState(() => Math.max(1, Number(savedAutoUi.logsPage) || 1));
   const [logsPagination, setLogsPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
   const [logsSummary, setLogsSummary] = useState({ total: 0, rotatedTotal: 0, exhaustedTotal: 0 });
-  const [logSearch, setLogSearch] = useState("");
-  const [logRuleFilter, setLogRuleFilter] = useState("");
-  const [logOutcomeFilter, setLogOutcomeFilter] = useState("");
+  const [logSearch, setLogSearch] = useState(() => savedAutoUi.logSearch || "");
+  const [logRuleFilter, setLogRuleFilter] = useState(() => savedAutoUi.logRuleFilter || "");
+  const [logOutcomeFilter, setLogOutcomeFilter] = useState(() => savedAutoUi.logOutcomeFilter || "");
   const [clearingLogs, setClearingLogs] = useState(false);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "crm_lead_automation_ui_v1",
+        JSON.stringify({
+          activeTab,
+          selectedRuleId,
+          logsPage,
+          logSearch,
+          logRuleFilter,
+          logOutcomeFilter,
+        })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [activeTab, selectedRuleId, logsPage, logSearch, logRuleFilter, logOutcomeFilter]);
 
   // Auto-Refill Pool state (existing unassigned pool auto-assignment)
   const [enabled, setEnabled] = useState(true);

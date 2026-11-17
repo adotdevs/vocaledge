@@ -4805,6 +4805,257 @@ exports.leadListStatistics = async (req, res) => {
     }
 };
 
+exports.getLeadAgentMatrix = async (req, res) => {
+    try {
+        const Lead = await getLeadModel();
+        const getActivityModel = require("../crmDB/models/activityModel");
+        const Activity = await getActivityModel();
+        const LogModel = await getLeadAutomationLogModel();
+        const getLeadStatusModel = require("../crmDB/models/leadStatusModel");
+        const LeadStatus = await getLeadStatusModel();
+
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(10, parseInt(req.query.limit, 10) || 50));
+        const skip = (page - 1) * limit;
+
+        const query = { isDeleted: false };
+        await applyLeadVisibilityToQuery(query, req.user);
+
+        const search = String(req.query.search || "").trim();
+        if (search) {
+            const safeSearch = escapeRegex(search);
+            const rx = new RegExp(safeSearch, "i");
+            const num = Number(search.replace(/^#/, ""));
+            const orParts = [
+                { firstName: rx },
+                { lastName: rx },
+                { email: rx },
+                { phone: rx },
+                ...(Number.isInteger(num) && num > 0 ? [{ leadNumber: num }] : []),
+            ];
+            query.$and = query.$and || [];
+            query.$and.push({ $or: orParts });
+        }
+
+        const statusFilter = String(req.query.status || "").trim();
+        if (statusFilter) {
+            if (statusFilter.toLowerCase() === "new") {
+                query.$and = query.$and || [];
+                query.$and.push({
+                    $or: [{ status: /^new$/i }, { status: null }, { status: "" }, { status: { $exists: false } }],
+                });
+            } else {
+                query.status = new RegExp(`^${escapeRegex(statusFilter)}$`, "i");
+            }
+        }
+
+        const agentFilter = String(req.query.agent || "").trim();
+        if (agentFilter && agentFilter !== "all") {
+            if (agentFilter === "unassigned") {
+                const unassignedCond = await getUnassignedCondition(Lead);
+                query.$and = query.$and || [];
+                query.$and.push(unassignedCond);
+            } else if (mongoose.Types.ObjectId.isValid(agentFilter)) {
+                const agentObjId = new mongoose.Types.ObjectId(agentFilter);
+                query.$and = query.$and || [];
+                query.$and.push({
+                    $or: [{ agent: agentObjId }, { pastAgentIds: agentObjId }],
+                });
+            }
+        }
+
+        const listFilter = String(req.query.list || "").trim();
+        if (listFilter) {
+            if (listFilter === "__manual__") {
+                query.$and = query.$and || [];
+                query.$and.push({ $or: [{ fileName: null }, { fileName: "" }, { fileName: { $exists: false } }] });
+            } else {
+                query.fileName = new RegExp(`^${escapeRegex(listFilter)}$`, "i");
+            }
+        }
+
+        if (req.query.brand && String(req.query.brand).trim() && hasCrmPermission(req.user, "canViewLeadBrand")) {
+            query.Brand = new RegExp(`^${escapeRegex(String(req.query.brand).trim())}$`, "i");
+        }
+        if (req.query.country && String(req.query.country).trim()) {
+            applyCountryFilter(query, req.query.country);
+        }
+        if (req.query.source && String(req.query.source).trim() && canViewLeadSource(req.user)) {
+            query.source = new RegExp(`^${escapeRegex(String(req.query.source).trim())}$`, "i");
+        }
+
+        const statusQuery = req.user?.role === "superadmin" ? {} : { adminOnly: { $ne: true } };
+
+        const [leads, total, staffUsers, activeCounts, statusDocs] = await Promise.all([
+            Lead.find(query)
+                .sort({ updatedAt: -1, createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .select("leadNumber firstName lastName email phone country Brand fileName source status agent pastAgentIds rotationCount createdAt updatedAt")
+                .lean(),
+            Lead.countDocuments(query),
+            User.find({ role: { $in: ["admin", "subadmin", "manager"] } })
+                .select("firstName lastName role email avatar")
+                .lean(),
+            Lead.aggregate([
+                { $match: { isDeleted: false, agent: { $ne: null } } },
+                { $group: { _id: "$agent", count: { $sum: 1 } } },
+            ]),
+            LeadStatus.find(statusQuery).sort({ sortOrder: 1, label: 1 }).select("label color").lean(),
+        ]);
+
+        const countMap = new Map(activeCounts.map((r) => [String(r._id), r.count || 0]));
+        const agents = staffUsers
+            .map((u) => ({
+                id: String(u._id),
+                name: `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.email,
+                role: u.role,
+                activeCount: countMap.get(String(u._id)) || 0,
+            }))
+            .sort((a, b) => b.activeCount - a.activeCount || a.name.localeCompare(b.name));
+
+        const agentNameToId = new Map(agents.map((a) => [a.name.toLowerCase(), a.id]));
+        const leadIds = leads.map((l) => l._id);
+
+        const [activities, rotLogs] = leadIds.length
+            ? await Promise.all([
+                Activity.find({
+                    leadId: { $in: leadIds },
+                    type: { $in: ["assignment_change", "status_change"] },
+                })
+                    .sort({ createdAt: 1 })
+                    .select("leadId type changes metadata createdAt")
+                    .lean(),
+                LogModel.find({ leadId: { $in: leadIds } })
+                    .sort({ createdAt: 1 })
+                    .select("leadId fromAgent toAgent fromStatus toStatus outcome createdAt")
+                    .lean(),
+            ])
+            : [[], []];
+
+        const activitiesByLead = new Map();
+        activities.forEach((act) => {
+            const k = String(act.leadId);
+            if (!activitiesByLead.has(k)) activitiesByLead.set(k, []);
+            activitiesByLead.get(k).push(act);
+        });
+
+        const logsByLead = new Map();
+        rotLogs.forEach((log) => {
+            const k = String(log.leadId);
+            if (!logsByLead.has(k)) logsByLead.set(k, []);
+            logsByLead.get(k).push(log);
+        });
+
+        const matrixRows = leads.map((lead) => {
+            const idStr = String(lead._id);
+            const agentStates = {};
+            let trackedOwnerId = "";
+
+            const leadActs = activitiesByLead.get(idStr) || [];
+            leadActs.forEach((act) => {
+                if (act.type === "assignment_change") {
+                    const meta = act.metadata instanceof Map ? Object.fromEntries(act.metadata) : (act.metadata || {});
+                    const prevId = meta.previousAgentId ? String(meta.previousAgentId) : "";
+                    const newId =
+                        (meta.newAgentId ? String(meta.newAgentId) : "") ||
+                        agentNameToId.get(String(act.changes?.newValue || "").trim().toLowerCase()) ||
+                        "";
+                    if (prevId && !agentStates[prevId]) {
+                        agentStates[prevId] = { status: "Handled", isCurrent: false, updatedAt: act.createdAt };
+                    }
+                    if (newId) {
+                        trackedOwnerId = newId;
+                        if (!agentStates[newId]) {
+                            agentStates[newId] = { status: "New", isCurrent: false, updatedAt: act.createdAt };
+                        }
+                    }
+                } else if (act.type === "status_change" && trackedOwnerId) {
+                    agentStates[trackedOwnerId] = {
+                        status: act.changes?.newValue || "Updated",
+                        isCurrent: false,
+                        updatedAt: act.createdAt,
+                    };
+                }
+            });
+
+            const leadLogs = logsByLead.get(idStr) || [];
+            leadLogs.forEach((log) => {
+                const fromId = log.fromAgent?.userId ? String(log.fromAgent.userId) : "";
+                const toId = log.toAgent?.userId ? String(log.toAgent.userId) : "";
+                if (fromId) {
+                    agentStates[fromId] = {
+                        status: log.fromStatus || "No Answer",
+                        isCurrent: false,
+                        updatedAt: log.createdAt,
+                    };
+                }
+                if (toId && log.outcome === "rotated") {
+                    agentStates[toId] = {
+                        status: log.toStatus || "New",
+                        isCurrent: false,
+                        updatedAt: log.createdAt,
+                    };
+                }
+            });
+
+            if (Array.isArray(lead.pastAgentIds)) {
+                lead.pastAgentIds.forEach((pid) => {
+                    const pStr = String(pid);
+                    if (pStr && !agentStates[pStr]) {
+                        agentStates[pStr] = { status: "Handled", isCurrent: false, updatedAt: lead.updatedAt };
+                    }
+                });
+            }
+
+            if (lead.agent) {
+                const curId = String(lead.agent);
+                agentStates[curId] = {
+                    status: lead.status || "New",
+                    isCurrent: true,
+                    updatedAt: lead.updatedAt,
+                };
+            }
+
+            const sanitized = hidePrivateLeadFields(lead, req.user);
+            return {
+                _id: idStr,
+                leadNumber: sanitized.leadNumber || null,
+                firstName: sanitized.firstName || "",
+                lastName: sanitized.lastName || "",
+                email: sanitized.email || "",
+                phone: sanitized.phone || "",
+                country: sanitized.country || "",
+                Brand: sanitized.Brand || "",
+                fileName: sanitized.fileName || "",
+                source: sanitized.source || "",
+                status: sanitized.status || "New",
+                currentAgentId: lead.agent ? String(lead.agent) : "",
+                rotationCount: sanitized.rotationCount || 0,
+                updatedAt: sanitized.updatedAt,
+                agentStates,
+            };
+        });
+
+        res.json({
+            success: true,
+            leads: matrixRows,
+            agents,
+            statuses: statusDocs,
+            pagination: {
+                page,
+                limit,
+                total,
+                pages: Math.max(1, Math.ceil(total / limit)),
+            },
+            generatedAt: new Date().toISOString(),
+        });
+    } catch (err) {
+        console.error("Error loading lead agent matrix:", err);
+        res.status(500).json({ success: false, msg: "Could not load lead agent matrix" });
+    }
+};
+
 const LEAD_VIEW_COLUMNS = ["contact", "phone", "status", "country", "brand", "source", "fileName", "remarks", "agent", "created"];
 
 exports.getLeadViewColumns = async (req, res) => {

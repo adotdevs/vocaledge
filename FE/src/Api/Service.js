@@ -586,6 +586,13 @@ export const getLeadListStatsApi = (params = {}) => {
   const query = new URLSearchParams(clean).toString();
   return getApi(`/crm/lead-list-stats${query ? `?${query}` : ""}`);
 };
+export const getLeadAgentMatrixApi = (params = {}) => {
+  const clean = Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== "")
+  );
+  const query = new URLSearchParams(clean).toString();
+  return getApi(`/crm/lead-agent-matrix${query ? `?${query}` : ""}`);
+};
 export const clearChatRecycleConversationApi = (id) => deleteApi(`/crm/chat/admin/recycle/conversations/${id}`);
 export const restoreChatMessageApi = (id) => postApi(`/crm/chat/admin/messages/${id}/restore`);
 export const deleteChatRecycleMessageApi = (id) => deleteApi(`/crm/chat/admin/messages/${id}`);

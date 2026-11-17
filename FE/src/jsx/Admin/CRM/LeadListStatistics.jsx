@@ -14,6 +14,8 @@ import {
   InputAdornment,
   LinearProgress,
   MenuItem,
+  Pagination,
+  Popover,
   Table,
   TableBody,
   TableCell,
@@ -39,14 +41,18 @@ import Bolt from "@mui/icons-material/Bolt";
 import Business from "@mui/icons-material/Business";
 import CalendarToday from "@mui/icons-material/CalendarToday";
 import CheckCircleOutline from "@mui/icons-material/CheckCircleOutline";
+import ChevronLeft from "@mui/icons-material/ChevronLeft";
 import ChevronRight from "@mui/icons-material/ChevronRight";
+import Close from "@mui/icons-material/Close";
 import DescriptionOutlined from "@mui/icons-material/DescriptionOutlined";
 import EmailOutlined from "@mui/icons-material/EmailOutlined";
 import EmojiEventsOutlined from "@mui/icons-material/EmojiEventsOutlined";
 import Flag from "@mui/icons-material/Flag";
+import GridOn from "@mui/icons-material/GridOn";
 import HourglassEmpty from "@mui/icons-material/HourglassEmpty";
 import Hub from "@mui/icons-material/Hub";
 import InfoOutlined from "@mui/icons-material/InfoOutlined";
+import KeyboardArrowDown from "@mui/icons-material/KeyboardArrowDown";
 import Layers from "@mui/icons-material/Layers";
 import LocationOn from "@mui/icons-material/LocationOn";
 import MenuIcon from "@mui/icons-material/Menu";
@@ -68,7 +74,8 @@ import Sidebar from "./Sidebar";
 import CrmAppBarActions from "./components/CrmAppBarActions";
 import CrmAccessDenied from "./components/CrmAccessDenied";
 import useLiveCrmUser from "./useLiveCrmUser";
-import { adminCrmLeadsApi, getLeadListStatsApi } from "../../../Api/Service";
+import { toast } from "react-toastify";
+import { adminCrmLeadsApi, getLeadAgentMatrixApi, getLeadListStatsApi, updateLeadApi } from "../../../Api/Service";
 
 const formatCount = (value) => Number(value || 0).toLocaleString();
 
@@ -356,17 +363,41 @@ const EMPTY_FILTERS = {
   status: "",
 };
 
+const COMMAND_CENTER_STORAGE_KEY = "crm_command_center_ui_v1";
+
+const readCommandCenterStorage = () => {
+  try {
+    const raw = window.localStorage.getItem(COMMAND_CENTER_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
 const LeadListStatistics = () => {
   const navigate = useNavigate();
   const { can, ready } = useLiveCrmUser();
   const canViewCommandCenter = can("canViewCommandCenter");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenu, setIsMobileMenu] = useState(false);
+  const initialUiRef = useRef(null);
+  if (initialUiRef.current === null) {
+    initialUiRef.current = readCommandCenterStorage();
+  }
+  const savedUi = initialUiRef.current;
 
-  // Top-level workspace view: "command_center" | "leaderboard" | "agent_detail"
-  const [workspaceMode, setWorkspaceMode] = useState("command_center");
-  const [selectedAgentId, setSelectedAgentId] = useState("");
-  const [agentSubTab, setAgentSubTab] = useState("overview"); // "overview" | "journey" | "leads" | "rotations" | "activity"
+  // Top-level workspace view: "agent_matrix" | "command_center" | "leaderboard" | "agent_detail"
+  const [workspaceMode, setWorkspaceMode] = useState(() =>
+    ["agent_matrix", "command_center", "leaderboard", "agent_detail"].includes(savedUi.workspaceMode)
+      ? savedUi.workspaceMode
+      : "command_center"
+  );
+  const [selectedAgentId, setSelectedAgentId] = useState(() => savedUi.selectedAgentId || "");
+  const [agentSubTab, setAgentSubTab] = useState(() =>
+    ["overview", "journey", "leads", "rotations", "activity"].includes(savedUi.agentSubTab)
+      ? savedUi.agentSubTab
+      : "overview"
+  );
 
   // Agent-specific recent leads state
   const [agentLeads, setAgentLeads] = useState([]);
@@ -376,7 +407,10 @@ const LeadListStatistics = () => {
   const [selectedLeadIds, setSelectedLeadIds] = useState([]);
 
   // Filters
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useState(() => ({
+    ...EMPTY_FILTERS,
+    ...(savedUi.filters && typeof savedUi.filters === "object" ? savedUi.filters : {}),
+  }));
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
@@ -401,13 +435,143 @@ const LeadListStatistics = () => {
   });
 
   // Interactive UI states
-  const [flowViewBy, setFlowViewBy] = useState("status"); // "status" | "agent" | "automation"
-  const [rightPanelTab, setRightPanelTab] = useState("status"); // "status" | "brand" | "list" | "country"
-  const [agentSortBy, setAgentSortBy] = useState("leadsReceived");
-  const [agentSortDir, setAgentSortDir] = useState("desc");
+  const [flowViewBy, setFlowViewBy] = useState(() => savedUi.flowViewBy || "status");
+  const [rightPanelTab, setRightPanelTab] = useState(() => savedUi.rightPanelTab || "status");
+  const [agentSortBy, setAgentSortBy] = useState(() => savedUi.agentSortBy || "leadsReceived");
+  const [agentSortDir, setAgentSortDir] = useState(() => savedUi.agentSortDir || "desc");
   const [agentSearch, setAgentSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Agent Matrix (Excel-style Lead x Agent Status Grid)
+  const [matrixLeads, setMatrixLeads] = useState([]);
+  const [matrixAgents, setMatrixAgents] = useState([]);
+  const [matrixStatuses, setMatrixStatuses] = useState([]);
+  const initialMatrixPage = Math.max(1, Number(savedUi.matrixPage) || 1);
+  const [matrixPagination, setMatrixPagination] = useState({
+    page: initialMatrixPage,
+    limit: 50,
+    total: 0,
+    pages: 1,
+  });
+  const [matrixLoading, setMatrixLoading] = useState(false);
+  const [matrixFilters, setMatrixFilters] = useState(() => ({
+    search: "",
+    agent: "",
+    status: "",
+    ...(savedUi.matrixFilters && typeof savedUi.matrixFilters === "object" ? savedUi.matrixFilters : {}),
+  }));
+  const matrixFiltersRef = useRef(matrixFilters);
+  matrixFiltersRef.current = matrixFilters;
+  const matrixPageRef = useRef(initialMatrixPage);
+  const [matrixSelectedIds, setMatrixSelectedIds] = useState([]);
+  const [matrixLeadMenu, setMatrixLeadMenu] = useState({ anchorEl: null, lead: null, agentName: "" });
+  const [matrixSavingStatus, setMatrixSavingStatus] = useState(false);
+
+  // Persist tab, pagination, selected agent, and filters across browser refreshes
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        COMMAND_CENTER_STORAGE_KEY,
+        JSON.stringify({
+          workspaceMode,
+          selectedAgentId,
+          agentSubTab,
+          matrixPage: matrixPagination.page || matrixPageRef.current || 1,
+          matrixFilters,
+          filters,
+          flowViewBy,
+          rightPanelTab,
+          agentSortBy,
+          agentSortDir,
+        })
+      );
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [
+    workspaceMode,
+    selectedAgentId,
+    agentSubTab,
+    matrixPagination.page,
+    matrixFilters,
+    filters,
+    flowViewBy,
+    rightPanelTab,
+    agentSortBy,
+    agentSortDir,
+  ]);
+
+  const loadAgentMatrix = useCallback(async (pageOverride, customFilters, silent = false) => {
+    const targetPage = pageOverride ?? matrixPageRef.current ?? 1;
+    const activeMatFilters = customFilters ?? matrixFiltersRef.current;
+    const globalF = filtersRef.current;
+    if (!silent) setMatrixLoading(true);
+    try {
+      const res = await getLeadAgentMatrixApi({
+        page: targetPage,
+        limit: 50,
+        search: activeMatFilters.search,
+        agent: activeMatFilters.agent || globalF.agent,
+        status: activeMatFilters.status || globalF.status,
+        list: globalF.list,
+        brand: globalF.brand,
+        country: globalF.country,
+        source: globalF.source,
+      });
+      if (res?.success) {
+        setMatrixLeads(res.leads || []);
+        setMatrixAgents(res.agents || []);
+        setMatrixStatuses(res.statuses || []);
+        setMatrixPagination(res.pagination || { page: targetPage, limit: 50, total: 0, pages: 1 });
+        matrixPageRef.current = res.pagination?.page || targetPage;
+        setLastUpdatedTime(
+          new Date(res.generatedAt || Date.now()).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        );
+      }
+    } finally {
+      if (!silent) setMatrixLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !canViewCommandCenter || workspaceMode !== "agent_matrix") return undefined;
+    loadAgentMatrix(matrixPageRef.current, undefined, false);
+    const timer = window.setInterval(() => {
+      loadAgentMatrix(matrixPageRef.current, undefined, true);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [ready, canViewCommandCenter, workspaceMode, loadAgentMatrix]);
+
+  const handleMatrixStatusChange = async (lead, nextStatus) => {
+    if (!lead?._id || !nextStatus || nextStatus === lead.status) return;
+    setMatrixSavingStatus(true);
+    try {
+      const res = await updateLeadApi(lead._id, {
+        firstName: lead.firstName || "Lead",
+        lastName: lead.lastName || "-",
+        email: lead.email || "",
+        phone: lead.phone || "",
+        country: lead.country || "",
+        Brand: lead.Brand || "",
+        status: nextStatus,
+      });
+      if (res?.success) {
+        toast.success(res.msg || `Status updated to "${nextStatus}"`);
+        setMatrixLeadMenu({ anchorEl: null, lead: null, agentName: "" });
+        loadAgentMatrix(matrixPageRef.current, undefined, true);
+      } else {
+        toast.error(res?.msg || "Could not update status");
+      }
+    } catch (err) {
+      toast.error(err?.msg || "Could not update status");
+    } finally {
+      setMatrixSavingStatus(false);
+    }
+  };
 
   const loadStats = useCallback(async (appliedFilters, isInitial = false) => {
     const activeFilters = appliedFilters !== undefined ? appliedFilters : filtersRef.current;
@@ -868,7 +1032,9 @@ const LeadListStatistics = () => {
                   noWrap
                   sx={{ fontWeight: 800, color: "#0f172a", lineHeight: 1.15, fontSize: { xs: 17, sm: 21 } }}
                 >
-                  {workspaceMode === "agent_detail" && selectedAgent
+                  {workspaceMode === "agent_matrix"
+                    ? "CRM — Agent Matrix & Lead Status"
+                    : workspaceMode === "agent_detail" && selectedAgent
                     ? `${selectedAgent.name} — Agent Performance`
                     : workspaceMode === "leaderboard"
                     ? "Agent Performance & Leaderboard"
@@ -879,7 +1045,9 @@ const LeadListStatistics = () => {
                   noWrap
                   sx={{ color: "#64748b", fontSize: 12.5, display: { xs: "none", sm: "block" } }}
                 >
-                  {workspaceMode === "agent_detail"
+                  {workspaceMode === "agent_matrix"
+                    ? "Real-time lead-by-agent matrix showing current and historical agent handling statuses."
+                    : workspaceMode === "agent_detail"
                     ? "Deep agent conversion metrics, lead journey funnel, rotation history, and handled leads."
                     : workspaceMode === "leaderboard"
                     ? "Track your team's lead handling velocity, response rates, rotations, and conversion leaderboard."
@@ -900,12 +1068,16 @@ const LeadListStatistics = () => {
                   <IconButton
                     size="small"
                     onClick={() => {
-                      loadStats(filters, false);
-                      if (workspaceMode === "agent_detail" && selectedAgent?.agentId) {
-                        loadAgentRecentLeads(selectedAgent.agentId);
+                      if (workspaceMode === "agent_matrix") {
+                        loadAgentMatrix(matrixPageRef.current, undefined, false);
+                      } else {
+                        loadStats(filters, false);
+                        if (workspaceMode === "agent_detail" && selectedAgent?.agentId) {
+                          loadAgentRecentLeads(selectedAgent.agentId);
+                        }
                       }
                     }}
-                    disabled={loading || refreshing}
+                    disabled={loading || refreshing || matrixLoading}
                     sx={{
                       border: "1px solid",
                       borderColor: "divider",
@@ -917,7 +1089,7 @@ const LeadListStatistics = () => {
                     <Refresh
                       sx={{
                         fontSize: 18,
-                        animation: refreshing ? "spin 0.9s linear infinite" : "none",
+                        animation: refreshing || matrixLoading ? "spin 0.9s linear infinite" : "none",
                         "@keyframes spin": {
                           "0%": { transform: "rotate(0deg)" },
                           "100%": { transform: "rotate(360deg)" },
@@ -932,7 +1104,14 @@ const LeadListStatistics = () => {
                 size="small"
                 variant="outlined"
                 startIcon={<AutoFixHigh sx={{ fontSize: 16 }} />}
-                onClick={handleResetFilters}
+                onClick={() => {
+                  handleResetFilters();
+                  if (workspaceMode === "agent_matrix") {
+                    const clean = { search: "", agent: "", status: "" };
+                    setMatrixFilters(clean);
+                    loadAgentMatrix(1, clean, false);
+                  }
+                }}
                 sx={{
                   borderRadius: "10px",
                   textTransform: "none",
@@ -955,7 +1134,9 @@ const LeadListStatistics = () => {
               <CrmAppBarActions />
             </Box>
           </Toolbar>
-          {refreshing && <LinearProgress sx={{ height: 2, "& .MuiLinearProgress-bar": { bgcolor: "#6d28d9" } }} />}
+          {(refreshing || matrixLoading) && (
+            <LinearProgress sx={{ height: 2, "& .MuiLinearProgress-bar": { bgcolor: "#6d28d9" } }} />
+          )}
         </AppBar>
 
         {/* Main Workspace Container */}
@@ -981,9 +1162,11 @@ const LeadListStatistics = () => {
                 border: "1px solid rgba(15, 23, 42, 0.08)",
                 boxShadow: "0 2px 6px rgba(15, 23, 42, 0.03)",
                 gap: 0.5,
+                flexWrap: "wrap",
               }}
             >
               {[
+                { id: "agent_matrix", label: "Agent Matrix", icon: <GridOn sx={{ fontSize: 17 }} /> },
                 { id: "command_center", label: "Command Center", icon: <Assessment sx={{ fontSize: 17 }} /> },
                 { id: "leaderboard", label: "Agent Leaderboard", icon: <EmojiEventsOutlined sx={{ fontSize: 17 }} /> },
                 ...(staffAgents.length > 0
@@ -1037,7 +1220,589 @@ const LeadListStatistics = () => {
                 );
               })}
             </Box>
+
+            {workspaceMode === "agent_matrix" && (
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <IconButton
+                  size="small"
+                  disabled={matrixPagination.page <= 1 || matrixLoading}
+                  onClick={() => loadAgentMatrix(matrixPagination.page - 1)}
+                  sx={{ border: "1px solid rgba(15, 23, 42, 0.1)", bgcolor: "#fff", borderRadius: "8px" }}
+                >
+                  <ChevronLeft fontSize="small" />
+                </IconButton>
+                <Typography variant="body2" fontWeight={700} color="#334155">
+                  {matrixPagination.total === 0
+                    ? "0 of 0"
+                    : `${formatCount((matrixPagination.page - 1) * matrixPagination.limit + 1)}–${formatCount(
+                        Math.min(matrixPagination.page * matrixPagination.limit, matrixPagination.total)
+                      )} of ${formatCount(matrixPagination.total)}`}
+                </Typography>
+                <IconButton
+                  size="small"
+                  disabled={matrixPagination.page >= matrixPagination.pages || matrixLoading}
+                  onClick={() => loadAgentMatrix(matrixPagination.page + 1)}
+                  sx={{ border: "1px solid rgba(15, 23, 42, 0.1)", bgcolor: "#fff", borderRadius: "8px" }}
+                >
+                  <ChevronRight fontSize="small" />
+                </IconButton>
+              </Box>
+            )}
           </Box>
+
+          {/* ========================================================= */}
+          {/* VIEW 0: AGENT MATRIX (EXCEL-STYLE LEAD x AGENT GRID)      */}
+          {/* ========================================================= */}
+          {workspaceMode === "agent_matrix" && (
+            <Box>
+              {/* Top Legend & Filter Bar */}
+              <Card elevation={0} sx={{ ...cardBaseSx, mb: 2 }}>
+                <CardContent
+                  sx={{
+                    p: 2,
+                    "&:last-child": { pb: 2 },
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: 1.5,
+                  }}
+                >
+                  {/* Status Legend */}
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                    <Typography variant="caption" fontWeight={800} color="#475569" sx={{ mr: 0.5 }}>
+                      Status (per agent):
+                    </Typography>
+                    {[
+                      { label: "Active / Call Back", bg: "#dcfce7", color: "#15803d", icon: "✓" },
+                      { label: "New", bg: "#dbeafe", color: "#1d4ed8", icon: "★" },
+                      { label: "No Answer", bg: "#fef3c7", color: "#b45309", icon: "◷" },
+                      { label: "Not Interested", bg: "#fee2e2", color: "#b91c1c", icon: "✕" },
+                      { label: "Handled (Past)", bg: "#ede9fe", color: "#6d28d9", icon: "↺" },
+                      { label: "— Not Assigned", bg: "#f1f5f9", color: "#64748b", icon: "" },
+                    ].map((leg) => (
+                      <Box
+                        key={leg.label}
+                        sx={{
+                          px: 1.2,
+                          py: 0.4,
+                          borderRadius: 999,
+                          bgcolor: leg.bg,
+                          color: leg.color,
+                          fontSize: 11.5,
+                          fontWeight: 800,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 0.5,
+                        }}
+                      >
+                        {leg.icon && <span>{leg.icon}</span>}
+                        <span>{leg.label}</span>
+                      </Box>
+                    ))}
+                  </Box>
+
+                  {/* Quick Filters */}
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, flexWrap: "wrap" }}>
+                    <TextField
+                      select
+                      size="small"
+                      value={matrixFilters.agent}
+                      onChange={(e) => {
+                        const next = { ...matrixFilters, agent: e.target.value };
+                        setMatrixFilters(next);
+                        loadAgentMatrix(1, next, false);
+                      }}
+                      SelectProps={{ displayEmpty: true }}
+                      sx={{
+                        minWidth: 165,
+                        "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5, fontWeight: 700 },
+                      }}
+                    >
+                      <MenuItem value="">All Agents</MenuItem>
+                      <MenuItem value="unassigned">Unassigned Pool</MenuItem>
+                      {matrixAgents.map((ag) => (
+                        <MenuItem key={ag.id} value={ag.id}>
+                          {ag.name} ({formatCount(ag.activeCount)})
+                        </MenuItem>
+                      ))}
+                    </TextField>
+
+                    <TextField
+                      select
+                      size="small"
+                      value={matrixFilters.status}
+                      onChange={(e) => {
+                        const next = { ...matrixFilters, status: e.target.value };
+                        setMatrixFilters(next);
+                        loadAgentMatrix(1, next, false);
+                      }}
+                      SelectProps={{ displayEmpty: true }}
+                      sx={{
+                        minWidth: 155,
+                        "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5, fontWeight: 700 },
+                      }}
+                    >
+                      <MenuItem value="">All Statuses</MenuItem>
+                      {matrixStatuses.map((st) => (
+                        <MenuItem key={st.label} value={st.label}>
+                          {st.label}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+
+                    <TextField
+                      size="small"
+                      placeholder="Search lead..."
+                      value={matrixFilters.search}
+                      onChange={(e) => {
+                        const next = { ...matrixFilters, search: e.target.value };
+                        setMatrixFilters(next);
+                        loadAgentMatrix(1, next, false);
+                      }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Search sx={{ fontSize: 16, color: "text.secondary" }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        width: { xs: "100%", sm: 210 },
+                        "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5 },
+                      }}
+                    />
+                  </Box>
+                </CardContent>
+              </Card>
+
+              {/* Matrix Table Card */}
+              <Card elevation={0} sx={{ ...cardBaseSx, overflow: "hidden" }}>
+                <TableContainer
+                  sx={{
+                    maxHeight: "calc(100vh - 300px)",
+                    minHeight: 420,
+                    overflow: "auto",
+                    "&::-webkit-scrollbar": { width: 7, height: 7 },
+                    "&::-webkit-scrollbar-track": { bgcolor: "#f8fafc" },
+                    "&::-webkit-scrollbar-thumb": {
+                      bgcolor: "rgba(100, 116, 139, 0.3)",
+                      borderRadius: 999,
+                    },
+                  }}
+                >
+                  <Table
+                    stickyHeader
+                    size="small"
+                    sx={{
+                      "& th": {
+                        whiteSpace: "nowrap",
+                        bgcolor: "#f8fafc",
+                        color: "#334155",
+                        fontWeight: 800,
+                        fontSize: 12.5,
+                        py: 1.35,
+                        px: 1.25,
+                        borderBottom: "1px solid rgba(15, 23, 42, 0.08)",
+                      },
+                      "& td": {
+                        whiteSpace: "nowrap",
+                        py: 1.05,
+                        px: 1.15,
+                        borderBottom: "1px solid rgba(15, 23, 42, 0.05)",
+                      },
+                    }}
+                  >
+                    <TableHead>
+                      <TableRow>
+                        <TableCell
+                          padding="checkbox"
+                          sx={{ position: "sticky", left: 0, zIndex: 4, bgcolor: "#f8fafc !important" }}
+                        >
+                          <Checkbox
+                            size="small"
+                            checked={matrixLeads.length > 0 && matrixSelectedIds.length === matrixLeads.length}
+                            indeterminate={
+                              matrixSelectedIds.length > 0 && matrixSelectedIds.length < matrixLeads.length
+                            }
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setMatrixSelectedIds(matrixLeads.map((l) => l._id));
+                              } else {
+                                setMatrixSelectedIds([]);
+                              }
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell
+                          sx={{
+                            position: "sticky",
+                            left: 42,
+                            zIndex: 4,
+                            bgcolor: "#f8fafc !important",
+                            minWidth: 78,
+                          }}
+                        >
+                          #
+                        </TableCell>
+                        <TableCell
+                          sx={{
+                            position: "sticky",
+                            left: 120,
+                            zIndex: 4,
+                            bgcolor: "#f8fafc !important",
+                            minWidth: 180,
+                            borderRight: "1px solid rgba(15, 23, 42, 0.08)",
+                          }}
+                        >
+                          Lead (Name)
+                        </TableCell>
+                        {matrixAgents.map((ag) => (
+                          <TableCell key={ag.id} align="center" sx={{ minWidth: 125 }}>
+                            <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.6 }}>
+                              <Person sx={{ fontSize: 15, color: "#64748b" }} />
+                              <span>{ag.name}</span>
+                            </Box>
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {matrixLoading && matrixLeads.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={3 + matrixAgents.length} align="center" sx={{ py: 8 }}>
+                            <CircularProgress size={28} sx={{ color: "#6d28d9" }} />
+                          </TableCell>
+                        </TableRow>
+                      ) : matrixLeads.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={3 + matrixAgents.length} align="center" sx={{ py: 7 }}>
+                            <Typography variant="body2" color="text.secondary">
+                              No leads match the current filters.
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        matrixLeads.map((lead, idx) => {
+                          const leadNum = lead.leadNumber
+                            ? `#${lead.leadNumber}`
+                            : `#${String(lead._id || "").slice(-5).toUpperCase() || idx + 1}`;
+                          const fullName = `${lead.firstName || ""} ${lead.lastName || ""}`.trim() || "Unnamed Lead";
+                          const isChecked = matrixSelectedIds.includes(lead._id);
+
+                          return (
+                            <TableRow key={lead._id} hover selected={isChecked}>
+                              <TableCell
+                                padding="checkbox"
+                                sx={{ position: "sticky", left: 0, zIndex: 2, bgcolor: isChecked ? "#f5f3ff" : "#fff" }}
+                              >
+                                <Checkbox
+                                  size="small"
+                                  checked={isChecked}
+                                  onChange={() =>
+                                    setMatrixSelectedIds((prev) =>
+                                      prev.includes(lead._id)
+                                        ? prev.filter((id) => id !== lead._id)
+                                        : [...prev, lead._id]
+                                    )
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  position: "sticky",
+                                  left: 42,
+                                  zIndex: 2,
+                                  bgcolor: isChecked ? "#f5f3ff" : "#fff",
+                                  fontWeight: 700,
+                                  color: "#475569",
+                                  fontSize: 12.5,
+                                }}
+                              >
+                                {leadNum}
+                              </TableCell>
+                              <TableCell
+                                sx={{
+                                  position: "sticky",
+                                  left: 120,
+                                  zIndex: 2,
+                                  bgcolor: isChecked ? "#f5f3ff" : "#fff",
+                                  borderRight: "1px solid rgba(15, 23, 42, 0.08)",
+                                }}
+                              >
+                                <Box
+                                  onClick={(e) =>
+                                    setMatrixLeadMenu({
+                                      anchorEl: e.currentTarget,
+                                      lead,
+                                      agentName: "",
+                                    })
+                                  }
+                                  sx={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 0.5,
+                                    cursor: "pointer",
+                                    color: "#3b28cc",
+                                    fontWeight: 800,
+                                    fontSize: 13,
+                                    "&:hover": { textDecoration: "underline" },
+                                  }}
+                                >
+                                  <span>{fullName}</span>
+                                  <KeyboardArrowDown sx={{ fontSize: 16, color: "#64748b" }} />
+                                </Box>
+                              </TableCell>
+
+                              {matrixAgents.map((ag) => {
+                                const state = lead.agentStates?.[ag.id] || null;
+                                if (!state) {
+                                  return (
+                                    <TableCell key={ag.id} align="center">
+                                      <Box
+                                        sx={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          minWidth: 94,
+                                          height: 28,
+                                          borderRadius: "8px",
+                                          bgcolor: "#f1f5f9",
+                                          color: "#94a3b8",
+                                          fontWeight: 700,
+                                          fontSize: 12,
+                                        }}
+                                      >
+                                        —
+                                      </Box>
+                                    </TableCell>
+                                  );
+                                }
+
+                                const stLower = String(state.status || "").trim().toLowerCase();
+                                let pillBg = "#ede9fe";
+                                let pillColor = "#6d28d9";
+                                let pillIcon = "↺";
+                                if (["active", "interested", "deposited", "converted", "call back", "callback", "replied"].includes(stLower)) {
+                                  pillBg = state.isCurrent ? "#16a34a" : "#dcfce7";
+                                  pillColor = state.isCurrent ? "#ffffff" : "#15803d";
+                                  pillIcon = "✓";
+                                } else if (stLower === "new") {
+                                  pillBg = state.isCurrent ? "#2563eb" : "#dbeafe";
+                                  pillColor = state.isCurrent ? "#ffffff" : "#1d4ed8";
+                                  pillIcon = "★";
+                                } else if (stLower === "no answer") {
+                                  pillBg = state.isCurrent ? "#eab308" : "#fef3c7";
+                                  pillColor = state.isCurrent ? "#1e293b" : "#b45309";
+                                  pillIcon = "◷";
+                                } else if (["not interested", "not active", "invalid number", "no money", "no english", "exhausted", "expired"].includes(stLower)) {
+                                  pillBg = state.isCurrent ? "#dc2626" : "#fee2e2";
+                                  pillColor = state.isCurrent ? "#ffffff" : "#b91c1c";
+                                  pillIcon = "✕";
+                                }
+
+                                return (
+                                  <TableCell key={ag.id} align="center">
+                                    <Tooltip
+                                      title={`${ag.name}: ${state.status}${state.isCurrent ? " (Current Owner)" : " (Past Handler)"}`}
+                                    >
+                                      <Box
+                                        onClick={(e) =>
+                                          setMatrixLeadMenu({
+                                            anchorEl: e.currentTarget,
+                                            lead,
+                                            agentName: ag.name,
+                                          })
+                                        }
+                                        sx={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          gap: 0.5,
+                                          minWidth: 94,
+                                          maxWidth: 122,
+                                          px: 1,
+                                          height: 28,
+                                          borderRadius: "8px",
+                                          bgcolor: pillBg,
+                                          color: pillColor,
+                                          fontWeight: 800,
+                                          fontSize: 11.5,
+                                          cursor: "pointer",
+                                          boxShadow: state.isCurrent
+                                            ? "0 2px 6px rgba(15, 23, 42, 0.14)"
+                                            : "inset 0 0 0 1px rgba(15, 23, 42, 0.08)",
+                                          transition: "transform 0.12s ease",
+                                          "&:hover": { transform: "scale(1.04)" },
+                                        }}
+                                      >
+                                        <span>{pillIcon}</span>
+                                        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                                          {state.status}
+                                        </span>
+                                      </Box>
+                                    </Tooltip>
+                                  </TableCell>
+                                );
+                              })}
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                {/* Matrix Footer & Pagination */}
+                <Box
+                  sx={{
+                    px: 2.5,
+                    py: 1.5,
+                    borderTop: "1px solid rgba(15, 23, 42, 0.06)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: 1.5,
+                    bgcolor: "#fafbff",
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                    Shows agent history per lead • Click a lead name or status cell to view details or change status
+                  </Typography>
+                  <Pagination
+                    size="small"
+                    color="secondary"
+                    count={matrixPagination.pages || 1}
+                    page={matrixPagination.page || 1}
+                    onChange={(_, p) => loadAgentMatrix(p)}
+                  />
+                </Box>
+              </Card>
+
+              {/* Lead Details & Status Dropdown Popover */}
+              <Popover
+                open={Boolean(matrixLeadMenu.anchorEl && matrixLeadMenu.lead)}
+                anchorEl={matrixLeadMenu.anchorEl}
+                onClose={() => setMatrixLeadMenu({ anchorEl: null, lead: null, agentName: "" })}
+                anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+                transformOrigin={{ vertical: "top", horizontal: "left" }}
+                PaperProps={{
+                  sx: {
+                    width: 340,
+                    p: 2,
+                    borderRadius: "14px",
+                    boxShadow: "0 16px 40px rgba(15, 23, 42, 0.16)",
+                  },
+                }}
+              >
+                {matrixLeadMenu.lead && (
+                  <Box>
+                    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.25 }}>
+                      <Box>
+                        <Typography variant="subtitle1" fontWeight={900} color="#0f172a" sx={{ lineHeight: 1.2 }}>
+                          {`${matrixLeadMenu.lead.firstName || ""} ${matrixLeadMenu.lead.lastName || ""}`.trim() ||
+                            "Unnamed Lead"}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          {matrixLeadMenu.lead.leadNumber
+                            ? `#${matrixLeadMenu.lead.leadNumber}`
+                            : `#${String(matrixLeadMenu.lead._id).slice(-5).toUpperCase()}`}
+                          {matrixLeadMenu.agentName ? ` · Viewing ${matrixLeadMenu.agentName}` : ""}
+                        </Typography>
+                      </Box>
+                      <IconButton
+                        size="small"
+                        onClick={() => setMatrixLeadMenu({ anchorEl: null, lead: null, agentName: "" })}
+                      >
+                        <Close fontSize="small" />
+                      </IconButton>
+                    </Box>
+
+                    <Divider sx={{ mb: 1.5 }} />
+
+                    <Box sx={{ display: "grid", gap: 0.85, mb: 1.75, fontSize: 12.5 }}>
+                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          Email:
+                        </Typography>
+                        <Typography variant="caption" fontWeight={800} color="#0f172a" noWrap>
+                          {matrixLeadMenu.lead.email || "—"}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          Phone:
+                        </Typography>
+                        <Typography variant="caption" fontWeight={800} color="#0f172a">
+                          {matrixLeadMenu.lead.phone || "—"}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          Country / Brand:
+                        </Typography>
+                        <Typography variant="caption" fontWeight={800} color="#0f172a">
+                          {[matrixLeadMenu.lead.country, matrixLeadMenu.lead.Brand].filter(Boolean).join(" · ") || "—"}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          List / Source:
+                        </Typography>
+                        <Typography variant="caption" fontWeight={800} color="#0f172a" noWrap>
+                          {[matrixLeadMenu.lead.fileName, matrixLeadMenu.lead.source].filter(Boolean).join(" / ") || "—"}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          Rotations:
+                        </Typography>
+                        <Typography variant="caption" fontWeight={800} color="#6d28d9">
+                          {matrixLeadMenu.lead.rotationCount || 0} time(s)
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    <TextField
+                      select
+                      size="small"
+                      fullWidth
+                      label="Change Current Status"
+                      value={matrixLeadMenu.lead.status || "New"}
+                      disabled={matrixSavingStatus}
+                      onChange={(e) => handleMatrixStatusChange(matrixLeadMenu.lead, e.target.value)}
+                      sx={{ mb: 1.5, "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 13 } }}
+                    >
+                      {matrixStatuses.map((st) => (
+                        <MenuItem key={st.label} value={st.label}>
+                          {st.label}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+
+                    <Button
+                      fullWidth
+                      size="small"
+                      variant="contained"
+                      endIcon={<OpenInNew sx={{ fontSize: 15 }} />}
+                      onClick={() => navigate(`/admin/crm/lead/${matrixLeadMenu.lead._id}/stream`)}
+                      sx={{
+                        borderRadius: "10px",
+                        textTransform: "none",
+                        fontWeight: 800,
+                        bgcolor: "#6d28d9",
+                        "&:hover": { bgcolor: "#5b21b6" },
+                      }}
+                    >
+                      Open Lead Stream
+                    </Button>
+                  </Box>
+                )}
+              </Popover>
+            </Box>
+          )}
+
           {/* ========================================================= */}
           {/* VIEW 3: INDIVIDUAL AGENT PERFORMANCE DEEP-DIVE            */}
           {/* ========================================================= */}
