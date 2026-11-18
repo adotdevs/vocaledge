@@ -1268,38 +1268,80 @@ const LeadListStatistics = () => {
                     gap: 1.5,
                   }}
                 >
-                  {/* Status Legend */}
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-                    <Typography variant="caption" fontWeight={800} color="#475569" sx={{ mr: 0.5 }}>
-                      Status (per agent):
-                    </Typography>
-                    {[
-                      { label: "Active / Call Back", bg: "#dcfce7", color: "#15803d", icon: "✓" },
-                      { label: "New", bg: "#dbeafe", color: "#1d4ed8", icon: "★" },
-                      { label: "No Answer", bg: "#fef3c7", color: "#b45309", icon: "◷" },
-                      { label: "Not Interested", bg: "#fee2e2", color: "#b91c1c", icon: "✕" },
-                      { label: "Handled (Past)", bg: "#ede9fe", color: "#6d28d9", icon: "↺" },
-                      { label: "— Not Assigned", bg: "#f1f5f9", color: "#64748b", icon: "" },
-                    ].map((leg) => (
+                  {/* Status Legend & Ownership Guide */}
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                      <Typography variant="caption" fontWeight={800} color="#475569" sx={{ mr: 0.5 }}>
+                        Status (per agent):
+                      </Typography>
+                      {[
+                        { label: "Active / Call Back", color: "#16a34a", icon: "✓" },
+                        { label: "New", color: "#2563eb", icon: "★" },
+                        { label: "No Answer", color: "#d97706", icon: "◷" },
+                        { label: "Not Interested", color: "#dc2626", icon: "✕" },
+                      ].map((leg) => (
+                        <Box
+                          key={leg.label}
+                          sx={{
+                            px: 1.1,
+                            py: 0.35,
+                            borderRadius: 999,
+                            bgcolor: leg.color,
+                            color: "#ffffff",
+                            fontSize: 11.5,
+                            fontWeight: 800,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 0.5,
+                          }}
+                        >
+                          <span>{leg.icon}</span>
+                          <span>{leg.label}</span>
+                        </Box>
+                      ))}
+                      <Tooltip title="Agent previously held this lead in the past before a status change was logged.">
+                        <Box
+                          sx={{
+                            px: 1.1,
+                            py: 0.3,
+                            borderRadius: 999,
+                            bgcolor: "transparent",
+                            border: "1.5px solid #7c3aed",
+                            color: "#6d28d9",
+                            fontSize: 11.5,
+                            fontWeight: 800,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 0.5,
+                            cursor: "help",
+                          }}
+                        >
+                          <span>↺</span>
+                          <span>Handled (Past)</span>
+                        </Box>
+                      </Tooltip>
                       <Box
-                        key={leg.label}
                         sx={{
-                          px: 1.2,
-                          py: 0.4,
+                          px: 1.1,
+                          py: 0.35,
                           borderRadius: 999,
-                          bgcolor: leg.bg,
-                          color: leg.color,
+                          bgcolor: "#f1f5f9",
+                          color: "#64748b",
                           fontSize: 11.5,
                           fontWeight: 800,
                           display: "inline-flex",
                           alignItems: "center",
-                          gap: 0.5,
                         }}
                       >
-                        {leg.icon && <span>{leg.icon}</span>}
-                        <span>{leg.label}</span>
+                        — Not Assigned
                       </Box>
-                    ))}
+                    </Box>
+
+                    <Typography variant="caption" sx={{ color: "#64748b", fontSize: 11.5, fontWeight: 600 }}>
+                      <strong>Filled chip</strong> = Current Owner &nbsp;•&nbsp;{" "}
+                      <strong>Outlined chip (border only)</strong> = Past Agent &nbsp;•&nbsp;{" "}
+                      <strong>↺ Handled</strong> = Agent was assigned this lead as the very first handler (initial assignment).
+                    </Typography>
                   </Box>
 
                   {/* Quick Filters */}
@@ -1580,31 +1622,35 @@ const LeadListStatistics = () => {
                                 }
 
                                 const stLower = String(state.status || "").trim().toLowerCase();
-                                let pillBg = "#ede9fe";
-                                let pillColor = "#6d28d9";
+                                let baseColor = "#6d28d9";
+                                let currentText = "#ffffff";
                                 let pillIcon = "↺";
                                 if (["active", "interested", "deposited", "converted", "call back", "callback", "replied"].includes(stLower)) {
-                                  pillBg = state.isCurrent ? "#16a34a" : "#dcfce7";
-                                  pillColor = state.isCurrent ? "#ffffff" : "#15803d";
+                                  baseColor = "#16a34a";
                                   pillIcon = "✓";
                                 } else if (stLower === "new") {
-                                  pillBg = state.isCurrent ? "#2563eb" : "#dbeafe";
-                                  pillColor = state.isCurrent ? "#ffffff" : "#1d4ed8";
+                                  baseColor = "#2563eb";
                                   pillIcon = "★";
                                 } else if (stLower === "no answer") {
-                                  pillBg = state.isCurrent ? "#eab308" : "#fef3c7";
-                                  pillColor = state.isCurrent ? "#1e293b" : "#b45309";
+                                  baseColor = "#d97706";
                                   pillIcon = "◷";
                                 } else if (["not interested", "not active", "invalid number", "no money", "no english", "exhausted", "expired"].includes(stLower)) {
-                                  pillBg = state.isCurrent ? "#dc2626" : "#fee2e2";
-                                  pillColor = state.isCurrent ? "#ffffff" : "#b91c1c";
+                                  baseColor = "#dc2626";
                                   pillIcon = "✕";
                                 }
+
+                                const pillBg = state.isCurrent ? baseColor : "transparent";
+                                const pillColor = state.isCurrent ? currentText : baseColor;
+                                const pillBorder = state.isCurrent ? "none" : `1.5px solid ${baseColor}`;
 
                                 return (
                                   <TableCell key={ag.id} align="center">
                                     <Tooltip
-                                      title={`${ag.name}: ${state.status}${state.isCurrent ? " (Current Owner)" : " (Past Handler)"}`}
+                                      title={
+                                        stLower === "handled"
+                                          ? `${ag.name}: Agent was assigned this lead as the very first handler (initial assignment)`
+                                          : `${ag.name}: ${state.status}${state.isCurrent ? " (Current Owner)" : " (Past Handler)"}`
+                                      }
                                     >
                                       <Box
                                         onClick={(e) =>
@@ -1626,12 +1672,13 @@ const LeadListStatistics = () => {
                                           borderRadius: "8px",
                                           bgcolor: pillBg,
                                           color: pillColor,
+                                          border: pillBorder,
                                           fontWeight: 800,
                                           fontSize: 11.5,
                                           cursor: "pointer",
                                           boxShadow: state.isCurrent
                                             ? "0 2px 6px rgba(15, 23, 42, 0.14)"
-                                            : "inset 0 0 0 1px rgba(15, 23, 42, 0.08)",
+                                            : "none",
                                           transition: "transform 0.12s ease",
                                           "&:hover": { transform: "scale(1.04)" },
                                         }}
