@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom";
 import {
   AppBar,
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -457,8 +458,11 @@ const LeadListStatistics = () => {
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixFilters, setMatrixFilters] = useState(() => ({
     search: "",
+    country: "",
+    brand: "",
     agent: "",
     status: "",
+    callStatus: "",
     ...(savedUi.matrixFilters && typeof savedUi.matrixFilters === "object" ? savedUi.matrixFilters : {}),
   }));
   const matrixFiltersRef = useRef(matrixFilters);
@@ -514,15 +518,23 @@ const LeadListStatistics = () => {
         search: activeMatFilters.search,
         agent: activeMatFilters.agent || globalF.agent,
         status: activeMatFilters.status || globalF.status,
+        callStatus: activeMatFilters.callStatus,
         list: globalF.list,
-        brand: globalF.brand,
-        country: globalF.country,
+        brand: activeMatFilters.brand || globalF.brand,
+        country: activeMatFilters.country || globalF.country,
         source: globalF.source,
       });
       if (res?.success) {
         setMatrixLeads(res.leads || []);
         setMatrixAgents(res.agents || []);
         setMatrixStatuses(res.statuses || []);
+        if (res.filterOptions) {
+          setFilterOptions((prev) => ({
+            ...prev,
+            countries: res.filterOptions.countries?.length ? res.filterOptions.countries : prev.countries,
+            brands: res.filterOptions.brands?.length ? res.filterOptions.brands : prev.brands,
+          }));
+        }
         setMatrixPagination(res.pagination || { page: targetPage, limit: 50, total: 0, pages: 1 });
         matrixPageRef.current = res.pagination?.page || targetPage;
         setLastUpdatedTime(
@@ -1107,7 +1119,7 @@ const LeadListStatistics = () => {
                 onClick={() => {
                   handleResetFilters();
                   if (workspaceMode === "agent_matrix") {
-                    const clean = { search: "", agent: "", status: "" };
+                    const clean = { search: "", country: "", brand: "", agent: "", status: "", callStatus: "" };
                     setMatrixFilters(clean);
                     loadAgentMatrix(1, clean, false);
                   }
@@ -1344,11 +1356,131 @@ const LeadListStatistics = () => {
                     </Typography>
                   </Box>
 
-                  {/* Quick Filters */}
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, flexWrap: "wrap" }}>
+                  {/* Matrix Filters & Search (Matching Matrix UI) */}
+                  <Box
+                    sx={{
+                      width: "100%",
+                      pt: 1.5,
+                      borderTop: "1px solid rgba(15, 23, 42, 0.06)",
+                      display: "grid",
+                      gridTemplateColumns: {
+                        xs: "1fr",
+                        sm: "repeat(2, 1fr)",
+                        md: "repeat(3, 1fr)",
+                        xl: "repeat(6, 1fr)",
+                      },
+                      gap: 1.25,
+                      alignItems: "center",
+                    }}
+                  >
+                    <TextField
+                      size="small"
+                      placeholder="Search leads..."
+                      value={matrixFilters.search}
+                      onChange={(e) => {
+                        const next = { ...matrixFilters, search: e.target.value };
+                        setMatrixFilters(next);
+                        loadAgentMatrix(1, next, false);
+                      }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Search sx={{ fontSize: 16, color: "text.secondary" }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5, fontWeight: 600 },
+                      }}
+                    />
+
+                    <Autocomplete
+                      freeSolo
+                      size="small"
+                      options={filterOptions.countries || []}
+                      value={matrixFilters.country || ""}
+                      onChange={(_, newValue) => {
+                        const next = { ...matrixFilters, country: newValue || "" };
+                        setMatrixFilters(next);
+                        loadAgentMatrix(1, next, false);
+                      }}
+                      onInputChange={(_, newInput, reason) => {
+                        if (reason === "input" || reason === "clear") {
+                          const next = { ...matrixFilters, country: newInput || "" };
+                          setMatrixFilters(next);
+                          loadAgentMatrix(1, next, false);
+                        }
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Country"
+                          placeholder="Search or select country..."
+                          InputLabelProps={{ shrink: true }}
+                          InputProps={{
+                            ...params.InputProps,
+                            startAdornment: (
+                              <>
+                                <InputAdornment position="start">
+                                  <LocationOn sx={{ fontSize: 16, color: "#64748b" }} />
+                                </InputAdornment>
+                                {params.InputProps.startAdornment}
+                              </>
+                            ),
+                          }}
+                          sx={{
+                            "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5, fontWeight: 600 },
+                          }}
+                        />
+                      )}
+                    />
+
+                    <Autocomplete
+                      freeSolo
+                      size="small"
+                      options={filterOptions.brands || []}
+                      value={matrixFilters.brand || ""}
+                      onChange={(_, newValue) => {
+                        const next = { ...matrixFilters, brand: newValue || "" };
+                        setMatrixFilters(next);
+                        loadAgentMatrix(1, next, false);
+                      }}
+                      onInputChange={(_, newInput, reason) => {
+                        if (reason === "input" || reason === "clear") {
+                          const next = { ...matrixFilters, brand: newInput || "" };
+                          setMatrixFilters(next);
+                          loadAgentMatrix(1, next, false);
+                        }
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Brand"
+                          placeholder="Search or select brand..."
+                          InputLabelProps={{ shrink: true }}
+                          InputProps={{
+                            ...params.InputProps,
+                            startAdornment: (
+                              <>
+                                <InputAdornment position="start">
+                                  <Business sx={{ fontSize: 16, color: "#64748b" }} />
+                                </InputAdornment>
+                                {params.InputProps.startAdornment}
+                              </>
+                            ),
+                          }}
+                          sx={{
+                            "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5, fontWeight: 600 },
+                          }}
+                        />
+                      )}
+                    />
+
                     <TextField
                       select
                       size="small"
+                      label="Agent"
+                      InputLabelProps={{ shrink: true }}
                       value={matrixFilters.agent}
                       onChange={(e) => {
                         const next = { ...matrixFilters, agent: e.target.value };
@@ -1357,7 +1489,6 @@ const LeadListStatistics = () => {
                       }}
                       SelectProps={{ displayEmpty: true }}
                       sx={{
-                        minWidth: 165,
                         "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5, fontWeight: 700 },
                       }}
                     >
@@ -1373,6 +1504,8 @@ const LeadListStatistics = () => {
                     <TextField
                       select
                       size="small"
+                      label="Status"
+                      InputLabelProps={{ shrink: true }}
                       value={matrixFilters.status}
                       onChange={(e) => {
                         const next = { ...matrixFilters, status: e.target.value };
@@ -1381,7 +1514,6 @@ const LeadListStatistics = () => {
                       }}
                       SelectProps={{ displayEmpty: true }}
                       sx={{
-                        minWidth: 155,
                         "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5, fontWeight: 700 },
                       }}
                     >
@@ -1394,26 +1526,30 @@ const LeadListStatistics = () => {
                     </TextField>
 
                     <TextField
+                      select
                       size="small"
-                      placeholder="Search lead..."
-                      value={matrixFilters.search}
+                      label="Call Status"
+                      InputLabelProps={{ shrink: true }}
+                      value={matrixFilters.callStatus || ""}
                       onChange={(e) => {
-                        const next = { ...matrixFilters, search: e.target.value };
+                        const next = { ...matrixFilters, callStatus: e.target.value };
                         setMatrixFilters(next);
                         loadAgentMatrix(1, next, false);
                       }}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <Search sx={{ fontSize: 16, color: "text.secondary" }} />
-                          </InputAdornment>
-                        ),
-                      }}
+                      SelectProps={{ displayEmpty: true }}
                       sx={{
-                        width: { xs: "100%", sm: 210 },
-                        "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5 },
+                        "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 12.5, fontWeight: 700 },
                       }}
-                    />
+                    >
+                      <MenuItem value="">All Call Statuses</MenuItem>
+                      <MenuItem value="no-calls">No Calls</MenuItem>
+                      <MenuItem value="completed">Completed</MenuItem>
+                      <MenuItem value="no-answer">No Answer</MenuItem>
+                      <MenuItem value="failed">Failed</MenuItem>
+                      <MenuItem value="cancelled">Cancelled</MenuItem>
+                      <MenuItem value="in-progress">In Progress</MenuItem>
+                      <MenuItem value="ringing">Ringing</MenuItem>
+                    </TextField>
                   </Box>
                 </CardContent>
               </Card>

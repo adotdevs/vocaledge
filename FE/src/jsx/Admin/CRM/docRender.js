@@ -28,9 +28,19 @@ export const renderDocHtml = (html, values) => {
     if (value == null || value === "") return "";
     return escapeHtml(value).replace(/\r\n|\n|\r/g, "<br>");
   });
-  const printStyle = "<style>@page{size:A4;margin:12mm}@media print{body{background:#fff!important;padding:0!important}.document{box-shadow:none!important;border:none!important;max-width:none!important}}</style>";
+  const printStyle =
+    "<style>@page{size:A4;margin:0}@media print{html,body{background:#fff!important;margin:0!important;padding:0!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.document{box-shadow:none!important;border:none!important;max-width:none!important;margin:0!important}tr,td,th,.card,.section,.box,.notice,.signature,.footer{break-inside:avoid!important;page-break-inside:avoid!important}.print-shell{width:100%;border-collapse:collapse}.print-shell-gap{height:12mm;padding:0;border:0}.print-shell-body{padding:0 12mm;border:0}}</style>";
   if (filled.includes("</head>")) return filled.replace("</head>", `${printStyle}</head>`);
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">${printStyle}</head><body>${filled}</body></html>`;
+};
+
+const wrapHtmlForPrint = (html) => {
+  const bodyMatch = String(html || "").match(/<body([^>]*)>([\s\S]*)<\/body>/i);
+  if (!bodyMatch) return html;
+  const attrs = bodyMatch[1] || "";
+  const inner = bodyMatch[2] || "";
+  const wrapped = `<body${attrs}><table class="print-shell"><thead><tr><td class="print-shell-gap"></td></tr></thead><tbody><tr><td class="print-shell-body">${inner}</td></tr></tbody><tfoot><tr><td class="print-shell-gap"></td></tr></tfoot></table></body>`;
+  return html.replace(/<body[^>]*>[\s\S]*<\/body>/i, wrapped);
 };
 
 export const downloadHtmlFile = (html, fileName) => {
@@ -46,16 +56,44 @@ export const downloadHtmlFile = (html, fileName) => {
 };
 
 export const printHtmlDocument = (html) => {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const popup = window.open(url, "_blank");
-  if (!popup) return false;
-  const print = () => {
-    popup.focus();
-    popup.print();
+  if (typeof document === "undefined") return false;
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.visibility = "hidden";
+  document.body.appendChild(iframe);
+
+  let printed = false;
+  const cleanup = () => {
+    setTimeout(() => {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    }, 1000);
   };
-  popup.addEventListener("load", print, { once: true });
-  setTimeout(print, 700);
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+  const triggerPrint = () => {
+    if (printed) return;
+    printed = true;
+    try {
+      const win = iframe.contentWindow;
+      if (!win) {
+        cleanup();
+        return;
+      }
+      win.addEventListener("afterprint", cleanup, { once: true });
+      win.focus();
+      win.print();
+      setTimeout(cleanup, 60000);
+    } catch {
+      cleanup();
+    }
+  };
+
+  iframe.addEventListener("load", triggerPrint, { once: true });
+  iframe.srcdoc = wrapHtmlForPrint(html);
+  setTimeout(triggerPrint, 600);
   return true;
 };

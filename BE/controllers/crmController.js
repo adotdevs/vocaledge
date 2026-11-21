@@ -329,6 +329,32 @@ async function getDistinctLeadBrands(user) {
     return brands;
 }
 
+const countryCache = new Map();
+const COUNTRY_CACHE_MS = 60 * 1000;
+
+async function getDistinctLeadCountries(user) {
+    const cacheKey = `${user?.role || "all"}:${user?._id || ""}`;
+    const cached = countryCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < COUNTRY_CACHE_MS) return cached.countries;
+
+    const Lead = await getLeadModel();
+    const countriesQuery = {
+        isDeleted: false,
+        country: { $exists: true, $nin: [null, ''] },
+    };
+
+    await applyLeadVisibilityToQuery(countriesQuery, user);
+
+    const countriesRaw = await Lead.distinct('country', countriesQuery);
+    const countries = [...new Set(
+        countriesRaw
+            .map((country) => String(country).trim())
+            .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    countryCache.set(cacheKey, { countries, at: Date.now() });
+    return countries;
+}
+
 // Super admin only: take a brand away from every lead that has it, which also removes it from the Brand filter list.
 // The leads themselves are kept, only their Brand value is cleared. With dryRun it only counts the leads.
 exports.removeLeadBrand = async (req, res) => {
@@ -1450,8 +1476,8 @@ exports.getLeads = async (req, res) => {
         const statusCountMatch = plainAggregateMatch({ ...query });
         delete statusCountMatch.status;
 
-        // Fetch the page, both counts, and brand options together.
-        const [leadsResult, totalFilteredResult, brands, totalLeads, statusGroups] = await Promise.all([
+        // Fetch the page, both counts, and brand/country options together.
+        const [leadsResult, totalFilteredResult, brands, countries, totalLeads, statusGroups] = await Promise.all([
             Lead.find(query)
                 .sort(sort)
                 .skip(skip)
@@ -1459,6 +1485,7 @@ exports.getLeads = async (req, res) => {
                 .lean(),
             Lead.countDocuments(query),
             hasCrmPermission(req.user, "canViewLeadBrand") ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
+            getDistinctLeadCountries(req.user),
             Lead.countDocuments(totalLeadsQuery),
             Lead.aggregate([
                 { $match: statusCountMatch },
@@ -1555,6 +1582,7 @@ exports.getLeads = async (req, res) => {
             data: {
                 leads: populatedLeads,
                 brands,
+                countries,
                 statusCounts,
                 statusTotal,
                 refilledLeads: openedRefill.leads,
@@ -4655,7 +4683,7 @@ exports.leadListStatistics = async (req, res) => {
             hasCrmPermission(req.user, "canViewLeadBrand") ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
             LeadUpload.find({ deletedAt: null }).sort({ createdAt: -1 }).limit(100).select("_id fileName leadCount createdAt").lean(),
             canViewLeadSource(req.user) ? Lead.distinct("source", { isDeleted: false, source: { $nin: [null, ""] } }) : Promise.resolve([]),
-            Lead.distinct("country", { isDeleted: false, country: { $nin: [null, ""] } }),
+            getDistinctLeadCountries(req.user),
             (async () => {
                 let agentsQuery = {};
                 if (req.user.role === "superadmin") {
@@ -4874,19 +4902,42 @@ exports.getLeadAgentMatrix = async (req, res) => {
             }
         }
 
-        if (req.query.brand && String(req.query.brand).trim() && hasCrmPermission(req.user, "canViewLeadBrand")) {
-            query.Brand = new RegExp(`^${escapeRegex(String(req.query.brand).trim())}$`, "i");
+        const brandVal = String(req.query.brand || req.query.brandSearch || "").trim();
+        if (brandVal && hasCrmPermission(req.user, "canViewLeadBrand")) {
+            query.Brand = new RegExp(escapeRegex(brandVal), "i");
         }
-        if (req.query.country && String(req.query.country).trim()) {
-            applyCountryFilter(query, req.query.country);
+        const countryVal = String(req.query.country || req.query.countrySearch || "").trim();
+        if (countryVal) {
+            query.country = new RegExp(escapeRegex(countryVal), "i");
         }
         if (req.query.source && String(req.query.source).trim() && canViewLeadSource(req.user)) {
             query.source = new RegExp(`^${escapeRegex(String(req.query.source).trim())}$`, "i");
         }
 
+        const callStatus = String(req.query.callStatus || "").trim();
+        if (callStatus) {
+            const getCallModel = require("../crmDB/models/callModel");
+            const Call = await getCallModel();
+            if (callStatus === "no-calls") {
+                const leadIdsWithAnyCalls = (await Call.distinct("leadId")).filter((id) => id != null);
+                if (leadIdsWithAnyCalls.length > 0) {
+                    query._id = { $nin: leadIdsWithAnyCalls };
+                }
+            } else {
+                const leadIdsWithStatus = await Call.aggregate([
+                    { $sort: { createdAt: -1 } },
+                    { $group: { _id: "$leadId", latestStatus: { $first: "$status" } } },
+                    { $match: { latestStatus: callStatus } },
+                    { $project: { _id: 1 } },
+                ]);
+                const matchingIds = leadIdsWithStatus.map((item) => item._id).filter((id) => id != null);
+                query._id = matchingIds.length > 0 ? { $in: matchingIds } : { $in: [] };
+            }
+        }
+
         const statusQuery = req.user?.role === "superadmin" ? {} : { adminOnly: { $ne: true } };
 
-        const [leads, total, staffUsers, activeCounts, statusDocs] = await Promise.all([
+        const [leads, total, staffUsers, activeCounts, statusDocs, distinctCountries, distinctBrands] = await Promise.all([
             Lead.find(query)
                 .sort({ updatedAt: -1, createdAt: -1 })
                 .skip(skip)
@@ -4902,6 +4953,8 @@ exports.getLeadAgentMatrix = async (req, res) => {
                 { $group: { _id: "$agent", count: { $sum: 1 } } },
             ]),
             LeadStatus.find(statusQuery).sort({ sortOrder: 1, label: 1 }).select("label color").lean(),
+            getDistinctLeadCountries(req.user),
+            hasCrmPermission(req.user, "canViewLeadBrand") ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
         ]);
 
         const countMap = new Map(activeCounts.map((r) => [String(r._id), r.count || 0]));
@@ -5042,6 +5095,10 @@ exports.getLeadAgentMatrix = async (req, res) => {
             leads: matrixRows,
             agents,
             statuses: statusDocs,
+            filterOptions: {
+                countries: (distinctCountries || []).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+                brands: distinctBrands || [],
+            },
             pagination: {
                 page,
                 limit,
