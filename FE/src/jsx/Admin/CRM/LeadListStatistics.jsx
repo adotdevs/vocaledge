@@ -1560,8 +1560,9 @@ const LeadListStatistics = () => {
                   sx={{
                     maxHeight: "calc(100vh - 300px)",
                     minHeight: 420,
-                    overflow: "auto",
-                    "&::-webkit-scrollbar": { width: 7, height: 7 },
+                    overflowY: "auto",
+                    overflowX: matrixAgents.length > 16 ? "auto" : "hidden",
+                    "&::-webkit-scrollbar": { width: 6, height: 6 },
                     "&::-webkit-scrollbar-track": { bgcolor: "#f8fafc" },
                     "&::-webkit-scrollbar-thumb": {
                       bgcolor: "rgba(100, 116, 139, 0.3)",
@@ -1573,20 +1574,22 @@ const LeadListStatistics = () => {
                     stickyHeader
                     size="small"
                     sx={{
+                      width: "100%",
+                      tableLayout: matrixAgents.length <= 16 ? "fixed" : "auto",
                       "& th": {
                         whiteSpace: "nowrap",
                         bgcolor: "#f8fafc",
                         color: "#334155",
                         fontWeight: 800,
-                        fontSize: 12.5,
-                        py: 1.35,
-                        px: 1.25,
+                        fontSize: 11.5,
+                        py: 1,
+                        px: 0.35,
                         borderBottom: "1px solid rgba(15, 23, 42, 0.08)",
                       },
                       "& td": {
                         whiteSpace: "nowrap",
-                        py: 1.05,
-                        px: 1.15,
+                        py: 0.65,
+                        px: 0.35,
                         borderBottom: "1px solid rgba(15, 23, 42, 0.05)",
                       },
                     }}
@@ -1595,10 +1598,23 @@ const LeadListStatistics = () => {
                       <TableRow>
                         <TableCell
                           padding="checkbox"
-                          sx={{ position: "sticky", left: 0, zIndex: 4, bgcolor: "#f8fafc !important" }}
+                          sx={{
+                            width: 34,
+                            minWidth: 34,
+                            maxWidth: 34,
+                            boxSizing: "border-box",
+                            px: "2px !important",
+                            ...(matrixAgents.length > 16 && {
+                              position: "sticky",
+                              left: 0,
+                              zIndex: 4,
+                            }),
+                            bgcolor: "#f8fafc !important",
+                          }}
                         >
                           <Checkbox
                             size="small"
+                            sx={{ p: 0.25 }}
                             checked={matrixLeads.length > 0 && matrixSelectedIds.length === matrixLeads.length}
                             indeterminate={
                               matrixSelectedIds.length > 0 && matrixSelectedIds.length < matrixLeads.length
@@ -1614,35 +1630,59 @@ const LeadListStatistics = () => {
                         </TableCell>
                         <TableCell
                           sx={{
-                            position: "sticky",
-                            left: 42,
-                            zIndex: 4,
+                            width: 52,
+                            minWidth: 52,
+                            maxWidth: 52,
+                            boxSizing: "border-box",
+                            px: "4px !important",
+                            ...(matrixAgents.length > 16 && {
+                              position: "sticky",
+                              left: 34,
+                              zIndex: 4,
+                            }),
                             bgcolor: "#f8fafc !important",
-                            minWidth: 78,
                           }}
                         >
                           #
                         </TableCell>
                         <TableCell
                           sx={{
-                            position: "sticky",
-                            left: 120,
-                            zIndex: 4,
+                            width: 128,
+                            minWidth: 128,
+                            maxWidth: 128,
+                            boxSizing: "border-box",
+                            px: "6px !important",
+                            ...(matrixAgents.length > 16 && {
+                              position: "sticky",
+                              left: 86,
+                              zIndex: 4,
+                            }),
                             bgcolor: "#f8fafc !important",
-                            minWidth: 180,
-                            borderRight: "1px solid rgba(15, 23, 42, 0.08)",
+                            borderRight: "1px solid rgba(15, 23, 42, 0.1)",
                           }}
                         >
                           Lead (Name)
                         </TableCell>
-                        {matrixAgents.map((ag) => (
-                          <TableCell key={ag.id} align="center" sx={{ minWidth: 125 }}>
-                            <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.6 }}>
-                              <Person sx={{ fontSize: 15, color: "#64748b" }} />
-                              <span>{ag.name}</span>
-                            </Box>
-                          </TableCell>
-                        ))}
+                        {matrixAgents.map((ag) => {
+                          const shortName =
+                            String(ag.name || "")
+                              .replace(/\b(manager|agent|admin|subadmin)\b/gi, "")
+                              .replace(/\s+/g, " ")
+                              .trim() || ag.name;
+                          return (
+                            <TableCell
+                              key={ag.id}
+                              align="center"
+                              sx={{ overflow: "hidden", textOverflow: "ellipsis" }}
+                            >
+                              <Tooltip title={ag.name}>
+                                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {shortName}
+                                </span>
+                              </Tooltip>
+                            </TableCell>
+                          );
+                        })}
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1672,10 +1712,23 @@ const LeadListStatistics = () => {
                             <TableRow key={lead._id} hover selected={isChecked}>
                               <TableCell
                                 padding="checkbox"
-                                sx={{ position: "sticky", left: 0, zIndex: 2, bgcolor: isChecked ? "#f5f3ff" : "#fff" }}
+                                sx={{
+                                  width: 34,
+                                  minWidth: 34,
+                                  maxWidth: 34,
+                                  boxSizing: "border-box",
+                                  px: "2px !important",
+                                  ...(matrixAgents.length > 16 && {
+                                    position: "sticky",
+                                    left: 0,
+                                    zIndex: 2,
+                                  }),
+                                  bgcolor: isChecked ? "#f5f3ff" : "#fff",
+                                }}
                               >
                                 <Checkbox
                                   size="small"
+                                  sx={{ p: 0.25 }}
                                   checked={isChecked}
                                   onChange={() =>
                                     setMatrixSelectedIds((prev) =>
@@ -1688,24 +1741,39 @@ const LeadListStatistics = () => {
                               </TableCell>
                               <TableCell
                                 sx={{
-                                  position: "sticky",
-                                  left: 42,
-                                  zIndex: 2,
+                                  width: 52,
+                                  minWidth: 52,
+                                  maxWidth: 52,
+                                  boxSizing: "border-box",
+                                  px: "4px !important",
+                                  ...(matrixAgents.length > 16 && {
+                                    position: "sticky",
+                                    left: 34,
+                                    zIndex: 2,
+                                  }),
                                   bgcolor: isChecked ? "#f5f3ff" : "#fff",
                                   fontWeight: 700,
                                   color: "#475569",
-                                  fontSize: 12.5,
+                                  fontSize: 11.5,
                                 }}
                               >
                                 {leadNum}
                               </TableCell>
                               <TableCell
                                 sx={{
-                                  position: "sticky",
-                                  left: 120,
-                                  zIndex: 2,
+                                  width: 128,
+                                  minWidth: 128,
+                                  maxWidth: 128,
+                                  boxSizing: "border-box",
+                                  px: "6px !important",
+                                  ...(matrixAgents.length > 16 && {
+                                    position: "sticky",
+                                    left: 86,
+                                    zIndex: 2,
+                                  }),
                                   bgcolor: isChecked ? "#f5f3ff" : "#fff",
-                                  borderRight: "1px solid rgba(15, 23, 42, 0.08)",
+                                  borderRight: "1px solid rgba(15, 23, 42, 0.1)",
+                                  overflow: "hidden",
                                 }}
                               >
                                 <Box
@@ -1717,18 +1785,19 @@ const LeadListStatistics = () => {
                                     })
                                   }
                                   sx={{
-                                    display: "inline-flex",
+                                    display: "flex",
                                     alignItems: "center",
-                                    gap: 0.5,
+                                    gap: 0.25,
                                     cursor: "pointer",
                                     color: "#3b28cc",
                                     fontWeight: 800,
-                                    fontSize: 13,
+                                    fontSize: 12,
+                                    minWidth: 0,
                                     "&:hover": { textDecoration: "underline" },
                                   }}
                                 >
-                                  <span>{fullName}</span>
-                                  <KeyboardArrowDown sx={{ fontSize: 16, color: "#64748b" }} />
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{fullName}</span>
+                                  <KeyboardArrowDown sx={{ fontSize: 14, color: "#64748b", flexShrink: 0 }} />
                                 </Box>
                               </TableCell>
 
@@ -1736,19 +1805,21 @@ const LeadListStatistics = () => {
                                 const state = lead.agentStates?.[ag.id] || null;
                                 if (!state) {
                                   return (
-                                    <TableCell key={ag.id} align="center">
+                                    <TableCell key={ag.id} align="center" sx={{ overflow: "hidden" }}>
                                       <Box
                                         sx={{
                                           display: "inline-flex",
                                           alignItems: "center",
                                           justifyContent: "center",
-                                          minWidth: 94,
-                                          height: 28,
-                                          borderRadius: "8px",
+                                          width: "100%",
+                                          maxWidth: 72,
+                                          boxSizing: "border-box",
+                                          height: 23,
+                                          borderRadius: "6px",
                                           bgcolor: "#f1f5f9",
                                           color: "#94a3b8",
                                           fontWeight: 700,
-                                          fontSize: 12,
+                                          fontSize: 11,
                                         }}
                                       >
                                         —
@@ -1780,7 +1851,7 @@ const LeadListStatistics = () => {
                                 const pillBorder = state.isCurrent ? "none" : `1.5px solid ${baseColor}`;
 
                                 return (
-                                  <TableCell key={ag.id} align="center">
+                                  <TableCell key={ag.id} align="center" sx={{ overflow: "hidden" }}>
                                     <Tooltip
                                       title={
                                         stLower === "handled"
@@ -1800,26 +1871,29 @@ const LeadListStatistics = () => {
                                           display: "inline-flex",
                                           alignItems: "center",
                                           justifyContent: "center",
-                                          gap: 0.5,
-                                          minWidth: 94,
-                                          maxWidth: 122,
-                                          px: 1,
-                                          height: 28,
-                                          borderRadius: "8px",
+                                          gap: 0.25,
+                                          width: "100%",
+                                          maxWidth: 84,
+                                          minWidth: 0,
+                                          boxSizing: "border-box",
+                                          overflow: "hidden",
+                                          px: 0.4,
+                                          height: 23,
+                                          borderRadius: "6px",
                                           bgcolor: pillBg,
                                           color: pillColor,
                                           border: pillBorder,
                                           fontWeight: 800,
-                                          fontSize: 11.5,
+                                          fontSize: 10,
                                           cursor: "pointer",
                                           boxShadow: state.isCurrent
-                                            ? "0 2px 6px rgba(15, 23, 42, 0.14)"
+                                            ? "0 1px 4px rgba(15, 23, 42, 0.14)"
                                             : "none",
                                           transition: "transform 0.12s ease",
                                           "&:hover": { transform: "scale(1.04)" },
                                         }}
                                       >
-                                        <span>{pillIcon}</span>
+                                        <span style={{ fontSize: 10, flexShrink: 0 }}>{pillIcon}</span>
                                         <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                                           {state.status}
                                         </span>

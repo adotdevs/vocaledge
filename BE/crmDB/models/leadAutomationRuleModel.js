@@ -89,6 +89,12 @@ const leadAutomationRuleSchema = new mongoose.Schema(
       min: 0,
       max: 500,
     },
+    maxLeadsPerAgent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5000,
+    },
     finalStatus: {
       type: String,
       default: "Exhausted",

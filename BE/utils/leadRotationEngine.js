@@ -115,6 +115,7 @@ const processLeadsForRotation = async (
     matchedCount: 0,
     rotatedCount: 0,
     exhaustedCount: 0,
+    skippedCapacityCount: 0,
     resultsByLeadId: new Map(),
   };
 
@@ -255,6 +256,28 @@ const processLeadsForRotation = async (
       }
 
       const hitMaxLimit = maxLimit > 0 && nextRotationCount > maxLimit;
+      const hadEligibleBeforeCap = eligibleAgentIds.length > 0;
+      const maxLeadsPerAgent = Number(rule.maxLeadsPerAgent) || 0;
+      if (maxLeadsPerAgent > 0 && eligibleAgentIds.length > 0) {
+        eligibleAgentIds = eligibleAgentIds.filter(
+          (id) => (agentLeadCounts.get(id) ?? 0) < maxLeadsPerAgent
+        );
+      }
+      const blockedByAgentCap = !hitMaxLimit && hadEligibleBeforeCap && eligibleAgentIds.length === 0;
+      if (blockedByAgentCap) {
+        summary.skippedCapacityCount += 1;
+        summary.resultsByLeadId.set(String(lead._id), {
+          outcome: "skipped_capacity",
+          ruleId: String(rule._id),
+          ruleName: rule.name,
+          status: enteredStatus,
+          agent: currentAgentUser || null,
+          rotationCount: currentRotationCount,
+          reason: `All eligible agents have reached the max leads limit (${maxLeadsPerAgent})`,
+        });
+        continue;
+      }
+
       const noEligibleAgents = eligibleAgentIds.length === 0;
 
       if (hitMaxLimit || noEligibleAgents) {
@@ -669,8 +692,13 @@ const runRuleOnExistingLeads = async (ruleId, actor = null, maxBatch = 500) => {
       matchedCount: summary.matchedCount,
       rotatedCount: summary.rotatedCount,
       exhaustedCount: summary.exhaustedCount,
+      skippedCapacityCount: summary.skippedCapacityCount,
       msg: `Processed ${summary.matchedCount} lead(s): ${summary.rotatedCount} rotated to next agent ("${rule.toStatus}")${
         summary.exhaustedCount ? `, ${summary.exhaustedCount} marked "${rule.finalStatus || "Exhausted"}"` : ""
+      }${
+        summary.skippedCapacityCount
+          ? `, ${summary.skippedCapacityCount} skipped (eligible agents reached max leads)`
+          : ""
       }.`,
     };
   } finally {

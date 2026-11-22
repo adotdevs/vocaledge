@@ -5417,6 +5417,11 @@ const sanitizeRulePayload = async (body, actor) => {
     const rotationMode = body?.rotationMode === "least_assigned" ? "least_assigned" : "sequential";
     const maxRaw = Number(body?.maxAgentsPerLead);
     const maxAgentsPerLead = Number.isFinite(maxRaw) && maxRaw >= 0 ? Math.min(500, Math.floor(maxRaw)) : 10;
+    const maxAgentLeadsRaw = Number(body?.maxLeadsPerAgent);
+    const maxLeadsPerAgent =
+        Number.isFinite(maxAgentLeadsRaw) && maxAgentLeadsRaw >= 0
+            ? Math.min(5000, Math.floor(maxAgentLeadsRaw))
+            : 0;
     const delayRaw = Number(body?.delayMinutes);
     const delayMinutes = Number.isFinite(delayRaw) && delayRaw >= 0 ? Math.min(43200, Math.floor(delayRaw)) : 0;
 
@@ -5438,6 +5443,7 @@ const sanitizeRulePayload = async (body, actor) => {
             rotationMode,
             skipPreviousAgents: body?.skipPreviousAgents !== false,
             maxAgentsPerLead,
+            maxLeadsPerAgent,
             finalStatus,
             unassignOnExhausted: body?.unassignOnExhausted === true,
             updatedBy: {
@@ -5579,6 +5585,7 @@ exports.duplicateLeadAutomationRule = async (req, res) => {
             rotationMode: source.rotationMode || "sequential",
             skipPreviousAgents: source.skipPreviousAgents !== false,
             maxAgentsPerLead: source.maxAgentsPerLead ?? 10,
+            maxLeadsPerAgent: source.maxLeadsPerAgent ?? 0,
             finalStatus: source.finalStatus || "Exhausted",
             unassignOnExhausted: Boolean(source.unassignOnExhausted),
             createdBy: actorObj,

@@ -166,6 +166,7 @@ const createBlankRuleDraft = (defaultAgentIds = []) => ({
   rotationMode: "sequential",
   skipPreviousAgents: true,
   maxAgentsPerLead: 10,
+  maxLeadsPerAgent: 0,
   finalStatus: "Exhausted",
   unassignOnExhausted: false,
 });
@@ -187,6 +188,7 @@ const ruleToDraft = (rule) => ({
   rotationMode: rule?.rotationMode === "least_assigned" ? "least_assigned" : "sequential",
   skipPreviousAgents: rule?.skipPreviousAgents !== false,
   maxAgentsPerLead: Number.isFinite(Number(rule?.maxAgentsPerLead)) ? Number(rule.maxAgentsPerLead) : 10,
+  maxLeadsPerAgent: Number.isFinite(Number(rule?.maxLeadsPerAgent)) ? Number(rule.maxLeadsPerAgent) : 0,
   finalStatus: rule?.finalStatus || "Exhausted",
   unassignOnExhausted: Boolean(rule?.unassignOnExhausted),
 });
@@ -1138,8 +1140,8 @@ const LeadAutomation = () => {
             <Box
               sx={{
                 display: "grid",
-                gridTemplateColumns: { xs: "1fr", lg: "360px 1fr" },
-                gap: 2.5,
+                gridTemplateColumns: { xs: "1fr", lg: "295px minmax(0, 1fr)" },
+                gap: 2,
                 alignItems: "start",
               }}
             >
@@ -1844,14 +1846,14 @@ const LeadAutomation = () => {
                   <Box
                     sx={{
                       display: "grid",
-                      gridTemplateColumns: { xs: "1fr", xl: "1.15fr 0.85fr" },
-                      gap: 2.5,
+                      gridTemplateColumns: { xs: "1fr", xl: "minmax(0, 1fr) minmax(0, 1fr)" },
+                      gap: 2,
                       mb: 2.5,
                       alignItems: "stretch",
                     }}
                   >
                     {/* SECTION 3: Agents in Rotation */}
-                    <Box sx={{ ...subPanelShell, display: "flex", flexDirection: "column" }}>
+                    <Box sx={{ ...subPanelShell, minWidth: 0, display: "flex", flexDirection: "column" }}>
                       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 0.5 }}>
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
                           <StepBadge number={3} />
@@ -2031,7 +2033,7 @@ const LeadAutomation = () => {
                     </Box>
 
                     {/* SECTION 4: Rotation Settings */}
-                    <Box sx={{ ...subPanelShell, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                    <Box sx={{ ...subPanelShell, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                       <Box>
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mb: 1.75 }}>
                           <StepBadge number={4} />
@@ -2131,7 +2133,7 @@ const LeadAutomation = () => {
                             mb: 1.5,
                           }}
                         >
-                          <Box>
+                          <Box sx={{ minWidth: 0 }}>
                             <Tooltip title="Maximum number of times a single lead can be rotated before stopping">
                               <Typography
                                 variant="caption"
@@ -2165,7 +2167,7 @@ const LeadAutomation = () => {
                             </TextField>
                           </Box>
 
-                          <Box>
+                          <Box sx={{ minWidth: 0 }}>
                             <Tooltip title="Status to assign once a lead has been rotated through all agents or reaches the max limit">
                               <Typography
                                 variant="caption"
@@ -2207,6 +2209,37 @@ const LeadAutomation = () => {
                                 </MenuItem>
                               ))}
                             </TextField>
+                          </Box>
+
+                          <Box sx={{ minWidth: 0, gridColumn: { sm: "1 / -1" } }}>
+                            <Tooltip title="Maximum total active leads an agent can hold via rotation (0 = Unlimited)">
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 0.5,
+                                  mb: 0.5,
+                                  fontWeight: 700,
+                                  color: "text.secondary",
+                                }}
+                              >
+                                Max Leads per Agent <InfoOutlined sx={{ fontSize: 14 }} />
+                              </Typography>
+                            </Tooltip>
+                            <TextField
+                              type="number"
+                              size="small"
+                              fullWidth
+                              value={ruleDraft.maxLeadsPerAgent ?? 0}
+                              onChange={(e) => {
+                                const val = Math.max(0, Math.min(5000, Number(e.target.value) || 0));
+                                setRuleDraft((prev) => ({ ...prev, maxLeadsPerAgent: val }));
+                              }}
+                              inputProps={{ min: 0, max: 5000 }}
+                              helperText="0 = Unlimited (caps total active leads per agent during rotation)"
+                              sx={{ "& .MuiOutlinedInput-root": { borderRadius: "10px" } }}
+                            />
                           </Box>
                         </Box>
 
