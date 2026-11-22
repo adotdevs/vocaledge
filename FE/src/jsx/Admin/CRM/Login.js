@@ -176,7 +176,7 @@ const LoginPage = () => {
                 }}
             >
                 <Typography variant="h5" fontWeight="bold" mb={3}>
-                    CRM Admin Login
+                    CRM Login
                 </Typography>
 
                 <form onSubmit={formik.handleSubmit}>
