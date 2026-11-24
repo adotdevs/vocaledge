@@ -449,9 +449,12 @@ const LeadListStatistics = () => {
   const [matrixAgents, setMatrixAgents] = useState([]);
   const [matrixStatuses, setMatrixStatuses] = useState([]);
   const initialMatrixPage = Math.max(1, Number(savedUi.matrixPage) || 1);
+  const initialMatrixLimit = [25, 50, 100, 200, 500].includes(Number(savedUi.matrixLimit))
+    ? Number(savedUi.matrixLimit)
+    : 50;
   const [matrixPagination, setMatrixPagination] = useState({
     page: initialMatrixPage,
-    limit: 50,
+    limit: initialMatrixLimit,
     total: 0,
     pages: 1,
   });
@@ -468,6 +471,7 @@ const LeadListStatistics = () => {
   const matrixFiltersRef = useRef(matrixFilters);
   matrixFiltersRef.current = matrixFilters;
   const matrixPageRef = useRef(initialMatrixPage);
+  const matrixLimitRef = useRef(initialMatrixLimit);
   const [matrixSelectedIds, setMatrixSelectedIds] = useState([]);
   const [matrixLeadMenu, setMatrixLeadMenu] = useState({ anchorEl: null, lead: null, agentName: "" });
   const [matrixSavingStatus, setMatrixSavingStatus] = useState(false);
@@ -482,6 +486,7 @@ const LeadListStatistics = () => {
           selectedAgentId,
           agentSubTab,
           matrixPage: matrixPagination.page || matrixPageRef.current || 1,
+          matrixLimit: matrixPagination.limit || matrixLimitRef.current || 50,
           matrixFilters,
           filters,
           flowViewBy,
@@ -498,6 +503,7 @@ const LeadListStatistics = () => {
     selectedAgentId,
     agentSubTab,
     matrixPagination.page,
+    matrixPagination.limit,
     matrixFilters,
     filters,
     flowViewBy,
@@ -506,15 +512,16 @@ const LeadListStatistics = () => {
     agentSortDir,
   ]);
 
-  const loadAgentMatrix = useCallback(async (pageOverride, customFilters, silent = false) => {
+  const loadAgentMatrix = useCallback(async (pageOverride, customFilters, silent = false, limitOverride) => {
     const targetPage = pageOverride ?? matrixPageRef.current ?? 1;
+    const targetLimit = limitOverride ?? matrixLimitRef.current ?? 50;
     const activeMatFilters = customFilters ?? matrixFiltersRef.current;
     const globalF = filtersRef.current;
     if (!silent) setMatrixLoading(true);
     try {
       const res = await getLeadAgentMatrixApi({
         page: targetPage,
-        limit: 50,
+        limit: targetLimit,
         search: activeMatFilters.search,
         agent: activeMatFilters.agent || globalF.agent,
         status: activeMatFilters.status || globalF.status,
@@ -535,8 +542,9 @@ const LeadListStatistics = () => {
             brands: res.filterOptions.brands?.length ? res.filterOptions.brands : prev.brands,
           }));
         }
-        setMatrixPagination(res.pagination || { page: targetPage, limit: 50, total: 0, pages: 1 });
+        setMatrixPagination(res.pagination || { page: targetPage, limit: targetLimit, total: 0, pages: 1 });
         matrixPageRef.current = res.pagination?.page || targetPage;
+        matrixLimitRef.current = res.pagination?.limit || targetLimit;
         setLastUpdatedTime(
           new Date(res.generatedAt || Date.now()).toLocaleTimeString([], {
             hour: "2-digit",
@@ -1234,7 +1242,44 @@ const LeadListStatistics = () => {
             </Box>
 
             {workspaceMode === "agent_matrix" && (
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                <TextField
+                  select
+                  size="small"
+                  value={matrixPagination.limit || 50}
+                  disabled={matrixLoading}
+                  onChange={(e) => {
+                    const nextLimit = Number(e.target.value) || 50;
+                    matrixLimitRef.current = nextLimit;
+                    setMatrixPagination((prev) => ({ ...prev, limit: nextLimit, page: 1 }));
+                    loadAgentMatrix(1, undefined, false, nextLimit);
+                  }}
+                  sx={{
+                    minWidth: 105,
+                    bgcolor: "#fff",
+                    borderRadius: "8px",
+                    "& .MuiOutlinedInput-root": {
+                      height: 30,
+                      borderRadius: "8px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#334155",
+                    },
+                    "& .MuiOutlinedInput-notchedOutline": {
+                      borderColor: "rgba(15, 23, 42, 0.1)",
+                    },
+                    "& .MuiSelect-select": {
+                      py: 0.4,
+                      px: 1.1,
+                    },
+                  }}
+                >
+                  {[25, 50, 100, 200, 500].map((opt) => (
+                    <MenuItem key={opt} value={opt} sx={{ fontSize: 12.5, fontWeight: 600 }}>
+                      {opt} / page
+                    </MenuItem>
+                  ))}
+                </TextField>
                 <IconButton
                   size="small"
                   disabled={matrixPagination.page <= 1 || matrixLoading}
@@ -1669,16 +1714,53 @@ const LeadListStatistics = () => {
                               .replace(/\b(manager|agent|admin|subadmin)\b/gi, "")
                               .replace(/\s+/g, " ")
                               .trim() || ag.name;
+                          const agCount = ag.filteredCount ?? ag.activeCount ?? 0;
                           return (
                             <TableCell
                               key={ag.id}
                               align="center"
-                              sx={{ overflow: "hidden", textOverflow: "ellipsis" }}
+                              sx={{ overflow: "hidden", textOverflow: "ellipsis", verticalAlign: "bottom", py: "6px !important" }}
                             >
-                              <Tooltip title={ag.name}>
-                                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                  {shortName}
-                                </span>
+                              <Tooltip title={`${ag.name}: ${formatCount(agCount)} assigned lead(s)`}>
+                                <Box
+                                  sx={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    alignItems: "center",
+                                    gap: 0.35,
+                                    minWidth: 0,
+                                  }}
+                                >
+                                  <Box
+                                    component="span"
+                                    sx={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      px: 0.65,
+                                      minWidth: 22,
+                                      height: 16,
+                                      borderRadius: "999px",
+                                      fontSize: 10,
+                                      fontWeight: 800,
+                                      lineHeight: 1,
+                                      bgcolor: agCount > 0 ? "rgba(109, 40, 217, 0.12)" : "#f1f5f9",
+                                      color: agCount > 0 ? "#6d28d9" : "#94a3b8",
+                                    }}
+                                  >
+                                    {formatCount(agCount)}
+                                  </Box>
+                                  <span
+                                    style={{
+                                      display: "block",
+                                      width: "100%",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    {shortName}
+                                  </span>
+                                </Box>
                               </Tooltip>
                             </TableCell>
                           );

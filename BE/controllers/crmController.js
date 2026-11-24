@@ -4843,7 +4843,7 @@ exports.getLeadAgentMatrix = async (req, res) => {
         const LeadStatus = await getLeadStatusModel();
 
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-        const limit = Math.min(100, Math.max(10, parseInt(req.query.limit, 10) || 50));
+        const limit = Math.min(500, Math.max(10, parseInt(req.query.limit, 10) || 50));
         const skip = (page - 1) * limit;
 
         const query = { isDeleted: false };
@@ -4937,7 +4937,7 @@ exports.getLeadAgentMatrix = async (req, res) => {
 
         const statusQuery = req.user?.role === "superadmin" ? {} : { adminOnly: { $ne: true } };
 
-        const [leads, total, staffUsers, activeCounts, statusDocs, distinctCountries, distinctBrands] = await Promise.all([
+        const [leads, total, staffUsers, activeCounts, filteredCounts, statusDocs, distinctCountries, distinctBrands] = await Promise.all([
             Lead.find(query)
                 .sort({ updatedAt: -1, createdAt: -1 })
                 .skip(skip)
@@ -4952,18 +4952,24 @@ exports.getLeadAgentMatrix = async (req, res) => {
                 { $match: { isDeleted: false, agent: { $ne: null } } },
                 { $group: { _id: "$agent", count: { $sum: 1 } } },
             ]),
+            Lead.aggregate([
+                { $match: { ...query, agent: { $ne: null } } },
+                { $group: { _id: "$agent", count: { $sum: 1 } } },
+            ]),
             LeadStatus.find(statusQuery).sort({ sortOrder: 1, label: 1 }).select("label color").lean(),
             getDistinctLeadCountries(req.user),
             hasCrmPermission(req.user, "canViewLeadBrand") ? getDistinctLeadBrands(req.user) : Promise.resolve([]),
         ]);
 
         const countMap = new Map(activeCounts.map((r) => [String(r._id), r.count || 0]));
+        const filteredCountMap = new Map(filteredCounts.map((r) => [String(r._id), r.count || 0]));
         const agents = staffUsers
             .map((u) => ({
                 id: String(u._id),
                 name: `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.email,
                 role: u.role,
                 activeCount: countMap.get(String(u._id)) || 0,
+                filteredCount: filteredCountMap.get(String(u._id)) || 0,
             }))
             .sort((a, b) => b.activeCount - a.activeCount || a.name.localeCompare(b.name));
 
