@@ -1048,6 +1048,7 @@ export const recordDocGenerationApi = (data) => postApi("/crm/doc-center/history
 export const saveDocTemplateApi = (key, data) => (
   key ? patchApi(`/crm/doc-center/templates/${key}`, data) : postApi("/crm/doc-center/templates", data)
 );
+export const reorderDocTemplatesApi = (data) => patchApi("/crm/doc-center/templates/reorder", data);
 export const removeDocTemplateApi = (key) => deleteApi(`/crm/doc-center/templates/${key}`);
 
 export const getCrmDocumentCategoriesApi = () => getApi('/crm/documents/categories');

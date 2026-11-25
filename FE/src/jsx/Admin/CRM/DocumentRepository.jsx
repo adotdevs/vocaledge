@@ -67,6 +67,7 @@ import {
   getDocTemplatesApi,
   recordDocGenerationApi,
   removeDocTemplateApi,
+  reorderDocTemplatesApi,
   saveDocTemplateApi,
   searchDocClientsApi,
   getDocHistoryApi,
@@ -135,7 +136,29 @@ const DocumentRepository = () => {
   const [sortBy, setSortBy] = useState("default");
   const [viewMode, setViewMode] = useState("grid");
   const [cardMenu, setCardMenu] = useState(null);
+  const [positionModal, setPositionModal] = useState(null);
+  const [savingPosition, setSavingPosition] = useState(false);
   const workflowRef = useRef(null);
+
+  const savePosition = async () => {
+    if (!positionModal?.item?.key) return;
+    const pos = Math.max(1, Math.floor(Number(positionModal.value) || 1));
+    setSavingPosition(true);
+    const response = await reorderDocTemplatesApi({ key: positionModal.item.key, position: pos });
+    setSavingPosition(false);
+    if (!response?.success) {
+      toast.error(response?.msg || "Could not update document position");
+      return;
+    }
+    if (Array.isArray(response.templates)) {
+      setTemplates(response.templates);
+    } else {
+      loadTemplates();
+    }
+    setSortBy("default");
+    setPositionModal(null);
+    toast.success(`Moved "${positionModal.item.title}" to #${pos}`);
+  };
 
   const loadTemplates = useCallback(async () => {
     setListLoading(true);
@@ -329,6 +352,7 @@ const DocumentRepository = () => {
       title: current?.title || "",
       description: current?.description || "",
       category: current?.category || "Correspondence",
+      sortOrder: current?.sortOrder ?? templates.length + 1,
       html: current?.html || "",
       fields: (current?.fields || []).map((item) => ({
         ...item,
@@ -349,6 +373,9 @@ const DocumentRepository = () => {
       title: editor.title.trim(),
       description: editor.description.trim(),
       category: editor.category.trim() || "Correspondence",
+      ...(editor.sortOrder !== "" && editor.sortOrder !== undefined && editor.sortOrder !== null
+        ? { sortOrder: Math.max(0, Math.floor(Number(editor.sortOrder) || 0)) }
+        : {}),
       html: editor.html,
       fields: editor.fields.map((item) => ({
         key: item.key,
@@ -670,7 +697,7 @@ const DocumentRepository = () => {
           )}
           {!listLoading && viewMode === "grid" && (
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", lg: "repeat(3, 1fr)", xl: "repeat(4, 1fr)" }, gap: 1.5, mb: 2 }}>
-              {visibleTemplates.map((item) => (
+              {visibleTemplates.map((item, idx) => (
                 <Card
                   key={item.key}
                   elevation={0}
@@ -691,6 +718,26 @@ const DocumentRepository = () => {
                         <HtmlFileIcon small />
                       </Box>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                        {canEdit ? (
+                          <Tooltip title="Edit position">
+                            <Chip
+                              size="small"
+                              label={`#${item.sortOrder || idx + 1}`}
+                              onClick={() => setPositionModal({ item, value: item.sortOrder || idx + 1 })}
+                              sx={{
+                                height: 22,
+                                fontSize: 11,
+                                fontWeight: 800,
+                                cursor: "pointer",
+                                bgcolor: "rgba(103, 58, 183, 0.08)",
+                                color: "primary.main",
+                                "&:hover": { bgcolor: "rgba(103, 58, 183, 0.16)" },
+                              }}
+                            />
+                          </Tooltip>
+                        ) : (
+                          <Chip size="small" label={`#${item.sortOrder || idx + 1}`} variant="outlined" sx={{ height: 22, fontSize: 11, fontWeight: 700 }} />
+                        )}
                         <Chip size="small" label="HTML" variant="outlined" sx={{ height: 22, fontSize: 11 }} />
                         {canEdit && (
                           <IconButton size="small" aria-label="More template actions" onClick={(event) => setCardMenu({ el: event.currentTarget, item })}>
@@ -712,6 +759,7 @@ const DocumentRepository = () => {
               <Table size="small">
                 <TableHead>
                   <TableRow>
+                    <TableCell sx={{ width: 64 }}>#</TableCell>
                     <TableCell>Document</TableCell>
                     <TableCell>Category</TableCell>
                     <TableCell>Updated</TableCell>
@@ -719,8 +767,22 @@ const DocumentRepository = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {visibleTemplates.map((item) => (
+                  {visibleTemplates.map((item, idx) => (
                     <TableRow key={item.key} hover selected={selectedKey === item.key}>
+                      <TableCell>
+                        {canEdit ? (
+                          <Tooltip title="Edit position">
+                            <Chip
+                              size="small"
+                              label={`#${item.sortOrder || idx + 1}`}
+                              onClick={() => setPositionModal({ item, value: item.sortOrder || idx + 1 })}
+                              sx={{ height: 22, fontSize: 11, fontWeight: 800, cursor: "pointer", bgcolor: "rgba(103, 58, 183, 0.08)", color: "primary.main" }}
+                            />
+                          </Tooltip>
+                        ) : (
+                          <Typography variant="caption" fontWeight={700}>#{item.sortOrder || idx + 1}</Typography>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
                           <HtmlFileIcon small />
@@ -925,11 +987,54 @@ const DocumentRepository = () => {
         open={Boolean(cardMenu)}
         onClose={() => setCardMenu(null)}
       >
+        <MenuItem
+          onClick={() => {
+            const target = cardMenu?.item;
+            setCardMenu(null);
+            if (target) setPositionModal({ item: target, value: target.sortOrder || 1 });
+          }}
+        >
+          <EditOutlined fontSize="small" sx={{ mr: 1 }} />
+          Change position
+        </MenuItem>
         <MenuItem onClick={() => cardMenu?.item && duplicateTemplate(cardMenu.item)}>
           <ContentCopy fontSize="small" sx={{ mr: 1 }} />
           Duplicate
         </MenuItem>
       </Menu>
+
+      <Dialog open={Boolean(positionModal)} onClose={() => !savingPosition && setPositionModal(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Edit document position</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Set the display order for <strong>{positionModal?.item?.title}</strong> (1 = first).
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            type="number"
+            label="Position #"
+            value={positionModal?.value ?? ""}
+            onChange={(event) =>
+              setPositionModal((prev) => (prev ? { ...prev, value: event.target.value } : prev))
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                savePosition();
+              }
+            }}
+            inputProps={{ min: 1, max: Math.max(1, templates.length) }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPositionModal(null)} disabled={savingPosition}>Cancel</Button>
+          <Button variant="contained" onClick={savePosition} disabled={savingPosition}>
+            {savingPosition ? "Saving..." : "Save position"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={Boolean(confirmRemove)} onClose={() => !removing && setConfirmRemove(null)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>

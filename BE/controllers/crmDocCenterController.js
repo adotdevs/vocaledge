@@ -257,6 +257,10 @@ exports.saveDocTemplate = async (req, res) => {
     const category = String(req.body?.category || "Correspondence").trim().slice(0, 40) || "Correspondence";
     const description = String(req.body?.description || "").trim().slice(0, 300);
     const key = String(req.params.key || req.body?.key || "").trim().toLowerCase();
+    const hasSortOrder = req.body?.sortOrder !== undefined && req.body?.sortOrder !== null && req.body?.sortOrder !== "";
+    const parsedSortOrder = hasSortOrder && Number.isFinite(Number(req.body.sortOrder))
+      ? Math.max(0, Math.floor(Number(req.body.sortOrder)))
+      : null;
 
     if (key) {
       const current = await DocTemplate.findOne({ key });
@@ -266,6 +270,7 @@ exports.saveDocTemplate = async (req, res) => {
       current.category = category;
       current.html = html;
       current.fields = fields;
+      if (parsedSortOrder !== null) current.sortOrder = parsedSortOrder;
       current.customized = true;
       current.active = req.body?.active === false ? false : true;
       current.updatedAt = new Date();
@@ -282,7 +287,7 @@ exports.saveDocTemplate = async (req, res) => {
       category,
       html,
       fields,
-      sortOrder: 1000,
+      sortOrder: parsedSortOrder !== null ? parsedSortOrder : 1000,
       starter: false,
       customized: true,
       seedVersion: 0,
@@ -293,6 +298,72 @@ exports.saveDocTemplate = async (req, res) => {
   } catch (error) {
     console.error("saveDocTemplate:", error);
     res.status(500).json({ success: false, msg: "Could not save this template" });
+  }
+};
+
+exports.reorderDocTemplates = async (req, res) => {
+  try {
+    await ensureDocTemplates();
+    const DocTemplate = await getDocTemplateModel();
+    const key = String(req.body?.key || "").trim().toLowerCase();
+    const targetPos = Number(req.body?.position);
+
+    const all = await DocTemplate.find({ active: { $ne: false } })
+      .sort({ sortOrder: 1, title: 1 })
+      .select("_id key sortOrder title")
+      .lean();
+
+    if (!all.length) {
+      return res.json({ success: true, templates: [] });
+    }
+
+    let ordered = [...all];
+    if (key && Number.isFinite(targetPos)) {
+      const idx = ordered.findIndex((item) => item.key === key);
+      if (idx === -1) {
+        return res.status(404).json({ success: false, msg: "Document not found" });
+      }
+      const [moved] = ordered.splice(idx, 1);
+      const clampedIndex = Math.max(0, Math.min(ordered.length, Math.floor(targetPos) - 1));
+      ordered.splice(clampedIndex, 0, moved);
+    } else if (Array.isArray(req.body?.keys) && req.body.keys.length > 0) {
+      const byKey = new Map(ordered.map((item) => [item.key, item]));
+      const next = [];
+      req.body.keys.forEach((k) => {
+        const found = byKey.get(String(k || "").trim().toLowerCase());
+        if (found) {
+          next.push(found);
+          byKey.delete(found.key);
+        }
+      });
+      byKey.forEach((remaining) => next.push(remaining));
+      ordered = next;
+    } else {
+      return res.status(400).json({ success: false, msg: "Provide key and position, or keys array" });
+    }
+
+    const now = new Date();
+    await DocTemplate.bulkWrite(
+      ordered.map((item, i) => ({
+        updateOne: {
+          filter: { _id: item._id },
+          update: { $set: { sortOrder: i + 1, customized: true, updatedAt: now } },
+        },
+      }))
+    );
+
+    const updated = await DocTemplate.find({ active: { $ne: false } })
+      .select("-html")
+      .sort({ sortOrder: 1, title: 1 })
+      .lean();
+
+    res.json({
+      success: true,
+      templates: updated.map((item) => publicTemplate(item)),
+    });
+  } catch (error) {
+    console.error("reorderDocTemplates:", error);
+    res.status(500).json({ success: false, msg: "Could not reorder documents" });
   }
 };
 

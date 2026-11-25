@@ -577,6 +577,7 @@ const {
   listDocHistory,
   recordDocGeneration,
   saveDocTemplate,
+  reorderDocTemplates,
   removeDocTemplate,
 } = require("../controllers/crmDocCenterController");
 
@@ -595,6 +596,13 @@ router.route("/crm/doc-center/templates").post(
   checkCrmAccess,
   requireCrmPermission("canEditDocuments"),
   saveDocTemplate
+);
+router.route("/crm/doc-center/templates/reorder").patch(
+  isAuthorizedUser,
+  authorizedRoles(...docCenterRoles),
+  checkCrmAccess,
+  requireCrmPermission("canEditDocuments"),
+  reorderDocTemplates
 );
 router.route("/crm/doc-center/clients").get(
   isAuthorizedUser,

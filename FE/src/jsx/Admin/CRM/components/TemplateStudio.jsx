@@ -183,6 +183,15 @@ const TemplateStudio = ({ editor, categories, onChange, onClose, onSave, saving 
         <Typography variant="h6" fontWeight={800} sx={{ mr: 1 }}>{editor.key ? "Edit template" : "New template"}</Typography>
         <TextField size="small" label="Name" value={editor.title || ""} onChange={(event) => update({ title: event.target.value })} sx={{ minWidth: 220 }} />
         <TextField size="small" label="Category" value={editor.category || ""} onChange={(event) => update({ category: event.target.value })} sx={{ minWidth: 160 }} />
+        <TextField
+          size="small"
+          type="number"
+          label="Position #"
+          value={editor.sortOrder ?? ""}
+          onChange={(event) => update({ sortOrder: event.target.value === "" ? "" : Math.max(0, Number(event.target.value)) })}
+          inputProps={{ min: 0 }}
+          sx={{ width: 110 }}
+        />
         <ToggleButtonGroup size="small" exclusive value={pane} onChange={(_, value) => value && setPane(value)} sx={{ ml: "auto" }}>
           <ToggleButton value="code" sx={{ textTransform: "none", px: 2 }}>Paste code</ToggleButton>
           <ToggleButton value="preview" sx={{ textTransform: "none", px: 2 }}>Preview</ToggleButton>
