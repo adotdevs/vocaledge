@@ -40,6 +40,7 @@ import ContentCopy from "@mui/icons-material/ContentCopy";
 import DeleteOutline from "@mui/icons-material/DeleteOutline";
 import Description from "@mui/icons-material/Description";
 import Download from "@mui/icons-material/Download";
+import DragIndicator from "@mui/icons-material/DragIndicator";
 import EditOutlined from "@mui/icons-material/EditOutlined";
 import History from "@mui/icons-material/History";
 import MenuIcon from "@mui/icons-material/Menu";
@@ -138,7 +139,41 @@ const DocumentRepository = () => {
   const [cardMenu, setCardMenu] = useState(null);
   const [positionModal, setPositionModal] = useState(null);
   const [savingPosition, setSavingPosition] = useState(false);
+  const [draggedKey, setDraggedKey] = useState("");
+  const [dragOverKey, setDragOverKey] = useState("");
   const workflowRef = useRef(null);
+
+  const handleDropTemplate = async (targetKey) => {
+    const sourceKey = draggedKey;
+    setDraggedKey("");
+    setDragOverKey("");
+    if (!canEdit || !sourceKey || !targetKey || sourceKey === targetKey) return;
+
+    const ordered = [...templates].sort(
+      (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || a.title.localeCompare(b.title)
+    );
+    const fromIdx = ordered.findIndex((item) => item.key === sourceKey);
+    const toIdx = ordered.findIndex((item) => item.key === targetKey);
+    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+
+    const [moved] = ordered.splice(fromIdx, 1);
+    ordered.splice(toIdx, 0, moved);
+    const optimistic = ordered.map((item, i) => ({ ...item, sortOrder: i + 1 }));
+
+    setTemplates(optimistic);
+    setSortBy("default");
+
+    const response = await reorderDocTemplatesApi({ keys: optimistic.map((item) => item.key) });
+    if (!response?.success) {
+      toast.error(response?.msg || "Could not reorder documents");
+      loadTemplates();
+      return;
+    }
+    if (Array.isArray(response.templates)) {
+      setTemplates(response.templates);
+    }
+    toast.success(`Moved "${moved.title}" to #${toIdx + 1}`);
+  };
 
   const savePosition = async () => {
     if (!positionModal?.item?.key) return;
@@ -701,21 +736,63 @@ const DocumentRepository = () => {
                 <Card
                   key={item.key}
                   elevation={0}
+                  draggable={canEdit}
+                  onDragStart={(event) => {
+                    if (!canEdit) return;
+                    setDraggedKey(item.key);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", item.key);
+                  }}
+                  onDragOver={(event) => {
+                    if (!canEdit || !draggedKey || draggedKey === item.key) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    if (dragOverKey !== item.key) setDragOverKey(item.key);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverKey === item.key) setDragOverKey("");
+                  }}
+                  onDrop={(event) => {
+                    if (!canEdit) return;
+                    event.preventDefault();
+                    handleDropTemplate(item.key);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedKey("");
+                    setDragOverKey("");
+                  }}
                   sx={{
                     height: "100%",
                     display: "flex",
                     flexDirection: "column",
                     borderRadius: 3,
-                    border: "1px solid",
-                    borderColor: selectedKey === item.key ? "primary.main" : "divider",
-                    boxShadow: selectedKey === item.key ? "0 0 0 3px rgba(103, 58, 183, 0.12)" : "none",
+                    border: dragOverKey === item.key ? "2px dashed" : "1px solid",
+                    borderColor:
+                      dragOverKey === item.key || selectedKey === item.key ? "primary.main" : "divider",
+                    boxShadow:
+                      dragOverKey === item.key
+                        ? "0 0 0 4px rgba(103, 58, 183, 0.16)"
+                        : selectedKey === item.key
+                        ? "0 0 0 3px rgba(103, 58, 183, 0.12)"
+                        : "none",
                     bgcolor: "background.paper",
+                    opacity: draggedKey === item.key ? 0.45 : 1,
+                    cursor: canEdit ? "grab" : "default",
+                    transition: "opacity 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease",
+                    "&:active": canEdit ? { cursor: "grabbing" } : undefined,
                   }}
                 >
                   <CardContent sx={{ flex: 1, px: 2, pt: 1.75, pb: 1, "&:last-child": { pb: 1 } }}>
                     <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
-                      <Box sx={{ width: 40, height: 40, borderRadius: 1.5, bgcolor: "rgba(228, 87, 46, 0.1)", display: "grid", placeItems: "center" }}>
-                        <HtmlFileIcon small />
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                        {canEdit && (
+                          <Tooltip title="Drag to reorder">
+                            <DragIndicator sx={{ fontSize: 18, color: "text.disabled", ml: -0.5 }} />
+                          </Tooltip>
+                        )}
+                        <Box sx={{ width: 40, height: 40, borderRadius: 1.5, bgcolor: "rgba(228, 87, 46, 0.1)", display: "grid", placeItems: "center" }}>
+                          <HtmlFileIcon small />
+                        </Box>
                       </Box>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                         {canEdit ? (
@@ -759,7 +836,7 @@ const DocumentRepository = () => {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ width: 64 }}>#</TableCell>
+                    <TableCell sx={{ width: 84 }}>#</TableCell>
                     <TableCell>Document</TableCell>
                     <TableCell>Category</TableCell>
                     <TableCell>Updated</TableCell>
@@ -768,20 +845,57 @@ const DocumentRepository = () => {
                 </TableHead>
                 <TableBody>
                   {visibleTemplates.map((item, idx) => (
-                    <TableRow key={item.key} hover selected={selectedKey === item.key}>
+                    <TableRow
+                      key={item.key}
+                      hover
+                      selected={selectedKey === item.key}
+                      draggable={canEdit}
+                      onDragStart={(event) => {
+                        if (!canEdit) return;
+                        setDraggedKey(item.key);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", item.key);
+                      }}
+                      onDragOver={(event) => {
+                        if (!canEdit || !draggedKey || draggedKey === item.key) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                        if (dragOverKey !== item.key) setDragOverKey(item.key);
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverKey === item.key) setDragOverKey("");
+                      }}
+                      onDrop={(event) => {
+                        if (!canEdit) return;
+                        event.preventDefault();
+                        handleDropTemplate(item.key);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedKey("");
+                        setDragOverKey("");
+                      }}
+                      sx={{
+                        opacity: draggedKey === item.key ? 0.45 : 1,
+                        bgcolor: dragOverKey === item.key ? "rgba(103, 58, 183, 0.08) !important" : undefined,
+                        cursor: canEdit ? "grab" : "default",
+                      }}
+                    >
                       <TableCell>
-                        {canEdit ? (
-                          <Tooltip title="Edit position">
-                            <Chip
-                              size="small"
-                              label={`#${item.sortOrder || idx + 1}`}
-                              onClick={() => setPositionModal({ item, value: item.sortOrder || idx + 1 })}
-                              sx={{ height: 22, fontSize: 11, fontWeight: 800, cursor: "pointer", bgcolor: "rgba(103, 58, 183, 0.08)", color: "primary.main" }}
-                            />
-                          </Tooltip>
-                        ) : (
-                          <Typography variant="caption" fontWeight={700}>#{item.sortOrder || idx + 1}</Typography>
-                        )}
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                          {canEdit && <DragIndicator sx={{ fontSize: 16, color: "text.disabled" }} />}
+                          {canEdit ? (
+                            <Tooltip title="Edit position">
+                              <Chip
+                                size="small"
+                                label={`#${item.sortOrder || idx + 1}`}
+                                onClick={() => setPositionModal({ item, value: item.sortOrder || idx + 1 })}
+                                sx={{ height: 22, fontSize: 11, fontWeight: 800, cursor: "pointer", bgcolor: "rgba(103, 58, 183, 0.08)", color: "primary.main" }}
+                              />
+                            </Tooltip>
+                          ) : (
+                            <Typography variant="caption" fontWeight={700}>#{item.sortOrder || idx + 1}</Typography>
+                          )}
+                        </Box>
                       </TableCell>
                       <TableCell>
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
